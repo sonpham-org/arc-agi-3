@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARC-AGI-3 Player</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Cascadia Code', monospace; }
+
+  .layout { display: flex; height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 300px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto; }
+  .sidebar h2 { padding: 16px; font-size: 14px; color: var(--accent); border-bottom: 1px solid var(--border); }
+  .game-card { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
+  .game-card:hover { background: var(--border); }
+  .game-card.active { background: #1f6feb22; border-left: 3px solid var(--accent); }
+  .game-card .title { font-weight: 600; font-size: 14px; }
+  .game-card .meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  /* Main area */
+  .main { flex: 1; display: flex; flex-direction: column; }
+  .topbar { padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; font-size: 13px; }
+  .topbar .status { padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .status-NOT_FINISHED { background: #d2992233; color: var(--yellow); }
+  .status-WIN { background: #3fb95033; color: var(--green); }
+  .status-GAME_OVER { background: #f8514933; color: var(--red); }
+  .status-NOT_PLAYED { background: #30363d; color: var(--text-dim); }
+
+  .game-area { flex: 1; display: flex; gap: 0; overflow: hidden; }
+
+  /* Canvas panel */
+  .canvas-panel { flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 16px; position: relative; }
+  #gameCanvas { image-rendering: pixelated; border: 2px solid var(--border); cursor: crosshair;
+    max-width: 100%; max-height: 70vh; }
+  .controls { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .controls button { background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px;
+    transition: all 0.15s; }
+  .controls button:hover { background: var(--border); border-color: var(--accent); }
+  .controls button:active { transform: scale(0.95); }
+  .controls button.primary { background: #1f6feb; border-color: #1f6feb; }
+  .controls button.primary:hover { background: #388bfd; }
+  .controls button.danger { border-color: var(--red); color: var(--red); }
+  .kbd { background: var(--border); padding: 1px 5px; border-radius: 3px; font-size: 10px; margin-left: 4px; }
+
+  /* Reasoning panel */
+  .reasoning-panel { width: 380px; background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden; }
+  .reasoning-panel h3 { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; }
+  .reasoning-content { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 12px; line-height: 1.6; }
+  .reasoning-entry { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .reasoning-entry .step-label { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+  .reasoning-entry .observation { color: var(--text-dim); }
+  .reasoning-entry .action-rec { color: var(--green); font-weight: 600; margin-top: 4px; }
+
+  .model-select { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .model-select select, .model-select input {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 8px; border-radius: 4px; font-family: inherit; font-size: 12px; margin-top: 4px;
+  }
+  .model-select label { font-size: 11px; color: var(--text-dim); }
+  .model-select .row { display: flex; gap: 8px; margin-top: 8px; }
+  .model-select button { flex: 1; }
+
+  .llm-toggle { display: flex; align-items: center; gap: 8px; }
+  .toggle { position: relative; width: 36px; height: 20px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle .slider { position: absolute; inset: 0; background: var(--border); border-radius: 10px;
+    cursor: pointer; transition: 0.2s; }
+  .toggle .slider:before { content: ''; position: absolute; width: 14px; height: 14px;
+    left: 3px; top: 3px; background: var(--text); border-radius: 50%; transition: 0.2s; }
+  .toggle input:checked + .slider { background: var(--accent); }
+  .toggle input:checked + .slider:before { transform: translateX(16px); }
+
+  /* Loading spinner */
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty-state { display: flex; align-items: center; justify-content: center; height: 100%;
+    color: var(--text-dim); font-size: 14px; text-align: center; padding: 40px; }
+
+  .step-counter { color: var(--text-dim); }
+  .level-info { color: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- Sidebar: Game List -->
+  <div class="sidebar">
+    <h2>ARC-AGI-3 Games</h2>
+    <div id="gameList"><div class="empty-state">Loading games...</div></div>
+  </div>
+
+  <!-- Main Area -->
+  <div class="main">
+    <div class="topbar">
+      <span id="gameTitle" style="font-weight:600;">No game selected</span>
+      <span id="gameStatus" class="status status-NOT_PLAYED">NOT_PLAYED</span>
+      <span id="levelInfo" class="level-info"></span>
+      <span id="stepCounter" class="step-counter"></span>
+      <span style="flex:1;"></span>
+      <div class="llm-toggle">
+        <label class="toggle">
+          <input type="checkbox" id="llmEnabled">
+          <span class="slider"></span>
+        </label>
+        <span style="font-size:12px;">LLM Reasoning</span>
+      </div>
+    </div>
+
+    <div class="game-area">
+      <!-- Canvas -->
+      <div class="canvas-panel">
+        <div id="emptyState" class="empty-state">
+          Select a game from the sidebar to start playing.<br><br>
+          Use keyboard arrows or click the action buttons.<br>
+          Toggle LLM to get AI reasoning before each move.
+        </div>
+        <canvas id="gameCanvas" width="512" height="512" style="display:none;"></canvas>
+        <div class="controls" id="controls" style="display:none;">
+          <button onclick="doAction(0)" class="danger">Reset <span class="kbd">R</span></button>
+          <button onclick="doAction(1)">Action1 <span class="kbd">&uarr;</span></button>
+          <button onclick="doAction(2)">Action2 <span class="kbd">&darr;</span></button>
+          <button onclick="doAction(3)">Action3 <span class="kbd">&larr;</span></button>
+          <button onclick="doAction(4)">Action4 <span class="kbd">&rarr;</span></button>
+          <button onclick="doAction(5)">Action5 <span class="kbd">Z</span></button>
+          <button onclick="doAction(7)">Action7 <span class="kbd">X</span></button>
+          <button onclick="doAction(6, true)" class="primary">Action6 (click grid) <span class="kbd">Click</span></button>
+        </div>
+      </div>
+
+      <!-- Reasoning Panel -->
+      <div class="reasoning-panel">
+        <h3>
+          <span>LLM Reasoning</span>
+          <span id="llmSpinner" style="display:none;"><span class="spinner"></span></span>
+        </h3>
+        <div class="reasoning-content" id="reasoningContent">
+          <div class="empty-state" style="height:auto;">
+            Enable LLM toggle and start a game.<br>The model will analyze each state and suggest actions.
+          </div>
+        </div>
+        <div class="model-select">
+          <label>Model</label>
+          <select id="modelSelect"><option value="">Loading...</option></select>
+          <input type="text" id="modelCustom" placeholder="Or type model name..." style="margin-top:4px;">
+          <div class="row" style="margin-top:8px;">
+            <button class="controls" onclick="askLLM()" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;">
+              Ask LLM Now
+            </button>
+            <button class="controls" onclick="autoPlay()" id="autoPlayBtn" style="background:#1f6feb;color:var(--text);border:1px solid #1f6feb;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;">
+              Auto-Play
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLORS = {{ color_map | tojson }};
+const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACTION5',6:'CLICK(x,y)',7:'ACTION7'};
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let sessionId = null;
+let currentGrid = null;
+let currentState = {};
+let stepCount = 0;
+let moveHistory = [];
+let autoPlaying = false;
+let action6Mode = false;
+
+// ---------- Rendering ----------
+function renderGrid(grid) {
+  if (!grid || !grid.length) return;
+  currentGrid = grid;
+  const h = grid.length, w = grid[0].length;
+  const scale = Math.floor(512 / Math.max(h, w));
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      ctx.fillStyle = COLORS[grid[y][x]] || '#000000';
+      ctx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  }
+}
+
+// ---------- API ----------
+async function fetchJSON(url, body) {
+  const r = await fetch(url, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return r.json();
+}
+
+async function loadGames() {
+  const games = await fetchJSON('/api/games');
+  const el = document.getElementById('gameList');
+  el.innerHTML = '';
+  games.forEach(g => {
+    const div = document.createElement('div');
+    div.className = 'game-card';
+    div.innerHTML = `<div class="title">${g.title}</div><div class="meta">${g.game_id} &middot; ${g.default_fps} FPS</div>`;
+    div.onclick = () => startGame(g.game_id);
+    el.appendChild(div);
+  });
+}
+
+async function startGame(gameId) {
+  // Highlight active card
+  document.querySelectorAll('.game-card').forEach((c, i) => c.classList.remove('active'));
+  const cards = document.querySelectorAll('.game-card');
+  cards.forEach(c => { if (c.querySelector('.meta').textContent.includes(gameId.split('-')[0])) c.classList.add('active'); });
+
+  const data = await fetchJSON('/api/start', { game_id: gameId });
+  if (data.error) { alert(data.error); return; }
+
+  sessionId = data.session_id;
+  stepCount = 0;
+  moveHistory = [];
+  autoPlaying = false;
+  updateUI(data);
+
+  document.getElementById('emptyState').style.display = 'none';
+  canvas.style.display = 'block';
+  document.getElementById('controls').style.display = 'flex';
+  document.getElementById('reasoningContent').innerHTML = '<div class="empty-state" style="height:auto;">Game started. Make a move or enable LLM reasoning.</div>';
+
+  // If LLM enabled, ask for initial analysis
+  if (document.getElementById('llmEnabled').checked) {
+    askLLM();
+  }
+}
+
+function updateUI(data) {
+  currentState = data;
+  renderGrid(data.grid);
+
+  document.getElementById('gameTitle').textContent = data.game_id || 'Game';
+  const statusEl = document.getElementById('gameStatus');
+  statusEl.textContent = data.state;
+  statusEl.className = 'status status-' + data.state;
+  document.getElementById('levelInfo').textContent = `Level ${data.levels_completed}/${data.win_levels}`;
+  document.getElementById('stepCounter').textContent = `Step ${stepCount}`;
+}
+
+async function doAction(actionId, isAction6Click) {
+  if (!sessionId) return;
+
+  // For ACTION6, we need x,y from click
+  if (isAction6Click || actionId === 6) {
+    action6Mode = true;
+    canvas.style.cursor = 'crosshair';
+    canvas.title = 'Click to place ACTION6 (x, y)';
+    return;
+  }
+
+  const body = { session_id: sessionId, action: actionId, data: {} };
+  stepCount++;
+
+  const data = await fetchJSON('/api/step', body);
+  if (data.error) { alert(data.error); return; }
+
+  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state });
+  updateUI(data);
+
+  // Auto-ask LLM after each move if enabled
+  if (document.getElementById('llmEnabled').checked && data.state === 'NOT_FINISHED') {
+    askLLM();
+  }
+}
+
+// ACTION6 click handler
+canvas.addEventListener('click', async (e) => {
+  if (!action6Mode || !sessionId) return;
+  action6Mode = false;
+  canvas.style.cursor = 'crosshair';
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = 64 / canvas.clientWidth;
+  const scaleY = 64 / canvas.clientHeight;
+  const x = Math.floor((e.clientX - rect.left) * scaleX);
+  const y = Math.floor((e.clientY - rect.top) * scaleY);
+
+  stepCount++;
+  const body = { session_id: sessionId, action: 6, data: { x, y } };
+  const data = await fetchJSON('/api/step', body);
+  if (data.error) { alert(data.error); return; }
+
+  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y });
+  updateUI(data);
+
+  if (document.getElementById('llmEnabled').checked && data.state === 'NOT_FINISHED') {
+    askLLM();
+  }
+});
+
+// Keyboard controls
+document.addEventListener('keydown', (e) => {
+  if (!sessionId) return;
+  const map = {
+    'ArrowUp': 1, 'ArrowDown': 2, 'ArrowLeft': 3, 'ArrowRight': 4,
+    'w': 1, 's': 2, 'a': 3, 'd': 4,
+    'z': 5, 'x': 7, 'r': 0,
+  };
+  const action = map[e.key];
+  if (action !== undefined) {
+    e.preventDefault();
+    doAction(action);
+  }
+});
+
+// ---------- LLM ----------
+async function loadModels() {
+  const data = await fetchJSON('/api/llm/models');
+  const sel = document.getElementById('modelSelect');
+  sel.innerHTML = '';
+  if (data.models && data.models.length) {
+    // Group by provider
+    const gemini = data.models.filter(m => m.provider === 'gemini');
+    const ollama = data.models.filter(m => m.provider === 'ollama');
+
+    if (gemini.length) {
+      const grp = document.createElement('optgroup');
+      grp.label = 'Gemini (API)';
+      gemini.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = `${m.name}  —  ${m.price}`;
+        grp.appendChild(opt);
+      });
+      sel.appendChild(grp);
+    }
+    if (ollama.length) {
+      const grp = document.createElement('optgroup');
+      grp.label = 'Ollama (Local)';
+      ollama.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = `${m.name}  —  ${m.price}`;
+        grp.appendChild(opt);
+      });
+      sel.appendChild(grp);
+    }
+  } else {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = 'No models found';
+    sel.appendChild(opt);
+  }
+}
+
+function getSelectedModel() {
+  const custom = document.getElementById('modelCustom').value.trim();
+  if (custom) return custom;
+  return document.getElementById('modelSelect').value;
+}
+
+async function askLLM() {
+  if (!currentState.grid) return;
+
+  const model = getSelectedModel();
+  if (!model) { alert('Select or type a model name'); return; }
+
+  document.getElementById('llmSpinner').style.display = 'inline';
+
+  try {
+    const resp = await fetchJSON('/api/llm/ask', {
+      grid: currentState.grid,
+      state: currentState.state,
+      available_actions: currentState.available_actions,
+      levels_completed: currentState.levels_completed,
+      win_levels: currentState.win_levels,
+      game_id: currentState.game_id,
+      history: moveHistory.slice(-10),
+      model: model,
+    });
+
+    const content = document.getElementById('reasoningContent');
+    const entry = document.createElement('div');
+    entry.className = 'reasoning-entry';
+
+    if (resp.error) {
+      entry.innerHTML = `<div class="step-label">Error</div><div style="color:var(--red);">${resp.error}</div>`;
+    } else if (resp.parsed) {
+      const p = resp.parsed;
+      const thinkHtml = resp.thinking ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:11px;">Model thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${resp.thinking}</div></details>` : '';
+      entry.innerHTML = `
+        <div class="step-label">Step ${stepCount} Analysis (${resp.model})</div>
+        <div class="observation"><strong>Sees:</strong> ${p.observation || ''}</div>
+        <div style="margin-top:4px;"><strong>Plan:</strong> ${p.reasoning || ''}</div>
+        <div class="action-rec">Action: ${p.action !== undefined ? p.action : 'None'} (${ACTION_NAMES[p.action] || '?'})${p.data && (p.data.x !== undefined) ? ` at (${p.data.x}, ${p.data.y})` : ''}</div>
+        ${thinkHtml}
+      `;
+    } else {
+      entry.innerHTML = `<div class="step-label">Step ${stepCount} (${resp.model})</div><div style="white-space:pre-wrap;">${resp.raw || 'No response'}</div>`;
+    }
+
+    // Prepend (newest first)
+    content.insertBefore(entry, content.firstChild);
+
+    return resp;
+  } finally {
+    document.getElementById('llmSpinner').style.display = 'none';
+  }
+}
+
+async function autoPlay() {
+  if (autoPlaying) { autoPlaying = false; document.getElementById('autoPlayBtn').textContent = 'Auto-Play'; return; }
+  if (!sessionId) { alert('Start a game first'); return; }
+
+  autoPlaying = true;
+  document.getElementById('autoPlayBtn').textContent = 'Stop';
+
+  while (autoPlaying && currentState.state === 'NOT_FINISHED') {
+    const resp = await askLLM();
+    if (!resp || resp.error || !resp.parsed) { autoPlaying = false; break; }
+
+    const p = resp.parsed;
+    const actionId = p.action;
+    if (actionId === undefined || actionId === null) { autoPlaying = false; break; }
+
+    // Small delay for visibility
+    await new Promise(r => setTimeout(r, 500));
+
+    // Execute the suggested action
+    const body = { session_id: sessionId, action: actionId, data: p.data || {} };
+    stepCount++;
+    const data = await fetchJSON('/api/step', body);
+    if (data.error) { autoPlaying = false; break; }
+
+    moveHistory.push({ step: stepCount, action: actionId, result_state: data.state });
+    updateUI(data);
+
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  autoPlaying = false;
+  document.getElementById('autoPlayBtn').textContent = 'Auto-Play';
+}
+
+// ---------- Init ----------
+loadGames();
+loadModels();
+</script>
+</body>
+</html>
