@@ -968,14 +968,14 @@ const TOKEN_PRICES = {
 let sessionTotalTokens = { input: 0, output: 0, cost: 0 };
 
 function formatTokenInfo(resp) {
-  // Use API-reported usage if available, otherwise estimate
+  // Use API-reported usage if available
   let inputTok = resp.usage?.input_tokens || resp.usage?.prompt_tokens || 0;
   let outputTok = resp.usage?.output_tokens || resp.usage?.completion_tokens || 0;
 
-  // Fallback: estimate from prompt character length (~4 chars per token)
-  if (!inputTok && resp.prompt_length) inputTok = Math.ceil(resp.prompt_length / 4);
+  // Estimate input tokens from prompt length if not reported by API
+  if (!inputTok && resp.prompt_length > 0) inputTok = Math.ceil(resp.prompt_length / 4);
+  // Estimate output tokens from response text if not reported by API
   if (!outputTok) outputTok = estimateTokens(resp.raw || '');
-  // Include thinking tokens if present
   if (resp.thinking) outputTok += estimateTokens(resp.thinking);
 
   const totalTok = inputTok + outputTok;
@@ -1056,8 +1056,14 @@ async function askLLM() {
       if (rawContent) {
         resp = parseClientLLMResponse(rawContent, model);
         resp.tools_active = getToolsMode() === 'on';
-        resp.prompt_length = prompt.length;
+        // Merge usage data from Puter.js if available
+        if (askLLMPuter._lastUsage) {
+          resp.usage = askLLMPuter._lastUsage;
+          askLLMPuter._lastUsage = null;
+        }
       }
+      // Always set prompt_length for token estimation (even on error)
+      if (resp) resp.prompt_length = prompt.length;
     }
 
     // Collect observation for compact context
@@ -1516,8 +1522,15 @@ async function askLLMPuter(prompt, model) {
   // Use Puter.js for client-side LLM
   if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter.js not loaded');
   const resp = await puter.ai.chat(prompt, { model: model || 'gpt-4o-mini' });
-  return typeof resp === 'string' ? resp : (resp.message?.content || resp.toString());
+  // Puter may return a string or an object with message + usage
+  if (typeof resp === 'string') return resp;
+  const text = resp.message?.content || resp.toString();
+  // Stash usage data if available (will be merged into parsed response)
+  if (resp.usage) askLLMPuter._lastUsage = resp.usage;
+  else askLLMPuter._lastUsage = null;
+  return text;
 }
+askLLMPuter._lastUsage = null;
 
 async function askLLMBYOK(prompt, model) {
   const provider = localStorage.getItem('byok_provider') || 'openai';
