@@ -780,7 +780,7 @@ def env_state_dict(env, frame_data=None) -> dict:
 # PROMPT BUILDING  (config-driven: input sources, tools mode)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _build_prompt(payload: dict, input_settings: dict, tools_mode: str) -> str:
+def _build_prompt(payload: dict, input_settings: dict, tools_mode: str, planning_mode: str = "off") -> str:
     """Build an LLM prompt controlled by the input settings from the UI."""
     grid = payload.get("grid", [])
     state = payload.get("state", "")
@@ -865,13 +865,31 @@ COLOR PALETTE: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
             "possible goals, and which areas of the grid are interactive."
         )
 
-    parts.append(f"""## YOUR TASK
+    analysis_field = ', "analysis": "<detailed spatial analysis>"' if tools_mode == "on" else ''
+    is_planning = planning_mode and planning_mode != "off"
+
+    if is_planning:
+        plan_n = int(planning_mode)
+        parts.append(f"""## YOUR TASK
+1. Identify key objects (character, walls, targets, items).
+2. Determine what must happen next to progress.
+3. Plan a sequence of actions (up to {plan_n} steps).
+
+Respond with EXACTLY this JSON (nothing else):
+{{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{{"action": <n>, "data": {{}}}}, ...]{analysis_field}}}
+
+Rules:
+- Return a "plan" array of up to {plan_n} steps. Each step has "action" (0-7) and "data" ({{}} or {{"x": <0-63>, "y": <0-63>}}).
+- ACTION6: set "data" to {{"x": <0-63>, "y": <0-63>}}.
+- Other actions: set "data" to {{}}.{tool_extra}""")
+    else:
+        parts.append(f"""## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
 2. Determine what must happen next to progress.
 3. Choose the best action.
 
 Respond with EXACTLY this JSON (nothing else):
-{{"observation": "<what you see>", "reasoning": "<your plan>", "action": <number>, "data": {{}}{', "analysis": "<detailed spatial analysis>"' if tools_mode == "on" else ''}}}
+{{"observation": "<what you see>", "reasoning": "<your plan>", "action": <number>, "data": {{}}{analysis_field}}}
 
 Rules:
 - "action" must be a plain integer (0-7).
@@ -1432,7 +1450,8 @@ def llm_ask():
         else:
             tools_mode = "off"
 
-    prompt = _build_prompt(payload, input_settings, tools_mode)
+    planning_mode = settings.get("planning_mode", "off")
+    prompt = _build_prompt(payload, input_settings, tools_mode, planning_mode)
 
     # Get image if the input setting is on and data was provided
     image_b64 = None

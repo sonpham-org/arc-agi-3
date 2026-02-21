@@ -130,6 +130,24 @@
   .reasoning-entry .tools-badge { font-size: 10px; background: #3fb95033; color: var(--green);
     padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
 
+  /* Plan progress display */
+  .plan-progress { font-size: 11px; margin: 6px 0 2px; }
+  .plan-step { padding: 2px 4px; color: var(--text-dim); border-radius: 3px; }
+  .plan-step.executing { color: var(--accent); font-weight: 600; }
+  .plan-step.done { color: var(--green); }
+  .plan-step.skipped { color: var(--text-dim); text-decoration: line-through; }
+  .plan-step.failed { color: var(--red); }
+  .plan-step .action-btn { display: inline-block; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; margin: 0 2px; }
+  .plan-step.executing .action-btn { background: var(--accent); color: #000; border-color: var(--accent); }
+  .plan-step.done .action-btn { background: var(--green); color: #000; border-color: var(--green); }
+
+  /* Tool call display in reasoning */
+  .tool-call { margin: 4px 0; padding: 4px 8px; background: var(--surface2); border-left: 2px solid var(--purple);
+    border-radius: 0 4px 4px 0; font-size: 11px; }
+  .tool-call .tool-name { color: var(--purple); font-weight: 600; }
+  .tool-call .tool-output { color: var(--text-dim); margin-top: 2px; white-space: pre-wrap; max-height: 80px; overflow-y: auto; }
+
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
     border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -534,8 +552,22 @@
                       <span class="opt-label">After step</span>
                       <input type="number" id="compactAfter" value="15" min="5" max="200" style="width:55px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;">
                     </div>
-                    <div style="font-size:10px;color:var(--text-dim);">
+                    <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
                       Summarises learned mechanics + goals into a compact block for the LLM
+                    </div>
+                    <div class="opt-row">
+                      <span class="opt-label">Planning horizon</span>
+                    </div>
+                    <div class="opt-row">
+                      <div class="triswitch" id="planningMode">
+                        <label><input type="radio" name="planMode" value="off" checked><span>Off</span></label>
+                        <label><input type="radio" name="planMode" value="5"><span>5</span></label>
+                        <label><input type="radio" name="planMode" value="10"><span>10</span></label>
+                        <label><input type="radio" name="planMode" value="20"><span>20</span></label>
+                      </div>
+                    </div>
+                    <div style="font-size:10px;color:var(--text-dim);">
+                      LLM returns a multi-step plan instead of one action. Saves tokens.
                     </div>
                   </div>
                 </div>
@@ -1001,6 +1033,10 @@ function getToolsMode() {
   return document.querySelector('input[name="toolsMode"]:checked')?.value || 'off';
 }
 
+function getPlanningMode() {
+  return document.querySelector('input[name="planMode"]:checked')?.value || 'off';
+}
+
 function shouldAskAdaptive() {
   // In adaptive mode, ask the LLM if no level progress in last 5 steps
   if (moveHistory.length < 5) return false;
@@ -1115,13 +1151,14 @@ async function askLLM() {
           input: inputSettings,
           reasoning_mode: getReasoningMode(),
           tools_mode: getToolsMode(),
+          planning_mode: getPlanningMode(),
         },
       };
       if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
       resp = await fetchJSON('/api/llm/ask', payload);
     } else {
       // ── Client-side LLM (online mode: Puter.js or BYOK) ─────────────
-      const prompt = buildClientPrompt(currentState, moveHistory.slice(-10), currentChangeMap, inputSettings, getToolsMode(), compactBlock);
+      const prompt = buildClientPrompt(currentState, moveHistory.slice(-10), currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
       let rawContent;
       try {
         if (FEATURES.puter_js && !byokActive()) {
@@ -1167,21 +1204,47 @@ async function askLLM() {
            <div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${resp.thinking}</div></details>` : '';
       const toolsBadge = resp.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
       const compactBadge = compactBlock ? '<span class="tools-badge" style="background:#bc8cff33;color:var(--purple);">COMPACT</span>' : '';
+      const planBadge = p.plan ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
       const analysisHtml = p.analysis
         ? `<div style="margin-top:4px;font-size:11px;color:var(--purple);"><strong>Analysis:</strong> ${p.analysis}</div>` : '';
       const ci = currentChangeMap?.change_count > 0
         ? `<div style="font-size:11px;color:var(--yellow);">${currentChangeMap.change_count} cells changed</div>` : '';
       const tokensHtml = formatTokenInfo(resp);
 
-      entry.innerHTML = `
-        <div class="step-label">Step ${stepCount} — ${resp.model}${toolsBadge}${compactBadge}</div>
-        ${tokensHtml}${ci}
-        <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
-        <div style="margin-top:4px;"><strong>Plan:</strong> ${p.reasoning || '—'}</div>
-        ${analysisHtml}
-        <div class="action-rec">→ Action ${p.action ?? '?'} (${ACTION_NAMES[p.action] || '?'})${
-          p.data?.x !== undefined ? ` at (${p.data.x}, ${p.data.y})` : ''}</div>
-        ${thinkHtml}`;
+      // Tool calls display
+      const toolCallsHtml = (resp.tool_calls || p.tool_calls || []).map(tc =>
+        `<div class="tool-call"><span class="tool-name">${tc.name || tc.function?.name || '?'}</span>` +
+        `${tc.arguments || tc.function?.arguments ? `<div class="tool-output">${JSON.stringify(tc.arguments || tc.function?.arguments, null, 1)}</div>` : ''}` +
+        `${tc.output ? `<div class="tool-output" style="border-left-color:var(--green);">${tc.output}</div>` : ''}</div>`
+      ).join('');
+
+      if (p.plan && Array.isArray(p.plan)) {
+        // Plan mode: show plan steps with action buttons
+        const planHtml = p.plan.map((s, i) => {
+          const aName = ACTION_NAMES[s.action] || `ACTION${s.action}`;
+          const dataStr = s.data?.x !== undefined ? ` (${s.data.x},${s.data.y})` : '';
+          return `<div class="plan-step" data-plan-idx="${i}">${i + 1}. <span class="action-btn">${aName}</span>${dataStr}</div>`;
+        }).join('');
+        entry.innerHTML = `
+          <div class="step-label">Steps ${stepCount + 1}-${stepCount + p.plan.length} — ${resp.model} [PLAN]${toolsBadge}${compactBadge}${planBadge}</div>
+          ${tokensHtml}${ci}
+          <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
+          <div style="margin-top:4px;"><strong>Reasoning:</strong> ${p.reasoning || '—'}</div>
+          ${analysisHtml}${toolCallsHtml}
+          <div class="plan-progress">${planHtml}</div>
+          ${thinkHtml}`;
+      } else {
+        // Single action mode
+        entry.innerHTML = `
+          <div class="step-label">Step ${stepCount} — ${resp.model}${toolsBadge}${compactBadge}</div>
+          ${tokensHtml}${ci}
+          <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
+          <div style="margin-top:4px;"><strong>Plan:</strong> ${p.reasoning || '—'}</div>
+          ${analysisHtml}${toolCallsHtml}
+          <div class="action-rec">→ <span class="action-btn" style="background:var(--accent);color:#000;border-color:var(--accent);">${ACTION_NAMES[p.action] || '?'}</span> Action ${p.action ?? '?'}${
+            p.data?.x !== undefined ? ` at (${p.data.x}, ${p.data.y})` : ''}</div>
+          ${thinkHtml}`;
+      }
     } else {
       entry.innerHTML = `<div class="step-label">Step ${stepCount} — ${resp.model}</div>
         <div style="white-space:pre-wrap;font-size:11px;">${resp.raw || 'No response'}</div>`;
@@ -1219,16 +1282,87 @@ function updateAutoBtn() {
   }
 }
 
-async function stepOnce() {
-  if (!sessionId) { alert('Start a game first'); return; }
-  if (currentState.state !== 'NOT_FINISHED') return;
+async function executePlan(plan, resp, entry) {
+  // Execute a multi-step plan, updating UI live
+  const planSteps = entry ? entry.querySelectorAll('.plan-step') : [];
+  let consecutiveNoChange = 0;
+  let completed = 0;
 
-  const resp = await askLLM();
-  if (!resp || resp.error || !resp.parsed) return;
+  for (let i = 0; i < plan.length; i++) {
+    const step = plan[i];
+    if (!autoPlaying && completed > 0) break; // allow stop during auto-play plans
+
+    // Mark step as executing
+    if (planSteps[i]) {
+      planSteps[i].className = 'plan-step executing';
+    }
+
+    // Save undo snapshot
+    const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : '';
+    undoStack.push({
+      grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
+      state: currentState.state,
+      levels_completed: currentState.levels_completed,
+      stepCount: stepCount,
+    });
+
+    stepCount++;
+    const body = { session_id: sessionId, action: step.action, data: step.data || {} };
+    if (!FEATURES.server_llm && resp) body.llm_response = (i === 0) ? resp : null;
+    const data = await fetchJSON('/api/step', body);
+
+    if (data.error) {
+      undoStack.pop();
+      stepCount--;
+      if (planSteps[i]) planSteps[i].className = 'plan-step failed';
+      // Mark remaining as skipped
+      for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped';
+      break;
+    }
+
+    moveHistory.push({ step: stepCount, action: step.action, result_state: data.state, levels: data.levels_completed });
+    recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null);
+    updateUI(data);
+    updateUndoBtn();
+    completed++;
+
+    // Mark step as done
+    if (planSteps[i]) {
+      planSteps[i].className = 'plan-step done';
+      const btn = planSteps[i].querySelector('.action-btn');
+      if (btn) { btn.style.background = 'var(--green)'; btn.style.color = '#000'; btn.style.borderColor = 'var(--green)'; }
+    }
+
+    // Surprise detection: game ended
+    if (data.state !== 'NOT_FINISHED') {
+      for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped';
+      checkSessionEndAndUpload();
+      break;
+    }
+
+    // Surprise detection: grid not changing
+    const newGrid = JSON.stringify(data.grid || []);
+    if (newGrid === prevGrid) {
+      consecutiveNoChange++;
+      if (consecutiveNoChange >= 3) {
+        for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped';
+        break;
+      }
+    } else {
+      consecutiveNoChange = 0;
+    }
+
+    // Brief pause for visual feedback
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  checkSessionEndAndUpload();
+  return { completed, total: plan.length, interrupted: completed < plan.length };
+}
+
+async function executeOneAction(resp) {
+  // Execute a single action from LLM response
   const p = resp.parsed;
-  if (p.action === undefined || p.action === null) return;
-
-  // Save undo snapshot before executing
   undoStack.push({
     grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
     state: currentState.state,
@@ -1238,16 +1372,34 @@ async function stepOnce() {
 
   stepCount++;
   const body = { session_id: sessionId, action: p.action, data: p.data || {} };
-  // In online mode, attach LLM response for DB persistence
   if (!FEATURES.server_llm && resp) body.llm_response = resp;
   const data = await fetchJSON('/api/step', body);
-  if (data.error) { undoStack.pop(); alert(data.error); return; }
+  if (data.error) { undoStack.pop(); stepCount--; alert(data.error); return null; }
   moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
   recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
   updateUI(data);
   updateUndoBtn();
   checkSessionEndAndUpload();
   return data;
+}
+
+async function stepOnce() {
+  if (!sessionId) { alert('Start a game first'); return; }
+  if (currentState.state !== 'NOT_FINISHED') return;
+
+  const resp = await askLLM();
+  if (!resp || resp.error || !resp.parsed) return;
+  const p = resp.parsed;
+
+  // Plan mode: execute multi-step plan
+  if (p.plan && Array.isArray(p.plan) && p.plan.length > 0) {
+    const entry = document.querySelector('#reasoningContent .reasoning-entry');
+    return await executePlan(p.plan, resp, entry);
+  }
+
+  // Single action mode
+  if (p.action === undefined || p.action === null) return;
+  return await executeOneAction(resp);
 }
 
 async function toggleAutoPlay() {
@@ -1261,42 +1413,32 @@ async function toggleAutoPlay() {
   autoPlaying = true;
   updateAutoBtn();
 
-  // Pipelined auto-play: start next LLM request while displaying current step
-  let nextLLMPromise = null;
-
   while (autoPlaying && currentState.state === 'NOT_FINISHED') {
-    // Get LLM response (either from pipeline or fresh request)
-    const resp = nextLLMPromise ? await nextLLMPromise : await askLLM();
-    nextLLMPromise = null;
+    const resp = await askLLM();
 
     if (!autoPlaying) break;
     if (!resp || resp.error || !resp.parsed) { autoPlaying = false; break; }
     const p = resp.parsed;
+
+    // Plan mode: execute the full plan
+    if (p.plan && Array.isArray(p.plan) && p.plan.length > 0) {
+      const entry = document.querySelector('#reasoningContent .reasoning-entry');
+      const result = await executePlan(p.plan, resp, entry);
+      if (!result || result.interrupted) {
+        // Plan was interrupted — re-plan on next iteration
+        await new Promise(r => setTimeout(r, 200));
+      }
+      continue;
+    }
+
+    // Single action mode
     if (p.action === undefined || p.action === null) { autoPlaying = false; break; }
 
-    // Save undo snapshot
-    undoStack.push({
-      grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
-      state: currentState.state,
-      levels_completed: currentState.levels_completed,
-      stepCount: stepCount,
-    });
+    const data = await executeOneAction(resp);
+    if (!data) { autoPlaying = false; break; }
 
-    stepCount++;
-    const body = { session_id: sessionId, action: p.action, data: p.data || {} };
-    if (!FEATURES.server_llm && resp) body.llm_response = resp;
-    const data = await fetchJSON('/api/step', body);
-    if (data.error) { undoStack.pop(); autoPlaying = false; break; }
-    moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
-    recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
-    updateUI(data);
-    updateUndoBtn();
-    checkSessionEndAndUpload();
-
-    // If game is still going, start the next LLM call immediately (pipelined)
+    // If game is still going, brief pause so user can see the grid update
     if (autoPlaying && currentState.state === 'NOT_FINISHED') {
-      nextLLMPromise = askLLM();
-      // Brief pause so the user can see the grid update
       await new Promise(r => setTimeout(r, 200));
     }
   }
@@ -1518,7 +1660,7 @@ function compressRowJS(row) {
   return parts.join(' ');
 }
 
-function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, compactContext) {
+function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, compactContext, planningMode) {
   const grid = state.grid || [];
   const parts = [];
   const desc = _customArcDescription || ARC_DESCRIPTION;
@@ -1553,7 +1695,24 @@ function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, 
   }
 
   const tm = toolsMode === 'on';
-  parts.push(`## YOUR TASK
+  const pm = planningMode && planningMode !== 'off';
+  const planN = pm ? parseInt(planningMode) : 0;
+
+  if (pm) {
+    parts.push(`## YOUR TASK
+1. Identify key objects (character, walls, targets, items).
+2. Determine what must happen next to progress.
+3. Plan a sequence of actions (up to ${planN} steps).
+
+Respond with EXACTLY this JSON (nothing else):
+{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{"action": <n>, "data": {}}, ...]${tm ? ', "analysis": "<detailed spatial analysis>"' : ''}}
+
+Rules:
+- Return a "plan" array of up to ${planN} steps. Each step has "action" (0-7) and "data" ({} or {"x": <0-63>, "y": <0-63>}).
+- ACTION6: set "data" to {"x": <0-63>, "y": <0-63>}.
+- Other actions: set "data" to {}.`);
+  } else {
+    parts.push(`## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
 2. Determine what must happen next to progress.
 3. Choose the best action.
@@ -1565,6 +1724,7 @@ Rules:
 - "action" must be a plain integer (0-7).
 - ACTION6: set "data" to {"x": <0-63>, "y": <0-63>}.
 - Other actions: set "data" to {}.`);
+  }
 
   return parts.join('\n\n');
 }
