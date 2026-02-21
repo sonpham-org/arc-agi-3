@@ -51,7 +51,10 @@ _server_port_online = 5001
 
 
 def get_mode() -> str:
-    """Determine mode from the port the request arrived on."""
+    """Determine mode from SERVER_MODE env var or port the request arrived on."""
+    env_mode = os.environ.get("SERVER_MODE", "")
+    if env_mode in ("local", "online"):
+        return env_mode
     try:
         port = int(request.environ.get("SERVER_PORT", _server_port_local))
         if port == _server_port_online:
@@ -388,6 +391,9 @@ def _try_recover_session(session_id: str):
         app.logger.warning(f"Session recovery failed for {session_id}: {e}")
         return None, None
 
+
+# Initialize DB at import time (for gunicorn/Railway)
+_init_db()
 
 COLOR_MAP = {
     0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999", 3: "#666666",
@@ -792,6 +798,11 @@ COLOR PALETTE: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
         f"Levels: {levels_completed}/{win_levels}\n"
         f"Available actions: {action_desc}"
     )
+
+    # ── Compact context (replaces verbose history when provided) ────────
+    compact_context = payload.get("compact_context", "")
+    if compact_context:
+        parts.append(compact_context)
 
     # ── History (always included) ─────────────────────────────────────────
     if history:
@@ -1419,6 +1430,7 @@ def llm_ask():
         content = _route_model_call(model_key, prompt, image_b64)
         result = _parse_llm_response(content, model_key)
         result["tools_active"] = tools_mode == "on"
+        result["prompt_length"] = len(prompt)
 
         # Stash LLM response for session DB persistence
         session_id = payload.get("session_id")
