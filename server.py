@@ -1,18 +1,27 @@
 """ARC-AGI-3 Web Player + LLM Reasoning Server."""
 
+import argparse
 import base64
+import copy
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
+import sqlite3
 import sys
 import threading
+import time
+import zlib
 from collections import deque
+from functools import wraps
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx as _httpx
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, make_response, render_template, request
 
 import arc_agi
 from arcengine import GameAction, GameState
@@ -22,12 +31,280 @@ load_dotenv(Path(__file__).parent / ".env")
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.logger.setLevel(logging.INFO)
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE FLAGS — dual-mode gating (local vs online)
+# ═══════════════════════════════════════════════════════════════════════════
+
+FEATURES = {
+    "copilot":       {"local": True,  "online": False},
+    "server_llm":    {"local": True,  "online": False},
+    "puter_js":      {"local": False, "online": True},
+    "byok":          {"local": False, "online": True},
+    "session_db":    {"local": True,  "online": True},
+    "memory_md":     {"local": True,  "online": False},
+}
+
+# Will be set by CLI args; default to local
+_server_mode = "local"
+_server_port_local = 5000
+_server_port_online = 5001
+
+
+def get_mode() -> str:
+    """Determine mode from the port the request arrived on."""
+    try:
+        port = int(request.environ.get("SERVER_PORT", _server_port_local))
+        if port == _server_port_online:
+            return "online"
+    except (ValueError, RuntimeError):
+        pass
+    return "local"
+
+
+def feature_enabled(name: str) -> bool:
+    mode = get_mode()
+    return FEATURES.get(name, {}).get(mode, False)
+
+
+def get_enabled_features() -> dict[str, bool]:
+    mode = get_mode()
+    return {name: feat.get(mode, False) for name, feat in FEATURES.items()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BOT PROTECTION — Turnstile + Rate Limiting + UA Filtering
+# ═══════════════════════════════════════════════════════════════════════════
+
+TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
+
+BOT_UA_PATTERNS = [
+    "bot", "crawler", "spider", "scraper", "wget", "curl", "python-requests",
+    "httpx", "aiohttp", "go-http-client", "java/", "libwww", "headlesschrome",
+    "phantomjs", "selenium", "puppeteer", "playwright", "mechanize", "scrapy",
+    "chatgpt", "gptbot", "claude-web", "anthropic-ai", "bingbot", "googlebot",
+    "baiduspider", "yandexbot", "duckduckbot", "facebookexternalhit",
+    "twitterbot", "applebot", "semrushbot", "ahrefsbot", "mj12bot",
+    "dotbot", "petalbot", "bytespider", "ccbot",
+]
+
+_rate_buckets: dict[str, dict] = {}
+_rate_lock = threading.Lock()
+RATE_LIMIT = 60       # max requests per window
+RATE_WINDOW = 60      # window in seconds
+
+_verified_tokens: dict[str, float] = {}
+_token_lock = threading.Lock()
+TURNSTILE_TOKEN_TTL = 3600  # verified session lasts 1 hour
+
+
+def _get_client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _is_bot_ua(ua: str) -> bool:
+    ua_lower = ua.lower()
+    return any(pat in ua_lower for pat in BOT_UA_PATTERNS)
+
+
+def _check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    with _rate_lock:
+        bucket = _rate_buckets.get(ip)
+        if bucket is None or now - bucket["window_start"] > RATE_WINDOW:
+            _rate_buckets[ip] = {"count": 1, "window_start": now}
+            return True
+        bucket["count"] += 1
+        return bucket["count"] <= RATE_LIMIT
+
+
+def _verify_turnstile_token(token: str, ip: str) -> bool:
+    if not TURNSTILE_SECRET_KEY:
+        return True
+    try:
+        resp = _httpx.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": TURNSTILE_SECRET_KEY, "response": token, "remoteip": ip},
+            timeout=10.0,
+        )
+        return resp.json().get("success", False)
+    except Exception as e:
+        app.logger.warning(f"Turnstile verification failed: {e}")
+        return False
+
+
+def _is_turnstile_verified() -> bool:
+    if not TURNSTILE_SITE_KEY or not TURNSTILE_SECRET_KEY:
+        return True  # skip if not configured
+    token_hash = request.cookies.get("ts_verified", "")
+    if not token_hash:
+        return False
+    now = time.time()
+    with _token_lock:
+        expiry = _verified_tokens.get(token_hash)
+        if expiry and now < expiry:
+            return True
+        _verified_tokens.pop(token_hash, None)
+    return False
+
+
+def bot_protection(f):
+    """UA filtering + rate limiting on API routes."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        ip = _get_client_ip()
+        ua = request.headers.get("User-Agent", "")
+        if _is_bot_ua(ua):
+            app.logger.info(f"Blocked bot UA from {ip}: {ua[:80]}")
+            abort(403)
+        if not _check_rate_limit(ip):
+            app.logger.info(f"Rate limited {ip}")
+            return jsonify({"error": "Rate limit exceeded. Try again later."}), 429
+        return f(*args, **kwargs)
+    return decorated
+
+
+def turnstile_required(f):
+    """Require Turnstile verification for protected routes."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not _is_turnstile_verified():
+            return jsonify({"error": "Human verification required", "need_turnstile": True}), 403
+        return f(*args, **kwargs)
+    return decorated
+
 # ── Global state ───────────────────────────────────────────────────────────
 
 arcade_instance: Optional[arc_agi.Arcade] = None
 game_sessions: dict[str, Any] = {}
 session_grids: dict[str, list[list[int]]] = {}
+session_snapshots: dict[str, list[dict]] = {}  # session_id → list of snapshots for undo
+session_api_mode: dict[str, str] = {}  # session-scoped api mode: "local" or "official"
+session_api_keys: dict[str, str] = {}  # session-scoped ARC API keys
 session_lock = threading.Lock()
+session_step_counts: dict[str, int] = {}  # session_id → server-side step counter
+session_last_llm: dict[str, dict] = {}  # session_id → last LLM response (for DB storage)
+
+# ── Copilot auth state ────────────────────────────────────────────────────
+copilot_oauth_token: Optional[str] = None  # GitHub OAuth access token
+copilot_api_token: Optional[str] = None  # Copilot short-lived API token
+copilot_token_expiry: float = 0.0  # Unix timestamp when copilot_api_token expires
+copilot_device_code: Optional[str] = None  # Pending device code during auth flow
+copilot_auth_lock = threading.Lock()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SQLite SESSION PERSISTENCE
+# ═══════════════════════════════════════════════════════════════════════════
+
+DB_PATH = Path(__file__).parent / "data" / "sessions.db"
+
+
+def _init_db():
+    """Create the sessions database and tables if they don't exist."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            model TEXT DEFAULT '',
+            mode TEXT DEFAULT 'local',
+            created_at REAL NOT NULL,
+            result TEXT DEFAULT 'NOT_FINISHED',
+            steps INTEGER DEFAULT 0,
+            levels INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS session_steps (
+            session_id TEXT NOT NULL,
+            step_num INTEGER NOT NULL,
+            action INTEGER NOT NULL,
+            data_json TEXT DEFAULT '{}',
+            grid_snapshot TEXT,
+            change_map_json TEXT,
+            llm_response_json TEXT,
+            timestamp REAL NOT NULL,
+            PRIMARY KEY (session_id, step_num),
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        );
+    """)
+    conn.close()
+
+
+def _get_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _compress_grid(grid: list) -> str:
+    """Compress a grid to zlib+base64 for storage."""
+    raw = json.dumps(grid).encode()
+    return base64.b64encode(zlib.compress(raw)).decode()
+
+
+def _decompress_grid(data: str) -> list:
+    """Decompress a zlib+base64 grid."""
+    return json.loads(zlib.decompress(base64.b64decode(data)))
+
+
+def _db_insert_session(session_id: str, game_id: str, mode: str):
+    """Insert a new session record."""
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, game_id, mode, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, game_id, mode, time.time()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"DB insert session failed: {e}")
+
+
+def _db_insert_step(session_id: str, step_num: int, action: int,
+                     data: dict, grid: list, change_map: dict,
+                     llm_response: dict | None = None):
+    """Insert a step record with compressed grid."""
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT OR REPLACE INTO session_steps "
+            "(session_id, step_num, action, data_json, grid_snapshot, change_map_json, llm_response_json, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                session_id, step_num, action,
+                json.dumps(data),
+                _compress_grid(grid) if grid else None,
+                json.dumps(change_map) if change_map else None,
+                json.dumps(llm_response) if llm_response else None,
+                time.time(),
+            ),
+        )
+        conn.execute(
+            "UPDATE sessions SET steps = ?, result = (SELECT result FROM sessions WHERE id = ?) WHERE id = ?",
+            (step_num, session_id, session_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"DB insert step failed: {e}")
+
+
+def _db_update_session(session_id: str, **kwargs):
+    """Update session fields."""
+    try:
+        conn = _get_db()
+        sets = ", ".join(f"{k} = ?" for k in kwargs)
+        conn.execute(f"UPDATE sessions SET {sets} WHERE id = ?",
+                     (*kwargs.values(), session_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"DB update session failed: {e}")
 
 COLOR_MAP = {
     0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999", 3: "#666666",
@@ -159,6 +436,86 @@ MODEL_REGISTRY: dict[str, dict] = {
         "url": "https://api-inference.huggingface.co/v1/chat/completions",
         "price": "Free tier",
         "capabilities": {"image": False, "reasoning": False, "tools": False},
+    },
+    # ── Cloudflare Workers AI ────────────────────────────────────────────
+    "cf/llama-3.3-70b-instruct": {
+        "provider": "cloudflare", "api_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": False, "tools": False},
+    },
+    "cf/llama-3.1-8b-instruct": {
+        "provider": "cloudflare", "api_model": "@cf/meta/llama-3.1-8b-instruct-fast",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": False, "tools": False},
+    },
+    "cf/llama-4-scout-17b": {
+        "provider": "cloudflare", "api_model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": False, "tools": False},
+    },
+    "cf/qwen3-30b": {
+        "provider": "cloudflare", "api_model": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": True, "tools": False},
+    },
+    "cf/qwq-32b": {
+        "provider": "cloudflare", "api_model": "@cf/qwen/qwq-32b",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": True, "tools": False},
+    },
+    "cf/deepseek-r1-distill-32b": {
+        "provider": "cloudflare", "api_model": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": True, "tools": False},
+    },
+    "cf/mistral-small-3.1-24b": {
+        "provider": "cloudflare", "api_model": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": False, "reasoning": False, "tools": False},
+    },
+    "cf/llama-3.2-11b-vision": {
+        "provider": "cloudflare", "api_model": "@cf/meta/llama-3.2-11b-vision-instruct",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "price": "Free (10k neurons/day)",
+        "capabilities": {"image": True, "reasoning": False, "tools": False},
+    },
+    # ── GitHub Copilot (local only, requires OAuth) ──────────────────────
+    "copilot/gpt-4.1": {
+        "provider": "copilot", "api_model": "gpt-4.1",
+        "env_key": "",  # no env key — auth via OAuth
+        "price": "Free (unlimited)",
+        "capabilities": {"image": True, "reasoning": False, "tools": True},
+    },
+    "copilot/gpt-4o": {
+        "provider": "copilot", "api_model": "gpt-4o",
+        "env_key": "",
+        "price": "Free (unlimited)",
+        "capabilities": {"image": True, "reasoning": False, "tools": True},
+    },
+    "copilot/gpt-5-mini": {
+        "provider": "copilot", "api_model": "gpt-5-mini",
+        "env_key": "",
+        "price": "Free (unlimited)",
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
+    },
+    "copilot/claude-sonnet-4": {
+        "provider": "copilot", "api_model": "claude-sonnet-4",
+        "env_key": "",
+        "price": "Premium (300/mo)",
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
+    },
+    "copilot/gemini-2.5-pro": {
+        "provider": "copilot", "api_model": "gemini-2.5-pro",
+        "env_key": "",
+        "price": "Premium (300/mo)",
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
 }
 
@@ -483,7 +840,8 @@ def _call_anthropic(model_name: str, prompt: str, image_b64: str | None = None) 
 
 
 def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
-                             image_b64: str | None = None) -> str:
+                             image_b64: str | None = None,
+                             extra_headers: dict | None = None) -> str:
     import httpx
     if image_b64:
         user_content: list | str = [
@@ -497,14 +855,50 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
         {"role": "system", "content": SYSTEM_MSG},
         {"role": "user", "content": user_content},
     ]
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
     resp = httpx.post(
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        url, headers=headers,
         json={"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048},
         timeout=90.0,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
+
+
+def _call_cloudflare(model_name: str, prompt: str, image_b64: str | None = None) -> str:
+    import httpx
+    api_key = os.environ.get("CLOUDFLARE_API_KEY", "")
+    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+    if not api_key or not account_id:
+        raise ValueError("CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID must be set")
+
+    messages = [
+        {"role": "system", "content": SYSTEM_MSG},
+        {"role": "user", "content": prompt},
+    ]
+
+    # Llama 3.2 vision supports image via base64 URL in content array
+    if image_b64 and "vision" in model_name:
+        messages[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                {"type": "text", "text": prompt},
+            ],
+        }
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model_name}"
+    resp = httpx.post(
+        url,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"messages": messages, "temperature": 0.3, "max_tokens": 2048},
+        timeout=90.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("result", {}).get("response", "") or json.dumps(data.get("result", {}))
 
 
 def _call_ollama(model_name: str, prompt: str, image_b64: str | None = None) -> str:
@@ -521,6 +915,45 @@ def _call_ollama(model_name: str, prompt: str, image_b64: str | None = None) -> 
         options={"temperature": 0.3, "num_predict": 2048},
     )
     return response["message"]["content"]
+
+
+def _get_copilot_token() -> str:
+    """Get a valid Copilot API token, refreshing if needed."""
+    global copilot_api_token, copilot_token_expiry
+    with copilot_auth_lock:
+        if not copilot_oauth_token:
+            raise ValueError("Copilot not authenticated. Complete the OAuth flow first.")
+        # Refresh if expired or within 5-min safety margin
+        if time.time() > copilot_token_expiry - 300:
+            import httpx
+            resp = httpx.get(
+                "https://api.github.com/copilot_internal/v2/token",
+                headers={"Authorization": f"token {copilot_oauth_token}",
+                         "Accept": "application/json"},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            copilot_api_token = data["token"]
+            copilot_token_expiry = data.get("expires_at", time.time() + 1500)
+        return copilot_api_token
+
+
+def _call_copilot(model_name: str, prompt: str, image_b64: str | None = None) -> str:
+    """Call GitHub Copilot Chat completions endpoint."""
+    token = _get_copilot_token()
+    return _call_openai_compatible(
+        url="https://api.githubcopilot.com/chat/completions",
+        api_key=token,
+        model=model_name,
+        prompt=prompt,
+        image_b64=image_b64,
+        extra_headers={
+            "Copilot-Integration-Id": "vscode-chat",
+            "editor-version": "vscode/1.100.0",
+            "user-agent": "GitHubCopilotChat/0.24.0",
+        },
+    )
 
 
 def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None) -> str:
@@ -541,6 +974,10 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None)
         return _call_gemini(api_model, prompt, img)
     if provider == "anthropic":
         return _call_anthropic(api_model, prompt, img)
+    if provider == "cloudflare":
+        return _call_cloudflare(api_model, prompt, img)
+    if provider == "copilot":
+        return _call_copilot(api_model, prompt, img)
     if provider == "ollama":
         return _call_ollama(api_model, prompt, img)
 
@@ -555,11 +992,43 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None)
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.route("/")
+@bot_protection
 def index():
-    return render_template("index.html", color_map=COLOR_MAP)
+    mode = get_mode()
+    features = get_enabled_features()
+    return render_template("index.html", color_map=COLOR_MAP,
+                           turnstile_site_key=TURNSTILE_SITE_KEY,
+                           mode=mode, features=features)
+
+
+@app.route("/api/turnstile/verify", methods=["POST"])
+@bot_protection
+def turnstile_verify():
+    """Verify a Turnstile token and set a session cookie."""
+    payload = request.get_json(force=True)
+    token = payload.get("token", "")
+    if not token:
+        return jsonify({"error": "Token required"}), 400
+
+    ip = _get_client_ip()
+    if not _verify_turnstile_token(token, ip):
+        return jsonify({"error": "Verification failed"}), 403
+
+    # Generate a session hash and store it
+    session_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+    with _token_lock:
+        _verified_tokens[session_hash] = time.time() + TURNSTILE_TOKEN_TTL
+
+    resp = make_response(jsonify({"status": "ok"}))
+    resp.set_cookie("ts_verified", session_hash,
+                     max_age=TURNSTILE_TOKEN_TTL, httponly=True,
+                     samesite="Lax", secure=request.is_secure)
+    return resp
 
 
 @app.route("/api/games")
+@bot_protection
+@turnstile_required
 def list_games():
     arc = get_arcade()
     envs = arc.get_environments()
@@ -570,6 +1039,8 @@ def list_games():
 
 
 @app.route("/api/start", methods=["POST"])
+@bot_protection
+@turnstile_required
 def start_game():
     data = request.get_json(force=True)
     game_id = data.get("game_id")
@@ -587,12 +1058,21 @@ def start_game():
     with session_lock:
         game_sessions[session_id] = env
         session_grids[session_id] = state.get("grid", [])
+        session_snapshots[session_id] = []  # reset undo stack
+        session_step_counts[session_id] = 0
     state["session_id"] = session_id
     state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(initial)"}
+
+    # Persist to SQLite
+    if feature_enabled("session_db"):
+        _db_insert_session(session_id, game_id, get_mode())
+
     return jsonify(state)
 
 
 @app.route("/api/step", methods=["POST"])
+@bot_protection
+@turnstile_required
 def step_game():
     payload = request.get_json(force=True)
     session_id = payload.get("session_id")
@@ -614,6 +1094,12 @@ def step_game():
 
     with session_lock:
         prev_grid = session_grids.get(session_id, [])
+        # Save snapshot for undo before executing the step
+        snapshot = {
+            "grid": copy.deepcopy(prev_grid),
+            "observation_space": copy.deepcopy(env.observation_space) if hasattr(env, "observation_space") else None,
+        }
+        session_snapshots.setdefault(session_id, []).append(snapshot)
 
     frame_data = env.step(action, data=action_data or None, reasoning=reasoning)
     if frame_data is None:
@@ -622,13 +1108,37 @@ def step_game():
     state = env_state_dict(env, frame_data)
     state["session_id"] = session_id
     curr_grid = state.get("grid", [])
-    state["change_map"] = compute_change_map(prev_grid, curr_grid)
+    change_map = compute_change_map(prev_grid, curr_grid)
+    state["change_map"] = change_map
+    state["undo_depth"] = len(session_snapshots.get(session_id, []))
+    # Accept client-side LLM response (online mode sends it with the step)
+    client_llm_response = payload.get("llm_response")
+
     with session_lock:
         session_grids[session_id] = curr_grid
+        session_step_counts[session_id] = session_step_counts.get(session_id, 0) + 1
+        step_num = session_step_counts[session_id]
+        # Pop any stashed LLM response, or use client-provided one
+        llm_resp = session_last_llm.pop(session_id, None) or client_llm_response
+
+    # Persist step to SQLite
+    if feature_enabled("session_db"):
+        _db_insert_step(
+            session_id, step_num, int(action_id), action_data or {},
+            curr_grid, change_map, llm_resp,
+        )
+        _db_update_session(
+            session_id,
+            result=state.get("state", "NOT_FINISHED"),
+            levels=state.get("levels_completed", 0),
+        )
+
     return jsonify(state)
 
 
 @app.route("/api/reset", methods=["POST"])
+@bot_protection
+@turnstile_required
 def reset_game():
     payload = request.get_json(force=True)
     session_id = payload.get("session_id")
@@ -646,43 +1156,61 @@ def reset_game():
 
 
 @app.route("/api/llm/models")
+@bot_protection
+@turnstile_required
 def llm_models():
-    """Return all models with capabilities and availability."""
+    """Return all models with capabilities and availability (mode-aware)."""
     models = []
+    mode = get_mode()
 
     for key, info in MODEL_REGISTRY.items():
-        env_key = info.get("env_key", "")
-        available = bool(not env_key or os.environ.get(env_key))
+        provider = info["provider"]
+        # In online mode, skip server-only providers
+        if mode == "online" and provider not in ("copilot",):
+            # Online mode only shows puter/byok models (handled client-side)
+            continue
+        # In local mode, include everything
+        # Copilot models need OAuth, not env key
+        if provider == "copilot":
+            if not feature_enabled("copilot"):
+                continue
+            available = copilot_oauth_token is not None
+        else:
+            env_key = info.get("env_key", "")
+            available = bool(not env_key or os.environ.get(env_key))
         models.append({
             "name": key,
-            "provider": info["provider"],
+            "provider": provider,
             "price": info.get("price", "?"),
             "capabilities": info.get("capabilities", {}),
             "available": available,
         })
 
-    # Discover Ollama models
-    try:
-        import ollama
-        ollama_list = ollama.list()
-        ollama_names = [m.model for m in ollama_list.models] if hasattr(ollama_list, "models") else []
-        for name in ollama_names:
-            vram = OLLAMA_VRAM.get(name, "local")
-            is_vision = name.split(":")[0] in OLLAMA_VISION_MODELS
-            models.append({
-                "name": name,
-                "provider": "ollama",
-                "price": f"Free ({vram})",
-                "capabilities": {"image": is_vision, "reasoning": False, "tools": False},
-                "available": True,
-            })
-    except Exception:
-        pass
+    # Discover Ollama models (local only)
+    if mode == "local":
+        try:
+            import ollama
+            ollama_list = ollama.list()
+            ollama_names = [m.model for m in ollama_list.models] if hasattr(ollama_list, "models") else []
+            for name in ollama_names:
+                vram = OLLAMA_VRAM.get(name, "local")
+                is_vision = name.split(":")[0] in OLLAMA_VISION_MODELS
+                models.append({
+                    "name": name,
+                    "provider": "ollama",
+                    "price": f"Free ({vram})",
+                    "capabilities": {"image": is_vision, "reasoning": False, "tools": False},
+                    "available": True,
+                })
+        except Exception:
+            pass
 
-    return jsonify({"models": models})
+    return jsonify({"models": models, "mode": mode})
 
 
 @app.route("/api/llm/ask", methods=["POST"])
+@bot_protection
+@turnstile_required
 def llm_ask():
     """Ask LLM for next action.
 
@@ -694,6 +1222,13 @@ def llm_ask():
       - settings.model: model key
       - image_b64: base64-encoded PNG screenshot (optional)
     """
+    # Gate: online mode cannot use server-side LLM
+    if not feature_enabled("server_llm"):
+        return jsonify({
+            "error": "Server-side LLM is not available in online mode. Use Puter.js or BYOK.",
+            "mode": get_mode(),
+        }), 403
+
     payload = request.get_json(force=True)
     settings = payload.get("settings", {})
     model_key = settings.get("model") or payload.get("model", "gemini-2.5-flash")
@@ -725,12 +1260,358 @@ def llm_ask():
         content = _route_model_call(model_key, prompt, image_b64)
         result = _parse_llm_response(content, model_key)
         result["tools_active"] = tools_mode == "on"
+
+        # Stash LLM response for session DB persistence
+        session_id = payload.get("session_id")
+        if session_id and feature_enabled("session_db"):
+            with session_lock:
+                session_last_llm[session_id] = result
+                # Also update the model on the session record
+            _db_update_session(session_id, model=model_key)
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e), "model": model_key}), 500
 
 
+@app.route("/api/undo", methods=["POST"])
+@bot_protection
+@turnstile_required
+def undo_step():
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id")
+    if not session_id:
+        return jsonify({"error": "session_id required"}), 400
+
+    with session_lock:
+        env = game_sessions.get(session_id)
+        snapshots = session_snapshots.get(session_id, [])
+
+    if env is None:
+        return jsonify({"error": "Session not found"}), 404
+    if not snapshots:
+        return jsonify({"error": "Nothing to undo"}), 400
+
+    with session_lock:
+        snapshot = snapshots.pop()
+
+    restored_grid = snapshot["grid"]
+    # We restore the grid and return the previous state to the UI.
+    # The env itself may not support true rollback, so we restore our cached grid.
+    with session_lock:
+        session_grids[session_id] = restored_grid
+
+    # Build a state dict from the snapshot
+    state = env_state_dict(env)
+    state["grid"] = restored_grid
+    state["session_id"] = session_id
+    state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(undo)"}
+    state["undo_depth"] = len(snapshots)
+    return jsonify(state)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# API MODE CONFIGURATION (Local vs Official ARC-AGI-3 API)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/config/mode", methods=["GET", "POST"])
+@bot_protection
+@turnstile_required
+def config_mode():
+    if request.method == "POST":
+        payload = request.get_json(force=True)
+        mode = payload.get("mode", "local")
+        client_id = payload.get("client_id", "default")
+        if mode not in ("local", "official"):
+            return jsonify({"error": "mode must be 'local' or 'official'"}), 400
+        with session_lock:
+            session_api_mode[client_id] = mode
+        return jsonify({"mode": mode})
+    else:
+        client_id = request.args.get("client_id", "default")
+        mode = session_api_mode.get(client_id, "local")
+        has_key = bool(session_api_keys.get(client_id) or os.environ.get("ARC_AGI_3_API_KEY"))
+        return jsonify({"mode": mode, "has_key": has_key})
+
+
+@app.route("/api/config/apikey", methods=["POST"])
+@bot_protection
+@turnstile_required
+def config_apikey():
+    payload = request.get_json(force=True)
+    api_key = payload.get("api_key", "")
+    client_id = payload.get("client_id", "default")
+    with session_lock:
+        session_api_keys[client_id] = api_key
+    return jsonify({"status": "ok"})
+
+
+def _get_arc_api_key(client_id: str = "default") -> str:
+    """Get the ARC-AGI-3 API key from session or environment."""
+    return session_api_keys.get(client_id, "") or os.environ.get("ARC_AGI_3_API_KEY", "")
+
+
+def _proxy_to_official_api(endpoint: str, payload: dict, client_id: str = "default") -> dict:
+    """Forward a request to the official ARC-AGI-3 API."""
+    import httpx
+    api_key = _get_arc_api_key(client_id)
+    if not api_key:
+        return {"error": "ARC-AGI-3 API key not configured"}
+    base_url = "https://three.arcprize.org"
+    try:
+        resp = httpx.post(
+            f"{base_url}/{endpoint}",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"error": f"Official API error: {str(e)}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# COPILOT AUTH ENDPOINTS (local only)
+# ═══════════════════════════════════════════════════════════════════════════
+
+COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98"
+
+
+@app.route("/api/copilot/auth/start", methods=["POST"])
+@bot_protection
+@turnstile_required
+def copilot_auth_start():
+    if not feature_enabled("copilot"):
+        return jsonify({"error": "Copilot not available in this mode"}), 403
+    global copilot_device_code
+    import httpx
+    try:
+        resp = httpx.post(
+            "https://github.com/login/device/code",
+            headers={"Accept": "application/json"},
+            data={"client_id": COPILOT_CLIENT_ID, "scope": "read:user"},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        with copilot_auth_lock:
+            copilot_device_code = data.get("device_code")
+        return jsonify({
+            "user_code": data.get("user_code"),
+            "verification_uri": data.get("verification_uri"),
+            "expires_in": data.get("expires_in"),
+            "interval": data.get("interval", 5),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/copilot/auth/poll", methods=["POST"])
+@bot_protection
+@turnstile_required
+def copilot_auth_poll():
+    if not feature_enabled("copilot"):
+        return jsonify({"error": "Copilot not available in this mode"}), 403
+    global copilot_oauth_token, copilot_device_code
+    import httpx
+    with copilot_auth_lock:
+        dc = copilot_device_code
+    if not dc:
+        return jsonify({"error": "No pending auth. Call /api/copilot/auth/start first."}), 400
+    try:
+        resp = httpx.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": COPILOT_CLIENT_ID,
+                "device_code": dc,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            },
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "access_token" in data:
+            with copilot_auth_lock:
+                copilot_oauth_token = data["access_token"]
+                copilot_device_code = None
+            return jsonify({"status": "authenticated"})
+        elif data.get("error") == "authorization_pending":
+            return jsonify({"status": "pending"})
+        elif data.get("error") == "slow_down":
+            return jsonify({"status": "slow_down", "interval": data.get("interval", 10)})
+        else:
+            return jsonify({"status": "error", "error": data.get("error_description", data.get("error", "Unknown"))})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/copilot/auth/status")
+@bot_protection
+@turnstile_required
+def copilot_auth_status():
+    if not feature_enabled("copilot"):
+        return jsonify({"available": False, "reason": "online_mode"})
+    with copilot_auth_lock:
+        authenticated = copilot_oauth_token is not None
+        pending = copilot_device_code is not None
+    return jsonify({
+        "available": True,
+        "authenticated": authenticated,
+        "pending": pending,
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SESSION HISTORY ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/sessions")
+@bot_protection
+@turnstile_required
+def list_sessions():
+    """List recent sessions (last 100)."""
+    if not feature_enabled("session_db"):
+        return jsonify({"sessions": []})
+    try:
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT id, game_id, model, mode, created_at, result, steps, levels "
+            "FROM sessions ORDER BY created_at DESC LIMIT 100"
+        ).fetchall()
+        conn.close()
+        return jsonify({"sessions": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"sessions": [], "error": str(e)})
+
+
+@app.route("/api/sessions/<session_id>")
+@bot_protection
+@turnstile_required
+def get_session(session_id):
+    """Get full session with all steps and decompressed grids."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 404
+    try:
+        conn = _get_db()
+        sess = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not sess:
+            conn.close()
+            return jsonify({"error": "Session not found"}), 404
+        steps = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        step_list = []
+        for s in steps:
+            d = dict(s)
+            # Decompress grid snapshot
+            if d.get("grid_snapshot"):
+                try:
+                    d["grid"] = _decompress_grid(d["grid_snapshot"])
+                except Exception:
+                    d["grid"] = None
+                del d["grid_snapshot"]
+            # Parse JSON fields
+            for jf in ("data_json", "change_map_json", "llm_response_json"):
+                if d.get(jf):
+                    try:
+                        d[jf.replace("_json", "")] = json.loads(d[jf])
+                    except Exception:
+                        d[jf.replace("_json", "")] = None
+                    del d[jf]
+            step_list.append(d)
+        return jsonify({"session": dict(sess), "steps": step_list})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/<session_id>/step/<int:step_num>")
+@bot_protection
+@turnstile_required
+def get_session_step(session_id, step_num):
+    """Get a single step from a session."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 404
+    try:
+        conn = _get_db()
+        row = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? AND step_num = ?",
+            (session_id, step_num),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"error": "Step not found"}), 404
+        d = dict(row)
+        if d.get("grid_snapshot"):
+            try:
+                d["grid"] = _decompress_grid(d["grid_snapshot"])
+            except Exception:
+                d["grid"] = None
+            del d["grid_snapshot"]
+        for jf in ("data_json", "change_map_json", "llm_response_json"):
+            if d.get(jf):
+                try:
+                    d[jf.replace("_json", "")] = json.loads(d[jf])
+                except Exception:
+                    d[jf.replace("_json", "")] = None
+                del d[jf]
+        return jsonify(d)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN — dual-port serving
+# ═══════════════════════════════════════════════════════════════════════════
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    print(f"\n  ARC-AGI-3 Web Player: http://localhost:{port}\n")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    parser = argparse.ArgumentParser(description="ARC-AGI-3 Web Player")
+    parser.add_argument("--mode", choices=["local", "online", "dual"], default="dual",
+                        help="Run mode: local (port 5000), online (port 5001), or dual (both)")
+    parser.add_argument("--port", type=int, default=None,
+                        help="Override port (for single-mode)")
+    parser.add_argument("--port-local", type=int, default=5000, help="Local mode port")
+    parser.add_argument("--port-online", type=int, default=5001, help="Online mode port")
+    args = parser.parse_args()
+
+    _server_port_local = args.port_local
+    _server_port_online = args.port_online
+
+    # Initialize SQLite DB
+    _init_db()
+    print("  SQLite sessions DB initialized at:", DB_PATH)
+
+    if args.mode == "dual":
+        print(f"\n  ARC-AGI-3 Web Player (dual mode)")
+        print(f"    Local:  http://localhost:{_server_port_local}")
+        print(f"    Online: http://localhost:{_server_port_online}\n")
+
+        # Run online port in a background thread
+        def run_online():
+            from werkzeug.serving import make_server
+            srv = make_server("0.0.0.0", _server_port_online, app)
+            srv.serve_forever()
+
+        t = threading.Thread(target=run_online, daemon=True)
+        t.start()
+
+        # Run local port in main thread
+        app.run(host="0.0.0.0", port=_server_port_local, debug=False)
+
+    elif args.mode == "local":
+        port = args.port or _server_port_local
+        _server_port_local = port
+        print(f"\n  ARC-AGI-3 Web Player (local): http://localhost:{port}\n")
+        app.run(host="0.0.0.0", port=port, debug=False)
+
+    elif args.mode == "online":
+        port = args.port or _server_port_online
+        _server_port_online = port
+        print(f"\n  ARC-AGI-3 Web Player (online): http://localhost:{port}\n")
+        app.run(host="0.0.0.0", port=port, debug=False)

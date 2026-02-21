@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ARC-AGI-3 Player</title>
+{% if turnstile_site_key %}
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+{% endif %}
+{% if features.puter_js %}
+<script src="https://js.puter.com/v2/"></script>
+{% endif %}
 <style>
   :root {
     --bg: #0d1117; --surface: #161b22; --surface2: #1c2129; --border: #30363d;
@@ -129,6 +135,76 @@
   /* Disabled overlay for image toggle */
   .opt-row.disabled { opacity: 0.35; pointer-events: none; }
 
+  /* ── Copilot auth section ─────────────────────────────────────────────── */
+  .copilot-status { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; }
+  .copilot-status .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot-green { background: var(--green); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-gray { background: var(--text-dim); }
+  .copilot-code { font-family: inherit; font-size: 18px; font-weight: 700; letter-spacing: 3px;
+    color: var(--accent); background: var(--bg); padding: 8px 16px; border-radius: 6px;
+    border: 1px solid var(--border); text-align: center; margin: 8px 0; }
+  .copilot-link { color: var(--accent); font-size: 11px; }
+  .tier-badge { font-size: 9px; padding: 1px 5px; border-radius: 6px; font-weight: 600; margin-left: 4px; }
+  .tier-free { background: #3fb95033; color: var(--green); }
+  .tier-premium { background: #bc8cff33; color: var(--purple); }
+
+  /* ── BYOK section ─────────────────────────────────────────────────────── */
+  .byok-notice { font-size: 10px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+
+  /* ── History tab ──────────────────────────────────────────────────────── */
+  .history-list { flex: 1; overflow-y: auto; padding: 8px 14px; }
+  .history-item { padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+    font-size: 12px; transition: background 0.15s; display: flex; gap: 8px; align-items: center; }
+  .history-item:hover { background: var(--border); }
+  .history-item .h-game { font-weight: 600; flex: 1; }
+  .history-item .h-meta { font-size: 10px; color: var(--text-dim); }
+  .history-item .h-result { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+  .h-result-WIN { background: #3fb95033; color: var(--green); }
+  .h-result-GAME_OVER { background: #f8514933; color: var(--red); }
+  .h-result-NOT_FINISHED { background: #d2992233; color: var(--yellow); }
+
+  .replay-panel { padding: 10px 14px; border-top: 1px solid var(--border); }
+  .replay-scrubber { width: 100%; margin: 6px 0; }
+  .replay-info { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+  .replay-reasoning { font-size: 11px; color: var(--text); margin-top: 8px; padding: 8px;
+    background: var(--bg); border-radius: 4px; border: 1px solid var(--border);
+    max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+
+  /* ── Turnstile gate overlay ─────────────────────────────────────────── */
+  .turnstile-gate { position: fixed; inset: 0; z-index: 9999; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+  .turnstile-gate h1 { font-size: 20px; color: var(--accent); letter-spacing: 1px; }
+  .turnstile-gate p { color: var(--text-dim); font-size: 13px; max-width: 400px; text-align: center; line-height: 1.6; }
+  .turnstile-gate .error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
+
+  /* ── Transport bar ──────────────────────────────────────────────────── */
+  .transport-bar { display: flex; gap: 4px; margin-top: 10px; width: 100%; }
+  .transport-bar .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 8px 6px; font-size: 12px; font-weight: 600; }
+  .btn-undo { border-color: var(--yellow); color: var(--yellow); }
+  .btn-undo:hover { background: #d2992233; }
+  .btn-undo:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
+  .btn-undo:disabled:hover { background: var(--surface); }
+  .btn-step { border-color: var(--accent); color: var(--accent); }
+  .btn-step:hover { background: #58a6ff22; }
+  .btn-auto { background: var(--green); border-color: var(--green); color: #000; }
+  .btn-auto:hover { background: #2ea043; }
+  .btn-pause { background: var(--yellow); border-color: var(--yellow); color: #000; }
+  .btn-pause:hover { background: #b8860b; }
+
+  /* ── API Mode toggle ────────────────────────────────────────────────── */
+  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; width: 100%; }
+  .mode-toggle label { flex: 1; padding: 6px 0; font-size: 12px; cursor: pointer; background: var(--bg);
+    color: var(--text-dim); transition: all 0.15s; text-align: center; border-right: 1px solid var(--border);
+    font-weight: 500; }
+  .mode-toggle label:last-child { border-right: none; }
+  .mode-toggle input { display: none; }
+  .mode-toggle label:has(input:checked) { background: var(--accent); color: #000; font-weight: 600; }
+  .api-warning { background: #d2992215; border: 1px solid #d2992244; border-radius: 6px; padding: 8px 10px;
+    font-size: 11px; color: var(--yellow); margin-top: 8px; line-height: 1.5; display: none; }
+  .api-key-input { margin-top: 8px; display: none; }
+
   /* ── Right panel tabs ────────────────────────────────────────────────── */
   .tab-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
   .tab-bar button { flex: 1; padding: 10px 0; background: none; border: none; color: var(--text-dim);
@@ -141,6 +217,14 @@
 </style>
 </head>
 <body>
+{% if turnstile_site_key %}
+<div class="turnstile-gate" id="turnstileGate">
+  <h1>ARC-AGI-3 Player</h1>
+  <p>Please verify you're human to continue.</p>
+  <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-callback="onTurnstileSuccess" data-theme="dark"></div>
+  <div class="error" id="turnstileError">Verification failed. Please try again.</div>
+</div>
+{% endif %}
 <div class="layout">
   <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
   <div class="sidebar">
@@ -189,10 +273,88 @@
           <button onclick="switchTab('reasoning')">
             Reasoning <span id="llmSpinner" style="display:none;margin-left:4px;"><span class="spinner"></span></span>
           </button>
+          <button onclick="switchTab('history')">History</button>
         </div>
 
         <!-- ════ SETTINGS TAB ════ -->
         <div class="tab-pane active" id="tabSettings" style="overflow-y:auto;">
+
+          <!-- GAME SOURCE -->
+          <div class="opt-section open" id="secGameSource">
+            <div class="opt-header" onclick="toggleSection('secGameSource')">
+              <span>Game Source</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <div class="mode-toggle" id="apiModeToggle">
+                <label><input type="radio" name="apiMode" value="local" checked onchange="onApiModeChange('local')">Local</label>
+                <label><input type="radio" name="apiMode" value="official" onchange="onApiModeChange('official')">Official API</label>
+              </div>
+              <div class="api-warning" id="apiWarning">
+                &#9888; This will use the official ARC-AGI-3 API at three.arcprize.org. Your current game will be reset. Results count toward your leaderboard score.
+              </div>
+              <div class="api-key-input" id="apiKeySection">
+                <input type="password" class="text-input" id="arcApiKey" placeholder="ARC-AGI-3 API Key" style="margin-bottom:6px;">
+                <button class="btn btn-primary" onclick="saveArcApiKey()" style="width:100%;font-size:11px;">Save API Key</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- GITHUB COPILOT (local only) -->
+          {% if features.copilot %}
+          <div class="opt-section" id="secCopilot">
+            <div class="opt-header" onclick="toggleSection('secCopilot')">
+              <span>GitHub Copilot</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <div id="copilotNotAuth">
+                <button class="btn btn-primary" onclick="copilotStartAuth()" style="width:100%;font-size:11px;">Connect GitHub Copilot</button>
+                <div id="copilotDeviceCode" style="display:none;">
+                  <div class="copilot-code" id="copilotUserCode">————</div>
+                  <div style="text-align:center;">
+                    <a id="copilotVerifyLink" href="#" target="_blank" class="copilot-link">Open GitHub to enter code</a>
+                  </div>
+                  <div style="font-size:10px;color:var(--text-dim);margin-top:6px;text-align:center;">Waiting for authorization...</div>
+                </div>
+              </div>
+              <div id="copilotAuthed" style="display:none;">
+                <div class="copilot-status">
+                  <span class="dot dot-green"></span>
+                  <span style="color:var(--green);font-weight:600;">Connected</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-dim);margin-top:6px;">
+                  Models: gpt-4.1, gpt-4o, gpt-5-mini<span class="tier-badge tier-free">FREE</span><br>
+                  claude-sonnet-4, gemini-2.5-pro<span class="tier-badge tier-premium">PREMIUM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- BYOK — Bring Your Own Key (online only) -->
+          {% if features.byok %}
+          <div class="opt-section" id="secBYOK">
+            <div class="opt-header" onclick="toggleSection('secBYOK')">
+              <span>API Key (BYOK)</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <div class="opt-row">
+                <span class="opt-label">Provider</span>
+                <select id="byokProvider" style="width:140px;">
+                  <option value="openai">OpenAI</option>
+                  <option value="gemini">Google Gemini</option>
+                </select>
+              </div>
+              <div class="opt-row">
+                <input type="password" class="text-input" id="byokKey" placeholder="Paste API key here...">
+              </div>
+              <button class="btn btn-primary" onclick="saveBYOK()" style="width:100%;font-size:11px;">Save locally</button>
+              <div class="byok-notice">
+                Your key is stored in localStorage only — never sent to our server.<br>
+                Anthropic keys won't work (CORS blocked). Use Puter.js for Claude models.
+              </div>
+            </div>
+          </div>
+          {% endif %}
 
           <!-- GRAPHICS -->
           <div class="opt-section open" id="secGraphics">
@@ -285,9 +447,10 @@
               <select id="modelSelect"><option value="">Loading...</option></select>
               <div class="model-caps" id="modelCaps"></div>
               <input type="text" class="text-input" id="modelCustom" placeholder="Or type model name..." style="margin-top:6px;">
-              <div style="display:flex;gap:6px;margin-top:10px;">
-                <button class="btn btn-primary" onclick="askLLM()" style="flex:1;">Ask LLM</button>
-                <button class="btn btn-green" onclick="autoPlay()" id="autoPlayBtn" style="flex:1;">Auto-Play</button>
+              <div class="transport-bar">
+                <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled title="Undo last step">&#9198; Undo</button>
+                <button class="btn btn-step" onclick="stepOnce()" id="stepBtn" title="Ask LLM + execute one step">&#9654; Step</button>
+                <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn" title="Auto-play continuously">&#9193; Auto</button>
               </div>
             </div>
           </div>
@@ -303,6 +466,18 @@
           </div>
         </div>
 
+        <!-- ════ HISTORY TAB ════ -->
+        <div class="tab-pane" id="tabHistory">
+          <div class="history-list" id="historyList">
+            <div class="empty-state" style="height:auto;font-size:12px;">Loading sessions...</div>
+          </div>
+          <div class="replay-panel" id="replayPanel" style="display:none;">
+            <div class="replay-info" id="replayInfo">Step 0 / 0</div>
+            <input type="range" class="replay-scrubber" id="replayScrubber" min="0" max="0" value="0">
+            <div class="replay-reasoning" id="replayReasoning"></div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -315,6 +490,8 @@
 
 const COLORS = {{ color_map | tojson }};
 const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACT5',6:'CLICK',7:'ACT7'};
+const MODE = {{ mode | tojson }};
+const FEATURES = {{ features | tojson }};
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -328,6 +505,9 @@ let moveHistory = [];
 let autoPlaying = false;
 let action6Mode = false;
 let modelsData = [];  // {name, provider, capabilities, available}
+let undoStack = [];   // local undo snapshots (grid + state for each step)
+let apiMode = 'local';
+const clientId = 'client_' + Math.random().toString(36).slice(2, 10);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COLLAPSIBLE SECTIONS
@@ -340,13 +520,13 @@ function toggleSection(id) {
 function switchTab(tab) {
   document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  if (tab === 'settings') {
-    document.querySelector('.tab-bar button:first-child').classList.add('active');
-    document.getElementById('tabSettings').classList.add('active');
-  } else {
-    document.querySelector('.tab-bar button:last-child').classList.add('active');
-    document.getElementById('tabReasoning').classList.add('active');
-  }
+  const tabMap = { settings: 'tabSettings', reasoning: 'tabReasoning', history: 'tabHistory' };
+  const buttons = document.querySelectorAll('.tab-bar button');
+  const idx = { settings: 0, reasoning: 1, history: 2 }[tab] || 0;
+  if (buttons[idx]) buttons[idx].classList.add('active');
+  const pane = document.getElementById(tabMap[tab]);
+  if (pane) pane.classList.add('active');
+  if (tab === 'history') loadSessionHistory();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -483,8 +663,10 @@ async function startGame(gameId) {
   sessionId = data.session_id;
   stepCount = 0;
   moveHistory = [];
+  undoStack = [];
   autoPlaying = false;
   updateUI(data);
+  updateUndoBtn();
 
   if ((data.available_actions || []).includes(6)) { action6Mode = true; canvas.style.cursor = 'crosshair'; }
   document.getElementById('emptyState').style.display = 'none';
@@ -523,11 +705,19 @@ async function doAction(actionId, isClick) {
     action6Mode = true; canvas.style.cursor = 'crosshair'; canvas.title = 'Click grid for ACTION6';
     return;
   }
+  // Save undo snapshot
+  undoStack.push({
+    grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
+    state: currentState.state,
+    levels_completed: currentState.levels_completed,
+    stepCount: stepCount,
+  });
   stepCount++;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: actionId, data: {} });
-  if (data.error) { alert(data.error); return; }
+  if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed });
   updateUI(data);
+  updateUndoBtn();
 
   // Reasoning logic
   const mode = getReasoningMode();
@@ -542,11 +732,19 @@ canvas.addEventListener('click', async (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - rect.left) * 64 / canvas.clientWidth);
   const y = Math.floor((e.clientY - rect.top) * 64 / canvas.clientHeight);
+  // Save undo snapshot
+  undoStack.push({
+    grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
+    state: currentState.state,
+    levels_completed: currentState.levels_completed,
+    stepCount: stepCount,
+  });
   stepCount++;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: 6, data: { x, y } });
-  if (data.error) { alert(data.error); return; }
+  if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed });
   updateUI(data);
+  updateUndoBtn();
   action6Mode = (data.available_actions || []).includes(6);
   if (!action6Mode) canvas.style.cursor = 'default';
   const mode = getReasoningMode();
@@ -609,33 +807,53 @@ async function askLLM() {
   document.getElementById('topSpinner').style.display = 'inline';
 
   try {
+    let resp;
     const inputSettings = getInputSettings();
-    const payload = {
-      grid: currentState.grid,
-      state: currentState.state,
-      available_actions: currentState.available_actions,
-      levels_completed: currentState.levels_completed,
-      win_levels: currentState.win_levels,
-      game_id: currentState.game_id,
-      history: moveHistory.slice(-10),
-      change_map: currentChangeMap,
-      settings: {
-        model: model,
-        input: inputSettings,
-        reasoning_mode: getReasoningMode(),
-        tools_mode: getToolsMode(),
-      },
-    };
 
-    // Attach screenshot if image input is enabled
-    if (inputSettings.image) {
-      payload.image_b64 = getCanvasScreenshotB64();
+    if (FEATURES.server_llm) {
+      // ── Server-side LLM (local mode) ─────────────────────────────────
+      const payload = {
+        grid: currentState.grid,
+        state: currentState.state,
+        available_actions: currentState.available_actions,
+        levels_completed: currentState.levels_completed,
+        win_levels: currentState.win_levels,
+        game_id: currentState.game_id,
+        history: moveHistory.slice(-10),
+        change_map: currentChangeMap,
+        session_id: sessionId,
+        settings: {
+          model: model,
+          input: inputSettings,
+          reasoning_mode: getReasoningMode(),
+          tools_mode: getToolsMode(),
+        },
+      };
+      if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
+      resp = await fetchJSON('/api/llm/ask', payload);
+    } else {
+      // ── Client-side LLM (online mode: Puter.js or BYOK) ─────────────
+      const prompt = buildClientPrompt(currentState, moveHistory.slice(-10), currentChangeMap, inputSettings, getToolsMode());
+      let rawContent;
+      try {
+        if (FEATURES.puter_js && !byokActive()) {
+          rawContent = await askLLMPuter(prompt, model);
+        } else if (FEATURES.byok && byokActive()) {
+          rawContent = await askLLMBYOK(prompt, model);
+        } else {
+          throw new Error('No LLM provider configured. Enable Puter.js or add a BYOK key.');
+        }
+      } catch (e) {
+        resp = { error: e.message, model: model };
+        rawContent = null;
+      }
+      if (rawContent) {
+        resp = parseClientLLMResponse(rawContent, model);
+        resp.tools_active = getToolsMode() === 'on';
+      }
     }
 
-    const resp = await fetchJSON('/api/llm/ask', payload);
     const content = document.getElementById('reasoningContent');
-
-    // Clear empty state on first entry
     if (content.querySelector('.empty-state')) content.innerHTML = '';
 
     const entry = document.createElement('div');
@@ -670,7 +888,6 @@ async function askLLM() {
     }
 
     content.insertBefore(entry, content.firstChild);
-    // Auto-switch to reasoning tab so user sees the result
     switchTab('reasoning');
     return resp;
   } finally {
@@ -679,12 +896,67 @@ async function askLLM() {
   }
 }
 
-async function autoPlay() {
-  if (autoPlaying) { autoPlaying = false; document.getElementById('autoPlayBtn').textContent = 'Auto-Play'; return; }
+// ═══════════════════════════════════════════════════════════════════════════
+// TRANSPORT CONTROLS: Step, Auto, Pause, Undo
+// ═══════════════════════════════════════════════════════════════════════════
+
+function updateUndoBtn() {
+  const btn = document.getElementById('undoBtn');
+  btn.disabled = undoStack.length === 0;
+}
+
+function updateAutoBtn() {
+  const btn = document.getElementById('autoPlayBtn');
+  if (autoPlaying) {
+    btn.innerHTML = '&#9208; Pause';
+    btn.className = 'btn btn-pause';
+    btn.title = 'Pause auto-play';
+  } else {
+    btn.innerHTML = '&#9193; Auto';
+    btn.className = 'btn btn-auto';
+    btn.title = 'Auto-play continuously';
+  }
+}
+
+async function stepOnce() {
+  if (!sessionId) { alert('Start a game first'); return; }
+  if (currentState.state !== 'NOT_FINISHED') return;
+
+  const resp = await askLLM();
+  if (!resp || resp.error || !resp.parsed) return;
+  const p = resp.parsed;
+  if (p.action === undefined || p.action === null) return;
+
+  // Save undo snapshot before executing
+  undoStack.push({
+    grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
+    state: currentState.state,
+    levels_completed: currentState.levels_completed,
+    stepCount: stepCount,
+  });
+
+  stepCount++;
+  const body = { session_id: sessionId, action: p.action, data: p.data || {} };
+  // In online mode, attach LLM response for DB persistence
+  if (!FEATURES.server_llm && resp) body.llm_response = resp;
+  const data = await fetchJSON('/api/step', body);
+  if (data.error) { undoStack.pop(); alert(data.error); return; }
+  moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
+  updateUI(data);
+  updateUndoBtn();
+  return data;
+}
+
+async function toggleAutoPlay() {
+  if (autoPlaying) {
+    autoPlaying = false;
+    updateAutoBtn();
+    return;
+  }
   if (!sessionId) { alert('Start a game first'); return; }
 
   autoPlaying = true;
-  document.getElementById('autoPlayBtn').textContent = 'Stop';
+  updateAutoBtn();
 
   while (autoPlaying && currentState.state === 'NOT_FINISHED') {
     const resp = await askLLM();
@@ -694,16 +966,89 @@ async function autoPlay() {
 
     await new Promise(r => setTimeout(r, 400));
 
+    // Save undo snapshot
+    undoStack.push({
+      grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
+      state: currentState.state,
+      levels_completed: currentState.levels_completed,
+      stepCount: stepCount,
+    });
+
     stepCount++;
     const body = { session_id: sessionId, action: p.action, data: p.data || {} };
+    if (!FEATURES.server_llm && resp) body.llm_response = resp;
     const data = await fetchJSON('/api/step', body);
-    if (data.error) { autoPlaying = false; break; }
+    if (data.error) { undoStack.pop(); autoPlaying = false; break; }
     moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
     updateUI(data);
+    updateUndoBtn();
     await new Promise(r => setTimeout(r, 300));
   }
   autoPlaying = false;
-  document.getElementById('autoPlayBtn').textContent = 'Auto-Play';
+  updateAutoBtn();
+}
+
+async function undoStep() {
+  if (!sessionId || undoStack.length === 0) return;
+
+  const snapshot = undoStack.pop();
+  const data = await fetchJSON('/api/undo', { session_id: sessionId });
+  if (data.error) {
+    // Even if server undo fails, restore local state from our stack
+    console.warn('Server undo failed:', data.error);
+  }
+
+  // Restore local state
+  stepCount = snapshot.stepCount;
+  if (moveHistory.length > 0) moveHistory.pop();
+
+  // Use server-returned grid if available, otherwise fall back to snapshot
+  const restoredGrid = (data && !data.error) ? data.grid : snapshot.grid;
+  currentState.grid = restoredGrid;
+  currentState.state = snapshot.state;
+  currentState.levels_completed = snapshot.levels_completed;
+  currentChangeMap = null;
+  renderGrid(restoredGrid);
+
+  document.getElementById('stepCounter').textContent = `Step ${stepCount}`;
+  const statusEl = document.getElementById('gameStatus');
+  statusEl.textContent = snapshot.state;
+  statusEl.className = 'status status-' + snapshot.state;
+  document.getElementById('levelInfo').textContent = `Level ${snapshot.levels_completed}/${currentState.win_levels}`;
+
+  updateUndoBtn();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API MODE (Local vs Official)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function onApiModeChange(mode) {
+  if (mode === 'official') {
+    const ok = confirm(
+      'This will switch to the official ARC-AGI-3 API at three.arcprize.org.\n\n' +
+      'Your current game will be reset. Results will count toward your leaderboard score.\n\n' +
+      'Continue?'
+    );
+    if (!ok) {
+      document.querySelector('input[name="apiMode"][value="local"]').checked = true;
+      return;
+    }
+    document.getElementById('apiWarning').style.display = 'block';
+    document.getElementById('apiKeySection').style.display = 'block';
+  } else {
+    document.getElementById('apiWarning').style.display = 'none';
+    document.getElementById('apiKeySection').style.display = 'none';
+  }
+  apiMode = mode;
+  fetchJSON('/api/config/mode', { mode, client_id: clientId });
+}
+
+async function saveArcApiKey() {
+  const key = document.getElementById('arcApiKey').value.trim();
+  if (!key) { alert('Please enter an API key'); return; }
+  await fetchJSON('/api/config/apikey', { api_key: key, client_id: clientId });
+  alert('API key saved for this session.');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -724,7 +1069,10 @@ async function loadModels() {
     (groups[key] ??= []).push(m);
   }
 
-  const providerOrder = ['Gemini', 'Anthropic', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
+  const providerOrder = MODE === 'online'
+    ? ['Copilot']
+    : ['Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
+
   for (const prov of providerOrder) {
     const models = groups[prov];
     if (!models?.length) continue;
@@ -744,11 +1092,41 @@ async function loadModels() {
     sel.appendChild(grp);
   }
 
+  // Online mode: add Puter.js and BYOK model groups (client-side only)
+  if (MODE === 'online') {
+    if (FEATURES.puter_js) {
+      const grp = document.createElement('optgroup');
+      grp.label = 'Puter.js (free)';
+      for (const m of ['gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'mistral-large-latest']) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = `${m} — Free (Puter.js)`;
+        grp.appendChild(opt);
+        modelsData.push({ name: m, provider: 'puter', price: 'Free', capabilities: { image: false, reasoning: false, tools: false }, available: true });
+      }
+      sel.appendChild(grp);
+    }
+    if (FEATURES.byok && byokActive()) {
+      const provider = localStorage.getItem('byok_provider') || 'openai';
+      const grp = document.createElement('optgroup');
+      grp.label = `BYOK (${provider})`;
+      const byokModels = provider === 'openai'
+        ? ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-mini']
+        : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
+      for (const m of byokModels) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = `${m} — BYOK`;
+        grp.appendChild(opt);
+        modelsData.push({ name: m, provider: 'byok', price: 'BYOK', capabilities: { image: false, reasoning: false, tools: false }, available: true });
+      }
+      sel.appendChild(grp);
+    }
+  }
+
   // Unavailable models (greyed out)
   const unavail = modelsData.filter(m => !m.available);
   if (unavail.length) {
     const grp = document.createElement('optgroup');
-    grp.label = '⚠ Missing API key';
+    grp.label = 'Missing API key';
     for (const m of unavail) {
       const opt = document.createElement('option');
       opt.value = m.name; opt.textContent = `${m.name} (no key)`; opt.disabled = true;
@@ -763,11 +1141,351 @@ async function loadModels() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CLIENT-SIDE PROMPT BUILDING (for Puter.js / BYOK — online mode)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ARC_DESCRIPTION = `ARC-AGI-3 is an interactive reasoning benchmark. Each game is a 64x64 pixel grid with 16 colors (0-15). There are NO instructions — you must discover the controls, rules, and goals by experimenting.
+Key facts:
+- Actions 1-5, 7 are simple (no parameters). ACTION6 needs x,y coordinates.
+- ACTION0 is RESET. States: NOT_FINISHED, WIN, GAME_OVER.
+- Large uniform regions = background/walls. Small shapes = interactive objects.
+- ACTIONs 1-4 often map to directional movement. ACTION6 is usually a click.`;
+
+const COLOR_PALETTE = '0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black 6=Magenta 7=LightMagenta 8=Red 9=Blue 10=LightBlue 11=Yellow 12=Orange 13=Maroon 14=Green 15=Purple';
+
+function compressRowJS(row) {
+  if (!row || !row.length) return '';
+  const parts = [];
+  let cur = row[0], count = 1;
+  for (let i = 1; i < row.length; i++) {
+    if (row[i] === cur) { count++; }
+    else { parts.push(count > 1 ? `${cur}x${count}` : `${cur}`); cur = row[i]; count = 1; }
+  }
+  parts.push(count > 1 ? `${cur}x${count}` : `${cur}`);
+  return parts.join(' ');
+}
+
+function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode) {
+  const grid = state.grid || [];
+  const parts = [];
+  parts.push(`${ARC_DESCRIPTION}\n\nCOLOR PALETTE: ${COLOR_PALETTE}`);
+
+  const actions = (state.available_actions || []).map(a => `${a}=${ACTION_NAMES[a] || 'ACTION'+a}`).join(', ');
+  parts.push(`## STATE\nGame: ${state.game_id} | State: ${state.state} | Levels: ${state.levels_completed}/${state.win_levels}\nAvailable actions: ${actions}`);
+
+  if (history && history.length) {
+    const recent = history.slice(-10);
+    const lines = recent.map(h => `  Step ${h.step || '?'}: ${ACTION_NAMES[h.action] || '?'} -> ${h.result_state || '?'}`);
+    parts.push('## HISTORY (last 10)\n' + lines.join('\n'));
+  }
+
+  if (inputSettings.diff && changeMap && changeMap.change_count > 0) {
+    parts.push(`## CHANGES (${changeMap.change_count} cells changed)\n${changeMap.change_map_text || ''}`);
+  }
+
+  if (inputSettings.full_grid) {
+    const gridText = grid.map((r, i) => `Row ${i}: ${compressRowJS(r)}`).join('\n');
+    parts.push(`## GRID (RLE, colors 0-15)\n${gridText}`);
+  }
+
+  const tm = toolsMode === 'on';
+  parts.push(`## YOUR TASK
+1. Identify key objects (character, walls, targets, items).
+2. Determine what must happen next to progress.
+3. Choose the best action.
+
+Respond with EXACTLY this JSON (nothing else):
+{"observation": "<what you see>", "reasoning": "<your plan>", "action": <number>, "data": {}${tm ? ', "analysis": "<detailed spatial analysis>"' : ''}}
+
+Rules:
+- "action" must be a plain integer (0-7).
+- ACTION6: set "data" to {"x": <0-63>, "y": <0-63>}.
+- Other actions: set "data" to {}.`);
+
+  return parts.join('\n\n');
+}
+
+function parseClientLLMResponse(content, modelName) {
+  let thinking = '';
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+  if (thinkMatch) {
+    thinking = thinkMatch[1].trim();
+    content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
+  try {
+    const start = content.indexOf('{');
+    const end = content.lastIndexOf('}') + 1;
+    if (start >= 0 && end > start) {
+      const parsed = JSON.parse(content.substring(start, end));
+      return { raw: content, thinking: thinking ? thinking.substring(0, 500) : null, parsed, model: modelName };
+    }
+  } catch {}
+  return { raw: content, parsed: null, model: modelName };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLIENT-SIDE LLM PROVIDERS (Puter.js + BYOK)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function byokActive() {
+  if (!FEATURES.byok) return false;
+  const provider = localStorage.getItem('byok_provider');
+  const key = localStorage.getItem('byok_key');
+  return !!(provider && key);
+}
+
+function saveBYOK() {
+  const provider = document.getElementById('byokProvider').value;
+  const key = document.getElementById('byokKey').value.trim();
+  if (!key) { alert('Enter an API key'); return; }
+  localStorage.setItem('byok_provider', provider);
+  localStorage.setItem('byok_key', key);
+  alert('Key saved locally.');
+}
+
+async function askLLMPuter(prompt, model) {
+  // Use Puter.js for client-side LLM
+  if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter.js not loaded');
+  const resp = await puter.ai.chat(prompt, { model: model || 'gpt-4o-mini' });
+  return typeof resp === 'string' ? resp : (resp.message?.content || resp.toString());
+}
+
+async function askLLMBYOK(prompt, model) {
+  const provider = localStorage.getItem('byok_provider') || 'openai';
+  const key = localStorage.getItem('byok_key');
+  if (!key) throw new Error('No BYOK API key configured');
+
+  let url, body;
+  if (provider === 'openai') {
+    url = 'https://api.openai.com/v1/chat/completions';
+    body = {
+      model: model || 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'You are an expert puzzle-solving AI agent. Analyse game grids and output ONLY valid JSON.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3, max_tokens: 2048,
+    };
+  } else if (provider === 'gemini') {
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.0-flash'}:generateContent?key=${key}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 2048 } }),
+    });
+    const data = await resp.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || JSON.stringify(data);
+  } else {
+    throw new Error(`Unknown BYOK provider: ${provider}`);
+  }
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || JSON.stringify(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COPILOT AUTH (local only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let copilotPollTimer = null;
+
+async function copilotStartAuth() {
+  try {
+    const data = await fetchJSON('/api/copilot/auth/start', {});
+    if (data.error) { alert(data.error); return; }
+    document.getElementById('copilotDeviceCode').style.display = 'block';
+    document.getElementById('copilotUserCode').textContent = data.user_code;
+    const link = document.getElementById('copilotVerifyLink');
+    link.href = data.verification_uri;
+    link.textContent = `Open ${data.verification_uri}`;
+    // Start polling
+    const interval = (data.interval || 5) * 1000;
+    copilotPollTimer = setInterval(() => copilotPollAuth(), interval);
+  } catch (e) { alert('Copilot auth error: ' + e.message); }
+}
+
+async function copilotPollAuth() {
+  try {
+    const data = await fetchJSON('/api/copilot/auth/poll', {});
+    if (data.status === 'authenticated') {
+      clearInterval(copilotPollTimer);
+      copilotPollTimer = null;
+      document.getElementById('copilotNotAuth').style.display = 'none';
+      document.getElementById('copilotAuthed').style.display = 'block';
+      loadModels(); // Refresh model list to include Copilot models
+    } else if (data.status === 'slow_down') {
+      // Slow down polling
+      clearInterval(copilotPollTimer);
+      copilotPollTimer = setInterval(() => copilotPollAuth(), (data.interval || 10) * 1000);
+    }
+    // 'pending' → keep polling
+  } catch {}
+}
+
+async function checkCopilotStatus() {
+  if (!FEATURES.copilot) return;
+  try {
+    const data = await fetchJSON('/api/copilot/auth/status');
+    if (data.authenticated) {
+      document.getElementById('copilotNotAuth').style.display = 'none';
+      document.getElementById('copilotAuthed').style.display = 'block';
+    }
+  } catch {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION HISTORY + REPLAY
+// ═══════════════════════════════════════════════════════════════════════════
+
+let replayData = null; // { session, steps }
+
+async function loadSessionHistory() {
+  try {
+    const data = await fetchJSON('/api/sessions');
+    const list = document.getElementById('historyList');
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No sessions yet. Play a game!</div>';
+      return;
+    }
+    list.innerHTML = '';
+    for (const s of sessions) {
+      const div = document.createElement('div');
+      div.className = 'history-item';
+      const date = new Date(s.created_at * 1000).toLocaleString();
+      const resultClass = `h-result-${s.result || 'NOT_FINISHED'}`;
+      div.innerHTML = `
+        <span class="h-game">${s.game_id}</span>
+        <span class="h-result ${resultClass}">${s.result || '?'}</span>
+        <span class="h-meta">${s.steps || 0} steps | ${s.model || '?'}</span>
+        <span class="h-meta">${date}</span>`;
+      div.onclick = () => loadReplay(s.id);
+      list.appendChild(div);
+    }
+  } catch (e) {
+    document.getElementById('historyList').innerHTML =
+      `<div class="empty-state" style="height:auto;font-size:12px;">Error loading sessions: ${e.message}</div>`;
+  }
+}
+
+async function loadReplay(sessionId) {
+  try {
+    const data = await fetchJSON(`/api/sessions/${sessionId}`);
+    if (data.error) { alert(data.error); return; }
+    replayData = data;
+    const panel = document.getElementById('replayPanel');
+    panel.style.display = 'block';
+    const scrubber = document.getElementById('replayScrubber');
+    const totalSteps = data.steps?.length || 0;
+    scrubber.max = totalSteps;
+    scrubber.value = 0;
+    document.getElementById('replayInfo').textContent =
+      `Replay: ${data.session.game_id} — Step 0 / ${totalSteps}`;
+    document.getElementById('replayReasoning').textContent = 'Move scrubber to view steps.';
+    scrubber.oninput = () => showReplayStep(parseInt(scrubber.value));
+    if (totalSteps > 0) showReplayStep(0);
+  } catch (e) { alert('Error loading replay: ' + e.message); }
+}
+
+function showReplayStep(stepIdx) {
+  if (!replayData || !replayData.steps) return;
+  const total = replayData.steps.length;
+  const info = document.getElementById('replayInfo');
+  info.textContent = `Replay: ${replayData.session.game_id} — Step ${stepIdx} / ${total}`;
+
+  if (stepIdx >= 0 && stepIdx < total) {
+    const step = replayData.steps[stepIdx];
+    // Render the grid if available
+    if (step.grid) {
+      renderGrid(step.grid);
+      // Show on canvas
+      document.getElementById('emptyState').style.display = 'none';
+      canvas.style.display = 'block';
+    }
+    // Show reasoning
+    const rDiv = document.getElementById('replayReasoning');
+    const llm = step.llm_response;
+    if (llm && llm.parsed) {
+      rDiv.innerHTML = `<strong>Action ${step.action} (${ACTION_NAMES[step.action] || '?'})</strong>\n` +
+        `<strong>Obs:</strong> ${llm.parsed.observation || '—'}\n` +
+        `<strong>Plan:</strong> ${llm.parsed.reasoning || '—'}\n` +
+        (llm.thinking ? `<details><summary>Thinking</summary>${llm.thinking}</details>` : '');
+    } else {
+      rDiv.textContent = `Action ${step.action} (${ACTION_NAMES[step.action] || '?'})`;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TURNSTILE VERIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+let turnstileVerified = !document.getElementById('turnstileGate');
+
+async function onTurnstileSuccess(token) {
+  try {
+    const resp = await fetch('/api/turnstile/verify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token}),
+    });
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      turnstileVerified = true;
+      document.getElementById('turnstileGate').style.display = 'none';
+      initApp();
+    } else {
+      document.getElementById('turnstileError').style.display = 'block';
+      if (typeof turnstile !== 'undefined') turnstile.reset();
+    }
+  } catch {
+    document.getElementById('turnstileError').style.display = 'block';
+    if (typeof turnstile !== 'undefined') turnstile.reset();
+  }
+}
+
+// Wrap fetchJSON to handle turnstile expiry (403 with need_turnstile)
+const _origFetchJSON = fetchJSON;
+fetchJSON = async function(url, body) {
+  const r = await fetch(url, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 403) {
+    const data = await r.json();
+    if (data.need_turnstile) {
+      // Re-show the gate
+      turnstileVerified = false;
+      const gate = document.getElementById('turnstileGate');
+      if (gate) {
+        gate.style.display = 'flex';
+        if (typeof turnstile !== 'undefined') turnstile.reset();
+      }
+      throw new Error('Human verification required');
+    }
+    return data;
+  }
+  return r.json();
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════════════════
 
-loadGames();
-loadModels();
+function initApp() {
+  loadGames();
+  loadModels();
+  if (FEATURES.copilot) checkCopilotStatus();
+}
+
+// If no Turnstile gate (not configured), init immediately
+if (turnstileVerified) initApp();
 </script>
 </body>
 </html>
