@@ -49,7 +49,12 @@
     justify-content: center; padding: 16px; position: relative; }
   #gameCanvas { image-rendering: pixelated; border: 2px solid var(--border); cursor: crosshair;
     max-width: 100%; max-height: 65vh; }
-  .controls { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .controls { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 3px; }
+  .dpad .btn { padding: 4px 10px; min-width: 0; font-size: 11px; }
+  .dpad-empty { visibility: hidden; }
+  .no-change-flash { color: var(--text-dim); font-size: 11px; text-align: center; margin-top: 4px; animation: fadeOut 2s forwards; }
+  @keyframes fadeOut { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
   .btn { background: var(--surface); color: var(--text); border: 1px solid var(--border);
     padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px;
     transition: all 0.15s; white-space: nowrap; }
@@ -170,6 +175,18 @@
   .replay-reasoning { font-size: 11px; color: var(--text); margin-top: 8px; padding: 8px;
     background: var(--bg); border-radius: 4px; border: 1px solid var(--border);
     max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+  .replay-branch-btn { margin-top: 6px; }
+
+  /* Branch indicators */
+  .history-item.branched { padding-left: 22px; }
+  .history-item .branch-indicator { font-size: 10px; color: var(--purple); margin-right: 4px; }
+
+  /* Resume banner */
+  .resume-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 1000;
+    background: var(--surface2); border: 1px solid var(--accent); border-top: none;
+    border-radius: 0 0 8px 8px; padding: 10px 20px; display: flex; align-items: center; gap: 12px;
+    font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+  .resume-banner .btn { font-size: 11px; padding: 4px 10px; }
 
   /* ── Turnstile gate overlay ─────────────────────────────────────────── */
   .turnstile-gate { position: fixed; inset: 0; z-index: 9999; background: var(--bg);
@@ -254,13 +271,21 @@
         <canvas id="gameCanvas" width="512" height="512" style="display:none;"></canvas>
         <div class="controls" id="controls" style="display:none;">
           <button class="btn btn-danger" onclick="doAction(0)">Reset <span class="kbd">R</span></button>
-          <button class="btn" onclick="doAction(1)">ACT1 <span class="kbd">&uarr;</span></button>
-          <button class="btn" onclick="doAction(2)">ACT2 <span class="kbd">&darr;</span></button>
-          <button class="btn" onclick="doAction(3)">ACT3 <span class="kbd">&larr;</span></button>
-          <button class="btn" onclick="doAction(4)">ACT4 <span class="kbd">&rarr;</span></button>
+          <div class="dpad">
+            <span class="dpad-empty"></span>
+            <button class="btn" onclick="doAction(1)">&uarr; <span class="kbd">W</span></button>
+            <span class="dpad-empty"></span>
+            <button class="btn" onclick="doAction(3)">&larr; <span class="kbd">A</span></button>
+            <span class="dpad-empty"></span>
+            <button class="btn" onclick="doAction(4)">&rarr; <span class="kbd">D</span></button>
+            <span class="dpad-empty"></span>
+            <button class="btn" onclick="doAction(2)">&darr; <span class="kbd">S</span></button>
+            <span class="dpad-empty"></span>
+          </div>
           <button class="btn" onclick="doAction(5)">ACT5 <span class="kbd">Z</span></button>
           <button class="btn" onclick="doAction(7)">ACT7 <span class="kbd">X</span></button>
           <button class="btn btn-primary" onclick="doAction(6,true)">Click grid <span class="kbd">Click</span></button>
+          <div id="noChangeMsg" style="display:none;"></div>
         </div>
       </div>
 
@@ -446,11 +471,13 @@
             <div class="opt-body">
               <select id="modelSelect"><option value="">Loading...</option></select>
               <div class="model-caps" id="modelCaps"></div>
+              <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
               <input type="text" class="text-input" id="modelCustom" placeholder="Or type model name..." style="margin-top:6px;">
               <div class="transport-bar">
                 <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled title="Undo last step">&#9198; Undo</button>
                 <button class="btn btn-step" onclick="stepOnce()" id="stepBtn" title="Ask LLM + execute one step">&#9654; Step</button>
                 <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn" title="Auto-play continuously">&#9193; Auto</button>
+                <button class="btn" onclick="testModel()" id="testBtn" title="Test model connectivity + latency" style="background:#445;">&#128267; Test</button>
               </div>
             </div>
           </div>
@@ -475,6 +502,7 @@
             <div class="replay-info" id="replayInfo">Step 0 / 0</div>
             <input type="range" class="replay-scrubber" id="replayScrubber" min="0" max="0" value="0">
             <div class="replay-reasoning" id="replayReasoning"></div>
+            <button class="btn btn-primary replay-branch-btn" onclick="branchHere()" id="branchBtn">Branch Here</button>
           </div>
         </div>
 
@@ -664,6 +692,9 @@ async function startGame(gameId) {
   stepCount = 0;
   moveHistory = [];
   undoStack = [];
+  sessionStepsBuffer = [];
+  sessionStartTime = Date.now() / 1000;
+  syncStepCounter = 0;
   autoPlaying = false;
   updateUI(data);
   updateUndoBtn();
@@ -675,8 +706,7 @@ async function startGame(gameId) {
   document.getElementById('reasoningContent').innerHTML =
     '<div class="empty-state" style="height:auto;font-size:12px;">Game started. Make a move or click Ask LLM.</div>';
 
-  // Auto-ask if reasoning is "on"
-  if (getReasoningMode() === 'on') askLLM();
+  // LLM calls are triggered manually via Step / Auto buttons only.
 }
 
 function updateUI(data) {
@@ -699,6 +729,18 @@ function updateUI(data) {
 // ACTIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
+function showNoChangeIfSame(prevGrid, newGrid) {
+  const el = document.getElementById('noChangeMsg');
+  if (prevGrid && JSON.stringify(newGrid) === prevGrid) {
+    el.textContent = 'no state change';
+    el.className = 'no-change-flash';
+    el.style.display = '';
+    setTimeout(() => { el.style.display = 'none'; }, 2000);
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 async function doAction(actionId, isClick) {
   if (!sessionId) return;
   if (isClick || actionId === 6) {
@@ -713,18 +755,15 @@ async function doAction(actionId, isClick) {
     stepCount: stepCount,
   });
   stepCount++;
+  const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : null;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: actionId, data: {} });
   if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed });
+  recordStepForPersistence(actionId, {}, data.grid, data.change_map, null);
   updateUI(data);
+  showNoChangeIfSame(prevGrid, data.grid);
   updateUndoBtn();
-
-  // Reasoning logic
-  const mode = getReasoningMode();
-  if (data.state === 'NOT_FINISHED') {
-    if (mode === 'on') askLLM();
-    else if (mode === 'adaptive' && shouldAskAdaptive()) askLLM();
-  }
+  checkSessionEndAndUpload();
 }
 
 canvas.addEventListener('click', async (e) => {
@@ -740,18 +779,17 @@ canvas.addEventListener('click', async (e) => {
     stepCount: stepCount,
   });
   stepCount++;
+  const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : null;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: 6, data: { x, y } });
   if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed });
+  recordStepForPersistence(6, { x, y }, data.grid, data.change_map, null);
   updateUI(data);
+  showNoChangeIfSame(prevGrid, data.grid);
   updateUndoBtn();
+  checkSessionEndAndUpload();
   action6Mode = (data.available_actions || []).includes(6);
   if (!action6Mode) canvas.style.cursor = 'default';
-  const mode = getReasoningMode();
-  if (data.state === 'NOT_FINISHED') {
-    if (mode === 'on') askLLM();
-    else if (mode === 'adaptive' && shouldAskAdaptive()) askLLM();
-  }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -942,8 +980,10 @@ async function stepOnce() {
   const data = await fetchJSON('/api/step', body);
   if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
+  recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
   updateUI(data);
   updateUndoBtn();
+  checkSessionEndAndUpload();
   return data;
 }
 
@@ -980,8 +1020,10 @@ async function toggleAutoPlay() {
     const data = await fetchJSON('/api/step', body);
     if (data.error) { undoStack.pop(); autoPlaying = false; break; }
     moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
+    recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
     updateUI(data);
     updateUndoBtn();
+    checkSessionEndAndUpload();
     await new Promise(r => setTimeout(r, 300));
   }
   autoPlaying = false;
@@ -1017,6 +1059,38 @@ async function undoStep() {
   document.getElementById('levelInfo').textContent = `Level ${snapshot.levels_completed}/${currentState.win_levels}`;
 
   updateUndoBtn();
+}
+
+async function testModel() {
+  const model = getSelectedModel();
+  if (!model) return;
+  const btn = document.getElementById('testBtn');
+  const resultEl = document.getElementById('testResult');
+  btn.disabled = true;
+  btn.textContent = '⏳ Testing...';
+  resultEl.style.display = 'block';
+  resultEl.style.background = '#333';
+  resultEl.style.color = '#aaa';
+  resultEl.textContent = `Testing ${model}...`;
+
+  try {
+    const data = await fetchJSON('/api/llm/test', { model });
+    if (data.success) {
+      resultEl.style.background = '#1a3a1a';
+      resultEl.style.color = '#6f6';
+      resultEl.innerHTML = `<b>${model}</b> ✓ ${data.latency_ms}ms · throttle: ${data.throttle_delay}s`;
+    } else {
+      resultEl.style.background = '#3a1a1a';
+      resultEl.style.color = '#f66';
+      resultEl.innerHTML = `<b>${model}</b> ✗ ${data.latency_ms}ms · ${data.error || 'Unknown error'}`;
+    }
+  } catch (e) {
+    resultEl.style.background = '#3a1a1a';
+    resultEl.style.color = '#f66';
+    resultEl.textContent = `Error: ${e.message}`;
+  }
+  btn.disabled = false;
+  btn.textContent = '🔗 Test';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1356,10 +1430,15 @@ async function loadSessionHistory() {
     list.innerHTML = '';
     for (const s of sessions) {
       const div = document.createElement('div');
-      div.className = 'history-item';
+      const isBranch = !!s.parent_session_id;
+      div.className = 'history-item' + (isBranch ? ' branched' : '');
       const date = new Date(s.created_at * 1000).toLocaleString();
       const resultClass = `h-result-${s.result || 'NOT_FINISHED'}`;
+      const branchLabel = isBranch
+        ? `<span class="branch-indicator">&#8627; from step ${s.branch_at_step}</span>`
+        : '';
       div.innerHTML = `
+        ${branchLabel}
         <span class="h-game">${s.game_id}</span>
         <span class="h-result ${resultClass}">${s.result || '?'}</span>
         <span class="h-meta">${s.steps || 0} steps | ${s.model || '?'}</span>
@@ -1409,14 +1488,15 @@ function showReplayStep(stepIdx) {
     }
     // Show reasoning
     const rDiv = document.getElementById('replayReasoning');
+    const fromParent = step.from_parent ? '<span style="color:var(--purple);font-size:10px;">[parent]</span> ' : '';
     const llm = step.llm_response;
     if (llm && llm.parsed) {
-      rDiv.innerHTML = `<strong>Action ${step.action} (${ACTION_NAMES[step.action] || '?'})</strong>\n` +
+      rDiv.innerHTML = `${fromParent}<strong>Action ${step.action} (${ACTION_NAMES[step.action] || '?'})</strong>\n` +
         `<strong>Obs:</strong> ${llm.parsed.observation || '—'}\n` +
         `<strong>Plan:</strong> ${llm.parsed.reasoning || '—'}\n` +
         (llm.thinking ? `<details><summary>Thinking</summary>${llm.thinking}</details>` : '');
     } else {
-      rDiv.textContent = `Action ${step.action} (${ACTION_NAMES[step.action] || '?'})`;
+      rDiv.innerHTML = `${fromParent}Action ${step.action} (${ACTION_NAMES[step.action] || '?'})`;
     }
   }
 }
@@ -1475,6 +1555,216 @@ fetchJSON = async function(url, body) {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PUTER.KV PERSISTENCE + AUTO-UPLOAD (online mode only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let sessionStepsBuffer = []; // accumulates steps during play for puter.kv
+let sessionStartTime = null;
+let syncStepCounter = 0; // counts steps since last periodic sync
+
+function puterKvKey(sid) { return `arc_session:${sid}`; }
+
+function buildSessionPayload() {
+  if (!sessionId || !currentState.game_id) return null;
+  return {
+    session: {
+      id: sessionId,
+      game_id: currentState.game_id,
+      model: getSelectedModel() || '',
+      mode: MODE,
+      created_at: sessionStartTime || (Date.now() / 1000),
+      result: currentState.state || 'NOT_FINISHED',
+      steps: stepCount,
+      levels: currentState.levels_completed || 0,
+    },
+    steps: sessionStepsBuffer,
+  };
+}
+
+function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResponse) {
+  const stepEntry = {
+    step_num: stepCount,
+    action: actionId,
+    data: actionData || {},
+    grid: grid,
+    change_map: changeMap || null,
+    llm_response: llmResponse || null,
+    timestamp: Date.now() / 1000,
+  };
+  sessionStepsBuffer.push(stepEntry);
+  syncStepCounter++;
+
+  // Fire-and-forget puter.kv write
+  if (FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+    const payload = buildSessionPayload();
+    if (payload) {
+      puter.kv.set(puterKvKey(sessionId), JSON.stringify(payload)).catch(() => {});
+    }
+  }
+
+  // Periodic sync every 30 steps
+  if (syncStepCounter >= 30) {
+    syncStepCounter = 0;
+    autoUploadSession();
+  }
+}
+
+const MIN_STEPS_FOR_UPLOAD = 50;
+
+async function autoUploadSession() {
+  const payload = buildSessionPayload();
+  if (!payload) return;
+  // Don't upload short sessions — they're noise
+  if ((payload.steps || []).length < MIN_STEPS_FOR_UPLOAD) return;
+  try {
+    await fetch('/api/sessions/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {} // fire-and-forget
+}
+
+function checkSessionEndAndUpload() {
+  if (!sessionId) return;
+  const st = currentState.state;
+  if (st === 'WIN' || st === 'GAME_OVER') {
+    // Auto-upload completed session
+    autoUploadSession().then(() => {
+      // Clean up puter.kv entry on success
+      if (FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+        puter.kv.del(puterKvKey(sessionId)).catch(() => {});
+      }
+    });
+  }
+}
+
+async function puterKvCheckResume() {
+  if (!FEATURES.puter_js || typeof puter === 'undefined' || !puter.kv) return;
+  try {
+    // Scan for in-progress sessions
+    const keys = await puter.kv.list();
+    const arcKeys = (keys || []).filter(k => k.startsWith('arc_session:'));
+    if (!arcKeys.length) return;
+
+    // Check the most recent one
+    const raw = await puter.kv.get(arcKeys[arcKeys.length - 1]);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data.session || data.session.result !== 'NOT_FINISHED') {
+      // Already finished, clean it up
+      await puter.kv.del(arcKeys[arcKeys.length - 1]).catch(() => {});
+      return;
+    }
+
+    // Show resume banner
+    const banner = document.createElement('div');
+    banner.className = 'resume-banner';
+    banner.id = 'resumeBanner';
+    banner.innerHTML = `
+      <span>Resume session <strong>${data.session.game_id}</strong> (${data.steps?.length || 0} steps)?</span>
+      <button class="btn btn-primary" onclick="resumeFromPuterKv('${arcKeys[arcKeys.length - 1]}')">Resume</button>
+      <button class="btn" onclick="dismissResumeBanner('${arcKeys[arcKeys.length - 1]}')">Dismiss</button>`;
+    document.body.appendChild(banner);
+  } catch (e) {
+    console.warn('puter.kv resume check failed:', e);
+  }
+}
+
+async function resumeFromPuterKv(kvKey) {
+  document.getElementById('resumeBanner')?.remove();
+  try {
+    const raw = await puter.kv.get(kvKey);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    // Upload to server and get a live session back
+    await fetch('/api/sessions/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    // Start the game fresh and replay via the server recovery mechanism
+    const gameId = data.session.game_id;
+    sessionId = data.session.id;
+    sessionStepsBuffer = data.steps || [];
+    stepCount = sessionStepsBuffer.length;
+    sessionStartTime = data.session.created_at;
+    syncStepCounter = 0;
+
+    // Fetch last state by triggering recovery
+    const lastStep = sessionStepsBuffer[sessionStepsBuffer.length - 1];
+    if (lastStep && lastStep.grid) {
+      currentState = {
+        grid: lastStep.grid,
+        state: data.session.result || 'NOT_FINISHED',
+        game_id: gameId,
+        levels_completed: data.session.levels || 0,
+        win_levels: currentState.win_levels || 0,
+        available_actions: currentState.available_actions || [0,1,2,3,4,5,6,7],
+      };
+      renderGrid(lastStep.grid);
+      document.getElementById('emptyState').style.display = 'none';
+      canvas.style.display = 'block';
+      document.getElementById('controls').style.display = 'flex';
+      updateUI(currentState);
+    }
+  } catch (e) {
+    console.warn('Resume failed:', e);
+  }
+}
+
+function dismissResumeBanner(kvKey) {
+  document.getElementById('resumeBanner')?.remove();
+  if (FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+    puter.kv.del(kvKey).catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION BRANCHING (client-side)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function branchHere() {
+  if (!replayData || !replayData.session) return;
+  const scrubber = document.getElementById('replayScrubber');
+  const stepNum = parseInt(scrubber.value);
+  const parentId = replayData.session.id;
+
+  try {
+    const data = await fetchJSON('/api/sessions/branch', {
+      parent_session_id: parentId,
+      step_num: stepNum,
+    });
+    if (data.error) { alert(data.error); return; }
+
+    // Transition from replay to live play
+    sessionId = data.session_id;
+    stepCount = stepNum;
+    moveHistory = [];
+    undoStack = [];
+    sessionStepsBuffer = [];
+    sessionStartTime = Date.now() / 1000;
+    syncStepCounter = 0;
+    autoPlaying = false;
+    replayData = null;
+
+    // Hide replay panel, show controls
+    document.getElementById('replayPanel').style.display = 'none';
+    document.getElementById('controls').style.display = 'flex';
+
+    updateUI(data);
+    updateUndoBtn();
+
+    if ((data.available_actions || []).includes(6)) {
+      action6Mode = true;
+      canvas.style.cursor = 'crosshair';
+    }
+  } catch (e) {
+    alert('Branch failed: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1482,6 +1772,7 @@ function initApp() {
   loadGames();
   loadModels();
   if (FEATURES.copilot) checkCopilotStatus();
+  if (FEATURES.puter_js) puterKvCheckResume();
 }
 
 // If no Turnstile gate (not configured), init immediately

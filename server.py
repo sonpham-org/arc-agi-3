@@ -152,9 +152,11 @@ def _is_turnstile_verified() -> bool:
 
 
 def bot_protection(f):
-    """UA filtering + rate limiting on API routes."""
+    """UA filtering + rate limiting on API routes (online mode only)."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        if get_mode() == "local":
+            return f(*args, **kwargs)
         ip = _get_client_ip()
         ua = request.headers.get("User-Agent", "")
         if _is_bot_ua(ua):
@@ -195,6 +197,21 @@ copilot_token_expiry: float = 0.0  # Unix timestamp when copilot_api_token expir
 copilot_device_code: Optional[str] = None  # Pending device code during auth flow
 copilot_auth_lock = threading.Lock()
 
+# ── Per-provider throttle ────────────────────────────────────────────────
+# Min seconds between calls per provider (tuned for free tiers)
+PROVIDER_MIN_DELAY: dict[str, float] = {
+    "gemini":      4.0,   # 15 req/min free
+    "anthropic":   1.0,   # paid, generous limits
+    "groq":        2.5,   # 30 req/min free (varies by model)
+    "mistral":     2.0,   # ~1-2 req/sec free
+    "huggingface": 6.0,   # ~10 req/min free
+    "cloudflare":  0.5,   # neuron-based, no per-minute limit
+    "copilot":     1.0,   # unknown exact limit, be safe
+    "ollama":      0.0,   # local, no limit
+}
+_provider_last_call: dict[str, float] = {}  # provider → last call unix time
+_throttle_lock = threading.Lock()
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SQLite SESSION PERSISTENCE
 # ═══════════════════════════════════════════════════════════════════════════
@@ -231,6 +248,14 @@ def _init_db():
             FOREIGN KEY (session_id) REFERENCES sessions(id)
         );
     """)
+    # Schema migration: add branch columns (idempotent)
+    for col, defn in [("parent_session_id", "TEXT DEFAULT NULL"),
+                      ("branch_at_step", "INTEGER DEFAULT NULL")]:
+        try:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    conn.commit()
     conn.close()
 
 
@@ -305,6 +330,64 @@ def _db_update_session(session_id: str, **kwargs):
         conn.close()
     except Exception as e:
         app.logger.warning(f"DB update session failed: {e}")
+
+def _reconstruct_session(game_id: str, actions: list[dict]):
+    """Replay a list of {action, data} dicts on a fresh env. Returns (env, state_dict)."""
+    bare_id = game_id.split("-")[0]
+    arc = get_arcade()
+    env = arc.make(bare_id)
+    state = env_state_dict(env)
+    for act in actions:
+        action = GameAction.from_id(int(act["action"]))
+        data = act.get("data") or None
+        if isinstance(data, str):
+            data = json.loads(data)
+        frame_data = env.step(action, data=data if data else None)
+        if frame_data is not None:
+            state = env_state_dict(env, frame_data)
+    return env, state
+
+
+def _try_recover_session(session_id: str):
+    """Try to recover a session from DB by replaying its steps. Returns (env, state) or (None, None)."""
+    try:
+        conn = _get_db()
+        sess = conn.execute("SELECT game_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not sess:
+            conn.close()
+            return None, None
+        rows = conn.execute(
+            "SELECT action, data_json FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        if not rows:
+            # Session exists but no steps — just recreate env at initial state
+            bare_id = sess["game_id"].split("-")[0]
+            arc = get_arcade()
+            env = arc.make(bare_id)
+            state = env_state_dict(env)
+            with session_lock:
+                game_sessions[session_id] = env
+                session_grids[session_id] = state.get("grid", [])
+                session_snapshots[session_id] = []
+                session_step_counts[session_id] = 0
+            app.logger.info(f"Recovered session {session_id} (0 steps)")
+            return env, state
+
+        actions = [{"action": r["action"], "data": r["data_json"]} for r in rows]
+        env, state = _reconstruct_session(sess["game_id"], actions)
+        with session_lock:
+            game_sessions[session_id] = env
+            session_grids[session_id] = state.get("grid", [])
+            session_snapshots[session_id] = []
+            session_step_counts[session_id] = len(actions)
+        app.logger.info(f"Recovered session {session_id} ({len(actions)} steps replayed)")
+        return env, state
+    except Exception as e:
+        app.logger.warning(f"Session recovery failed for {session_id}: {e}")
+        return None, None
+
 
 COLOR_MAP = {
     0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999", 3: "#666666",
@@ -430,10 +513,17 @@ MODEL_REGISTRY: dict[str, dict] = {
         "capabilities": {"image": False, "reasoning": False, "tools": False},
     },
     # ── HuggingFace ───────────────────────────────────────────────────────
-    "hf/meta-llama-3.3-70b": {
-        "provider": "huggingface", "api_model": "meta-llama/Llama-3.3-70B-Instruct",
+    "hf/qwen2.5-72b-instruct": {
+        "provider": "huggingface", "api_model": "Qwen/Qwen2.5-72B-Instruct",
         "env_key": "HUGGINGFACE_API_KEY",
-        "url": "https://api-inference.huggingface.co/v1/chat/completions",
+        "url": "https://router.huggingface.co/v1/chat/completions",
+        "price": "Free tier",
+        "capabilities": {"image": False, "reasoning": False, "tools": False},
+    },
+    "hf/llama-3.1-70b-instruct": {
+        "provider": "huggingface", "api_model": "meta-llama/Llama-3.1-70B-Instruct",
+        "env_key": "HUGGINGFACE_API_KEY",
+        "url": "https://router.huggingface.co/v1/chat/completions",
         "price": "Free tier",
         "capabilities": {"image": False, "reasoning": False, "tools": False},
     },
@@ -772,21 +862,40 @@ Rules:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _parse_llm_response(content: str, model_name: str) -> dict:
+    if not isinstance(content, str):
+        content = json.dumps(content) if content else ""
     thinking = ""
     think_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
     if think_match:
         thinking = think_match.group(1).strip()
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-    try:
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        if start >= 0 and end > start:
-            parsed = json.loads(content[start:end])
-            return {"raw": content, "thinking": thinking[:500] if thinking else None,
+
+    # Try to extract JSON from the main content
+    parsed = _extract_json(content)
+    if parsed:
+        return {"raw": content, "thinking": thinking[:500] if thinking else None,
+                "parsed": parsed, "model": model_name}
+
+    # If main content had no JSON, try inside the thinking block
+    if thinking:
+        parsed = _extract_json(thinking)
+        if parsed:
+            return {"raw": content or thinking, "thinking": thinking[:500],
                     "parsed": parsed, "model": model_name}
+
+    return {"raw": content or thinking, "thinking": thinking[:500] if thinking else None,
+            "parsed": None, "model": model_name}
+
+
+def _extract_json(text: str) -> dict | None:
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(text[start:end])
     except json.JSONDecodeError:
         pass
-    return {"raw": content, "parsed": None, "model": model_name}
+    return None
 
 
 def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None) -> str:
@@ -803,9 +912,21 @@ def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None) -> 
     else:
         contents = f"{SYSTEM_MSG}\n\n{prompt}"
 
+    # Thinking models (2.5-*) need a large output budget because thinking
+    # tokens count against max_output_tokens.  We set a thinking budget so
+    # the model doesn't burn all tokens on reasoning and truncate the answer.
+    is_thinking = "2.5" in model_name
+    config = genai.types.GenerateContentConfig(
+        temperature=0.3,
+        max_output_tokens=16384 if is_thinking else 2048,
+    )
+    if is_thinking:
+        config.thinking_config = genai.types.ThinkingConfig(
+            thinking_budget=8192,  # up to 8k tokens for reasoning
+        )
+
     response = client.models.generate_content(
-        model=model_name, contents=contents,
-        config=genai.types.GenerateContentConfig(temperature=0.3, max_output_tokens=2048),
+        model=model_name, contents=contents, config=config,
     )
     return response.text
 
@@ -858,13 +979,22 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
-    resp = httpx.post(
-        url, headers=headers,
-        json={"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048},
-        timeout=90.0,
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048}
+
+    # Retry with backoff on 429 (rate limit) — up to 3 attempts
+    last_exc = None
+    for attempt in range(3):
+        resp = httpx.post(url, headers=headers, json=body, timeout=90.0)
+        if resp.status_code == 429:
+            retry_after = float(resp.headers.get("retry-after", 2 ** attempt))
+            app.logger.info(f"Rate limited by {url}, retrying in {retry_after}s (attempt {attempt+1}/3)")
+            time.sleep(min(retry_after, 30))
+            last_exc = httpx.HTTPStatusError(
+                f"429 Too Many Requests", request=resp.request, response=resp)
+            continue
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    raise last_exc
 
 
 def _call_cloudflare(model_name: str, prompt: str, image_b64: str | None = None) -> str:
@@ -898,7 +1028,13 @@ def _call_cloudflare(model_name: str, prompt: str, image_b64: str | None = None)
     )
     resp.raise_for_status()
     data = resp.json()
-    return data.get("result", {}).get("response", "") or json.dumps(data.get("result", {}))
+    result = data.get("result", {})
+    if isinstance(result, str):
+        return result
+    response = result.get("response", "")
+    if isinstance(response, dict):
+        return json.dumps(response)
+    return response or json.dumps(result)
 
 
 def _call_ollama(model_name: str, prompt: str, image_b64: str | None = None) -> str:
@@ -956,6 +1092,21 @@ def _call_copilot(model_name: str, prompt: str, image_b64: str | None = None) ->
     )
 
 
+def _throttle_provider(provider: str):
+    """Sleep if needed to respect per-provider minimum delay."""
+    min_delay = PROVIDER_MIN_DELAY.get(provider, 1.0)
+    if min_delay <= 0:
+        return
+    with _throttle_lock:
+        now = time.time()
+        last = _provider_last_call.get(provider, 0.0)
+        wait = min_delay - (now - last)
+        if wait > 0:
+            app.logger.info(f"Throttling {provider}: waiting {wait:.1f}s")
+            time.sleep(wait)
+        _provider_last_call[provider] = time.time()
+
+
 def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None) -> str:
     """Route to the correct provider, passing image if available."""
     info = MODEL_REGISTRY.get(model_key)
@@ -966,6 +1117,9 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None)
 
     provider = info["provider"]
     api_model = info["api_model"]
+
+    # Respect per-provider rate limits
+    _throttle_provider(provider)
 
     # Only pass image if model supports it
     img = image_b64 if info.get("capabilities", {}).get("image") else None
@@ -1085,7 +1239,10 @@ def step_game():
     with session_lock:
         env = game_sessions.get(session_id)
     if env is None:
-        return jsonify({"error": "Session not found"}), 404
+        # Try to recover from DB
+        env, recovered_state = _try_recover_session(session_id)
+        if env is None:
+            return jsonify({"error": "Session not found"}), 404
 
     try:
         action = GameAction.from_id(int(action_id))
@@ -1145,7 +1302,9 @@ def reset_game():
     with session_lock:
         env = game_sessions.get(session_id)
     if env is None:
-        return jsonify({"error": "Session not found"}), 404
+        env, _ = _try_recover_session(session_id)
+        if env is None:
+            return jsonify({"error": "Session not found"}), 404
     frame_data = env.reset()
     state = env_state_dict(env, frame_data)
     state["session_id"] = session_id
@@ -1274,6 +1433,67 @@ def llm_ask():
         return jsonify({"error": str(e), "model": model_key}), 500
 
 
+@app.route("/api/llm/test", methods=["POST"])
+@bot_protection
+def llm_test():
+    """Quick probe: send a tiny prompt to a model, return latency + status.
+
+    Body: {"model": "groq/llama-3.3-70b-versatile"}
+    Returns: {"model", "provider", "latency_ms", "success", "error", "throttle_delay"}
+    """
+    if not feature_enabled("server_llm"):
+        return jsonify({"error": "Not available in online mode"}), 403
+
+    payload = request.get_json(force=True)
+    model_key = payload.get("model", "")
+    if not model_key:
+        return jsonify({"error": "model required"}), 400
+
+    info = MODEL_REGISTRY.get(model_key)
+    provider = info["provider"] if info else "ollama"
+    throttle_delay = PROVIDER_MIN_DELAY.get(provider, 1.0)
+
+    test_prompt = 'Reply with exactly: {"action": 1, "observation": "test", "plan": "test"}'
+
+    t0 = time.time()
+    try:
+        content = _route_model_call(model_key, test_prompt)
+        latency = round((time.time() - t0) * 1000)
+        return jsonify({
+            "model": model_key, "provider": provider,
+            "latency_ms": latency, "success": True,
+            "throttle_delay": throttle_delay,
+            "response_preview": (content[:200] if isinstance(content, str) else str(content)[:200]),
+        })
+    except Exception as e:
+        latency = round((time.time() - t0) * 1000)
+        return jsonify({
+            "model": model_key, "provider": provider,
+            "latency_ms": latency, "success": False,
+            "error": str(e), "throttle_delay": throttle_delay,
+        })
+
+
+@app.route("/api/llm/throttle", methods=["GET", "POST"])
+@bot_protection
+def llm_throttle():
+    """GET: return current throttle config. POST: update delays.
+
+    POST body: {"gemini": 5.0, "groq": 3.0, ...}
+    """
+    if request.method == "GET":
+        return jsonify(PROVIDER_MIN_DELAY)
+
+    if get_mode() != "local":
+        return jsonify({"error": "Throttle config only editable in local mode"}), 403
+
+    updates = request.get_json(force=True)
+    for provider, delay in updates.items():
+        if provider in PROVIDER_MIN_DELAY and isinstance(delay, (int, float)) and delay >= 0:
+            PROVIDER_MIN_DELAY[provider] = float(delay)
+    return jsonify(PROVIDER_MIN_DELAY)
+
+
 @app.route("/api/undo", methods=["POST"])
 @bot_protection
 @turnstile_required
@@ -1288,7 +1508,10 @@ def undo_step():
         snapshots = session_snapshots.get(session_id, [])
 
     if env is None:
-        return jsonify({"error": "Session not found"}), 404
+        env, _ = _try_recover_session(session_id)
+        if env is None:
+            return jsonify({"error": "Session not found"}), 404
+        snapshots = session_snapshots.get(session_id, [])
     if not snapshots:
         return jsonify({"error": "Nothing to undo"}), 400
 
@@ -1467,6 +1690,122 @@ def copilot_auth_status():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SESSION IMPORT + BRANCH ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/sessions/import", methods=["POST"])
+@bot_protection
+@turnstile_required
+def import_session():
+    """Import/upsert a session and its steps. Used by puter.kv auto-upload."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 400
+    payload = request.get_json(force=True)
+    sess = payload.get("session")
+    steps = payload.get("steps", [])
+    if not sess or not sess.get("id") or not sess.get("game_id"):
+        return jsonify({"error": "session.id and session.game_id required"}), 400
+    # Reject short sessions — under 50 steps is noise
+    if len(steps) < 50:
+        return jsonify({"error": "Session too short (min 50 steps)", "skipped": True}), 200
+    try:
+        conn = _get_db()
+        conn.execute(
+            """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
+                                     parent_session_id, branch_at_step)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 result = excluded.result, steps = excluded.steps, levels = excluded.levels,
+                 model = COALESCE(excluded.model, sessions.model)""",
+            (sess["id"], sess["game_id"], sess.get("model", ""),
+             sess.get("mode", "online"), sess.get("created_at", time.time()),
+             sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
+             sess.get("levels", 0), sess.get("parent_session_id"),
+             sess.get("branch_at_step")),
+        )
+        for s in steps:
+            grid_snapshot = None
+            if s.get("grid"):
+                grid_snapshot = _compress_grid(s["grid"])
+            conn.execute(
+                """INSERT OR REPLACE INTO session_steps
+                   (session_id, step_num, action, data_json, grid_snapshot,
+                    change_map_json, llm_response_json, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sess["id"], s.get("step_num", 0), s.get("action", 0),
+                 json.dumps(s.get("data", {})),
+                 grid_snapshot,
+                 json.dumps(s.get("change_map")) if s.get("change_map") else None,
+                 json.dumps(s.get("llm_response")) if s.get("llm_response") else None,
+                 s.get("timestamp", time.time())),
+            )
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "ok", "session_id": sess["id"], "steps_imported": len(steps)})
+    except Exception as e:
+        app.logger.warning(f"Session import failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/branch", methods=["POST"])
+@bot_protection
+@turnstile_required
+def branch_session():
+    """Branch a session at a given step. Creates a new live session from that point."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 400
+    payload = request.get_json(force=True)
+    parent_id = payload.get("parent_session_id")
+    step_num = payload.get("step_num")
+    if not parent_id or step_num is None:
+        return jsonify({"error": "parent_session_id and step_num required"}), 400
+    try:
+        conn = _get_db()
+        sess = conn.execute("SELECT game_id FROM sessions WHERE id = ?", (parent_id,)).fetchone()
+        if not sess:
+            conn.close()
+            return jsonify({"error": "Parent session not found"}), 404
+        rows = conn.execute(
+            "SELECT action, data_json FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+            (parent_id, step_num),
+        ).fetchall()
+        conn.close()
+
+        actions = [{"action": r["action"], "data": r["data_json"]} for r in rows]
+        env, state = _reconstruct_session(sess["game_id"], actions)
+
+        # Generate new session ID
+        new_session_id = env._guid if hasattr(env, "_guid") else secrets.token_hex(16)
+        with session_lock:
+            game_sessions[new_session_id] = env
+            session_grids[new_session_id] = state.get("grid", [])
+            session_snapshots[new_session_id] = []
+            session_step_counts[new_session_id] = len(actions)
+
+        # Persist the branched session
+        conn = _get_db()
+        conn.execute(
+            """INSERT INTO sessions (id, game_id, mode, created_at, result, steps, levels,
+                                     parent_session_id, branch_at_step)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (new_session_id, sess["game_id"], get_mode(), time.time(),
+             "NOT_FINISHED", len(actions), state.get("levels_completed", 0),
+             parent_id, step_num),
+        )
+        conn.commit()
+        conn.close()
+
+        state["session_id"] = new_session_id
+        state["parent_session_id"] = parent_id
+        state["branch_at_step"] = step_num
+        state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(branch)"}
+        return jsonify(state)
+    except Exception as e:
+        app.logger.warning(f"Session branch failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # SESSION HISTORY ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1480,13 +1819,32 @@ def list_sessions():
     try:
         conn = _get_db()
         rows = conn.execute(
-            "SELECT id, game_id, model, mode, created_at, result, steps, levels "
+            "SELECT id, game_id, model, mode, created_at, result, steps, levels, "
+            "parent_session_id, branch_at_step "
             "FROM sessions ORDER BY created_at DESC LIMIT 100"
         ).fetchall()
         conn.close()
         return jsonify({"sessions": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"sessions": [], "error": str(e)})
+
+
+def _format_step_row(d: dict) -> dict:
+    """Decompress grid and parse JSON fields in a step row dict."""
+    if d.get("grid_snapshot"):
+        try:
+            d["grid"] = _decompress_grid(d["grid_snapshot"])
+        except Exception:
+            d["grid"] = None
+        del d["grid_snapshot"]
+    for jf in ("data_json", "change_map_json", "llm_response_json"):
+        if d.get(jf):
+            try:
+                d[jf.replace("_json", "")] = json.loads(d[jf])
+            except Exception:
+                d[jf.replace("_json", "")] = None
+            del d[jf]
+    return d
 
 
 @app.route("/api/sessions/<session_id>")
@@ -1508,25 +1866,23 @@ def get_session(session_id):
         ).fetchall()
         conn.close()
         step_list = []
+        # For branched sessions, prepend parent steps up to branch point
+        sess_dict = dict(sess)
+        parent_id = sess_dict.get("parent_session_id")
+        branch_at = sess_dict.get("branch_at_step")
+        if parent_id and branch_at is not None:
+            parent_steps = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                (parent_id, branch_at),
+            ).fetchall()
+            for s in parent_steps:
+                d = _format_step_row(dict(s))
+                d["from_parent"] = True
+                step_list.append(d)
         for s in steps:
-            d = dict(s)
-            # Decompress grid snapshot
-            if d.get("grid_snapshot"):
-                try:
-                    d["grid"] = _decompress_grid(d["grid_snapshot"])
-                except Exception:
-                    d["grid"] = None
-                del d["grid_snapshot"]
-            # Parse JSON fields
-            for jf in ("data_json", "change_map_json", "llm_response_json"):
-                if d.get(jf):
-                    try:
-                        d[jf.replace("_json", "")] = json.loads(d[jf])
-                    except Exception:
-                        d[jf.replace("_json", "")] = None
-                    del d[jf]
+            d = _format_step_row(dict(s))
             step_list.append(d)
-        return jsonify({"session": dict(sess), "steps": step_list})
+        return jsonify({"session": sess_dict, "steps": step_list})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1547,20 +1903,7 @@ def get_session_step(session_id, step_num):
         conn.close()
         if not row:
             return jsonify({"error": "Step not found"}), 404
-        d = dict(row)
-        if d.get("grid_snapshot"):
-            try:
-                d["grid"] = _decompress_grid(d["grid_snapshot"])
-            except Exception:
-                d["grid"] = None
-            del d["grid_snapshot"]
-        for jf in ("data_json", "change_map_json", "llm_response_json"):
-            if d.get(jf):
-                try:
-                    d[jf.replace("_json", "")] = json.loads(d[jf])
-                except Exception:
-                    d[jf.replace("_json", "")] = None
-                del d[jf]
+        d = _format_step_row(dict(row))
         return jsonify(d)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
