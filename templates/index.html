@@ -6,196 +6,315 @@
 <title>ARC-AGI-3 Player</title>
 <style>
   :root {
-    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2129; --border: #30363d;
     --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Cascadia Code', monospace; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace; font-size: 13px; }
 
   .layout { display: flex; height: 100vh; }
 
-  /* Sidebar */
-  .sidebar { width: 300px; background: var(--surface); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow-y: auto; }
-  .sidebar h2 { padding: 16px; font-size: 14px; color: var(--accent); border-bottom: 1px solid var(--border); }
-  .game-card { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
+  /* ── Sidebar ─────────────────────────────────────────────────────────── */
+  .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; }
+  .sidebar h2 { padding: 14px 16px; font-size: 13px; color: var(--accent); border-bottom: 1px solid var(--border);
+    letter-spacing: 0.5px; text-transform: uppercase; }
+  .game-card { padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
   .game-card:hover { background: var(--border); }
   .game-card.active { background: #1f6feb22; border-left: 3px solid var(--accent); }
-  .game-card .title { font-weight: 600; font-size: 14px; }
+  .game-card .title { font-weight: 600; font-size: 13px; }
   .game-card .meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
-  /* Main area */
-  .main { flex: 1; display: flex; flex-direction: column; }
+  /* ── Main area ───────────────────────────────────────────────────────── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .topbar { padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 16px; font-size: 13px; }
-  .topbar .status { padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    display: flex; align-items: center; gap: 12px; font-size: 13px; flex-wrap: wrap; }
+  .topbar .status { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .status-NOT_FINISHED { background: #d2992233; color: var(--yellow); }
   .status-WIN { background: #3fb95033; color: var(--green); }
   .status-GAME_OVER { background: #f8514933; color: var(--red); }
   .status-NOT_PLAYED { background: #30363d; color: var(--text-dim); }
 
-  .game-area { flex: 1; display: flex; gap: 0; overflow: hidden; }
+  .game-area { flex: 1; display: flex; overflow: hidden; }
 
-  /* Canvas panel */
+  /* ── Canvas panel ────────────────────────────────────────────────────── */
   .canvas-panel { flex: 1; display: flex; flex-direction: column; align-items: center;
     justify-content: center; padding: 16px; position: relative; }
   #gameCanvas { image-rendering: pixelated; border: 2px solid var(--border); cursor: crosshair;
-    max-width: 100%; max-height: 70vh; }
-  .controls { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-  .controls button { background: var(--surface); color: var(--text); border: 1px solid var(--border);
-    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px;
-    transition: all 0.15s; }
-  .controls button:hover { background: var(--border); border-color: var(--accent); }
-  .controls button:active { transform: scale(0.95); }
-  .controls button.primary { background: #1f6feb; border-color: #1f6feb; }
-  .controls button.primary:hover { background: #388bfd; }
-  .controls button.danger { border-color: var(--red); color: var(--red); }
-  .kbd { background: var(--border); padding: 1px 5px; border-radius: 3px; font-size: 10px; margin-left: 4px; }
+    max-width: 100%; max-height: 65vh; }
+  .controls { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .btn { background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px;
+    transition: all 0.15s; white-space: nowrap; }
+  .btn:hover { background: var(--border); border-color: var(--accent); }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: #1f6feb; border-color: #1f6feb; }
+  .btn-primary:hover { background: #388bfd; }
+  .btn-danger { border-color: var(--red); color: var(--red); }
+  .btn-green { background: var(--green); border-color: var(--green); color: #000; font-weight: 600; }
+  .btn-green:hover { background: #2ea043; }
+  .kbd { background: var(--border); padding: 1px 4px; border-radius: 3px; font-size: 10px; margin-left: 3px; }
+  .empty-state { display: flex; align-items: center; justify-content: center; height: 100%;
+    color: var(--text-dim); font-size: 14px; text-align: center; padding: 40px; line-height: 1.8; }
 
-  /* Reasoning panel */
-  .reasoning-panel { width: 380px; background: var(--surface); border-left: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden; }
-  .reasoning-panel h3 { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between; }
-  .reasoning-content { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 12px; line-height: 1.6; }
-  .reasoning-entry { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .reasoning-entry .step-label { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
-  .reasoning-entry .observation { color: var(--text-dim); }
-  .reasoning-entry .action-rec { color: var(--green); font-weight: 600; margin-top: 4px; }
+  /* ── Right panel ─────────────────────────────────────────────────────── */
+  .right-panel { width: 380px; background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
 
-  .model-select { padding: 12px 16px; border-top: 1px solid var(--border); }
-  .model-select select, .model-select input {
-    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    padding: 6px 8px; border-radius: 4px; font-family: inherit; font-size: 12px; margin-top: 4px;
-  }
-  .model-select label { font-size: 11px; color: var(--text-dim); }
-  .model-select .row { display: flex; gap: 8px; margin-top: 8px; }
-  .model-select button { flex: 1; }
+  /* ── Option sections ─────────────────────────────────────────────────── */
+  .opt-section { border-bottom: 1px solid var(--border); }
+  .opt-header { display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; cursor: pointer; user-select: none; font-size: 12px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+  .opt-header:hover { color: var(--text); }
+  .opt-header .chevron { transition: transform 0.2s; font-size: 10px; }
+  .opt-section.open .chevron { transform: rotate(90deg); }
+  .opt-body { display: none; padding: 8px 14px 14px; }
+  .opt-section.open .opt-body { display: block; }
 
-  .llm-toggle { display: flex; align-items: center; gap: 8px; }
-  .toggle { position: relative; width: 36px; height: 20px; }
+  .opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+  .opt-row:last-child { margin-bottom: 0; }
+  .opt-label { flex: 1; color: var(--text-dim); }
+  .opt-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+  .badge-img { background: #58a6ff33; color: var(--accent); }
+  .badge-tools { background: #3fb95033; color: var(--green); }
+  .badge-reason { background: #bc8cff33; color: var(--purple); }
+  .badge-off { background: var(--border); color: var(--text-dim); }
+
+  /* Toggle switch */
+  .toggle { position: relative; width: 32px; height: 18px; flex-shrink: 0; }
   .toggle input { opacity: 0; width: 0; height: 0; }
-  .toggle .slider { position: absolute; inset: 0; background: var(--border); border-radius: 10px;
+  .toggle .slider { position: absolute; inset: 0; background: var(--border); border-radius: 9px;
     cursor: pointer; transition: 0.2s; }
-  .toggle .slider:before { content: ''; position: absolute; width: 14px; height: 14px;
+  .toggle .slider:before { content: ''; position: absolute; width: 12px; height: 12px;
     left: 3px; top: 3px; background: var(--text); border-radius: 50%; transition: 0.2s; }
   .toggle input:checked + .slider { background: var(--accent); }
-  .toggle input:checked + .slider:before { transform: translateX(16px); }
+  .toggle input:checked + .slider:before { transform: translateX(14px); }
+  .toggle input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
 
-  /* Loading spinner */
+  /* 3-way switch */
+  .triswitch { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .triswitch label { padding: 3px 10px; font-size: 11px; cursor: pointer; background: var(--bg);
+    color: var(--text-dim); transition: all 0.15s; text-align: center; border-right: 1px solid var(--border); }
+  .triswitch label:last-child { border-right: none; }
+  .triswitch input { display: none; }
+  .triswitch input:checked + span { background: var(--accent); color: #000; font-weight: 600; }
+  .triswitch label:has(input:checked) { background: var(--accent); color: #000; font-weight: 600; }
+
+  /* Model select */
+  select, .text-input { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 8px; border-radius: 4px; font-family: inherit; font-size: 12px; }
+  select optgroup { color: var(--accent); }
+  select option { color: var(--text); }
+  .model-caps { display: flex; gap: 4px; margin-top: 4px; }
+
+  /* Reasoning content */
+  .reasoning-scroll { flex: 1; overflow-y: auto; padding: 10px 14px; }
+  .reasoning-entry { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    font-size: 12px; line-height: 1.6; }
+  .reasoning-entry .step-label { color: var(--accent); font-weight: 600; margin-bottom: 4px; font-size: 11px; }
+  .reasoning-entry .observation { color: var(--text-dim); }
+  .reasoning-entry .action-rec { color: var(--green); font-weight: 600; margin-top: 4px; }
+  .reasoning-entry .tools-badge { font-size: 10px; background: #3fb95033; color: var(--green);
+    padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
+
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
     border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .empty-state { display: flex; align-items: center; justify-content: center; height: 100%;
-    color: var(--text-dim); font-size: 14px; text-align: center; padding: 40px; }
-
   .step-counter { color: var(--text-dim); }
   .level-info { color: var(--yellow); }
+
+  /* Disabled overlay for image toggle */
+  .opt-row.disabled { opacity: 0.35; pointer-events: none; }
+
+  /* ── Right panel tabs ────────────────────────────────────────────────── */
+  .tab-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .tab-bar button { flex: 1; padding: 10px 0; background: none; border: none; color: var(--text-dim);
+    font-family: inherit; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab-bar button:hover { color: var(--text); }
+  .tab-bar button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-pane { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+  .tab-pane.active { display: flex; }
 </style>
 </head>
 <body>
 <div class="layout">
-  <!-- Sidebar: Game List -->
+  <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
   <div class="sidebar">
-    <h2>ARC-AGI-3 Games</h2>
-    <div id="gameList"><div class="empty-state">Loading games...</div></div>
+    <h2>Games</h2>
+    <div id="gameList"><div class="empty-state" style="height:auto;padding:20px;">Loading...</div></div>
   </div>
 
-  <!-- Main Area -->
+  <!-- ── Main ────────────────────────────────────────────────────────── -->
   <div class="main">
     <div class="topbar">
       <span id="gameTitle" style="font-weight:600;">No game selected</span>
-      <span id="gameStatus" class="status status-NOT_PLAYED">NOT_PLAYED</span>
+      <span id="gameStatus" class="status status-NOT_PLAYED">—</span>
       <span id="levelInfo" class="level-info"></span>
       <span id="stepCounter" class="step-counter"></span>
       <span style="flex:1;"></span>
-      <div class="llm-toggle">
-        <label class="toggle">
-          <input type="checkbox" id="showChanges" checked>
-          <span class="slider"></span>
-        </label>
-        <span style="font-size:12px;">Diff Aware</span>
-      </div>
-      <div class="llm-toggle">
-        <label class="toggle">
-          <input type="checkbox" id="llmEnabled">
-          <span class="slider"></span>
-        </label>
-        <span style="font-size:12px;">LLM Reasoning</span>
-      </div>
+      <span id="topSpinner" style="display:none;"><span class="spinner"></span></span>
     </div>
 
     <div class="game-area">
       <!-- Canvas -->
       <div class="canvas-panel">
         <div id="emptyState" class="empty-state">
-          Select a game from the sidebar to start playing.<br><br>
-          Use keyboard arrows or click the action buttons.<br>
-          Toggle LLM to get AI reasoning before each move.
+          Select a game from the sidebar to start.<br>
+          Use keyboard arrows or click the grid.<br>
+          Configure input, reasoning, and model in the right panel.
         </div>
         <canvas id="gameCanvas" width="512" height="512" style="display:none;"></canvas>
         <div class="controls" id="controls" style="display:none;">
-          <button onclick="doAction(0)" class="danger">Reset <span class="kbd">R</span></button>
-          <button onclick="doAction(1)">Action1 <span class="kbd">&uarr;</span></button>
-          <button onclick="doAction(2)">Action2 <span class="kbd">&darr;</span></button>
-          <button onclick="doAction(3)">Action3 <span class="kbd">&larr;</span></button>
-          <button onclick="doAction(4)">Action4 <span class="kbd">&rarr;</span></button>
-          <button onclick="doAction(5)">Action5 <span class="kbd">Z</span></button>
-          <button onclick="doAction(7)">Action7 <span class="kbd">X</span></button>
-          <button onclick="doAction(6, true)" class="primary">Action6 (click grid) <span class="kbd">Click</span></button>
+          <button class="btn btn-danger" onclick="doAction(0)">Reset <span class="kbd">R</span></button>
+          <button class="btn" onclick="doAction(1)">ACT1 <span class="kbd">&uarr;</span></button>
+          <button class="btn" onclick="doAction(2)">ACT2 <span class="kbd">&darr;</span></button>
+          <button class="btn" onclick="doAction(3)">ACT3 <span class="kbd">&larr;</span></button>
+          <button class="btn" onclick="doAction(4)">ACT4 <span class="kbd">&rarr;</span></button>
+          <button class="btn" onclick="doAction(5)">ACT5 <span class="kbd">Z</span></button>
+          <button class="btn" onclick="doAction(7)">ACT7 <span class="kbd">X</span></button>
+          <button class="btn btn-primary" onclick="doAction(6,true)">Click grid <span class="kbd">Click</span></button>
         </div>
       </div>
 
-      <!-- Reasoning Panel -->
-      <div class="reasoning-panel">
-        <h3>
-          <span>LLM Reasoning</span>
-          <span id="llmSpinner" style="display:none;"><span class="spinner"></span></span>
-        </h3>
-        <div class="reasoning-content" id="reasoningContent">
-          <div class="empty-state" style="height:auto;">
-            Enable LLM toggle and start a game.<br>The model will analyze each state and suggest actions.
+      <!-- ── Right panel ───────────────────────────────────────────── -->
+      <div class="right-panel">
+
+        <!-- Tab bar -->
+        <div class="tab-bar">
+          <button class="active" onclick="switchTab('settings')">Settings</button>
+          <button onclick="switchTab('reasoning')">
+            Reasoning <span id="llmSpinner" style="display:none;margin-left:4px;"><span class="spinner"></span></span>
+          </button>
+        </div>
+
+        <!-- ════ SETTINGS TAB ════ -->
+        <div class="tab-pane active" id="tabSettings" style="overflow-y:auto;">
+
+          <!-- GRAPHICS -->
+          <div class="opt-section open" id="secGraphics">
+            <div class="opt-header" onclick="toggleSection('secGraphics')">
+              <span>Graphics</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <div class="opt-row">
+                <span class="opt-label">Change overlay</span>
+                <label class="toggle"><input type="checkbox" id="showChanges" checked><span class="slider"></span></label>
+              </div>
+              <div class="opt-row">
+                <span class="opt-label">Opacity</span>
+                <input type="range" id="changeOpacity" min="0" max="100" value="40" style="width:100px;">
+                <span id="changeOpacityVal" style="font-size:11px;width:28px;color:var(--text-dim);">40%</span>
+              </div>
+              <div class="opt-row">
+                <span class="opt-label">Highlight color</span>
+                <input type="color" id="changeColor" value="#ff0000" style="width:28px;height:20px;border:none;background:none;cursor:pointer;">
+              </div>
+            </div>
+          </div>
+
+          <!-- INPUT -->
+          <div class="opt-section open" id="secInput">
+            <div class="opt-header" onclick="toggleSection('secInput')">
+              <span>Input</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <div class="opt-row">
+                <span class="opt-label">Diff (change map)</span>
+                <label class="toggle"><input type="checkbox" id="inputDiff" checked><span class="slider"></span></label>
+              </div>
+              <div class="opt-row">
+                <span class="opt-label">Full grid (RLE)</span>
+                <label class="toggle"><input type="checkbox" id="inputGrid" checked><span class="slider"></span></label>
+              </div>
+              <div class="opt-row" id="imageRow">
+                <span class="opt-label">Image <span class="opt-badge badge-img" id="imgBadge">IMG</span></span>
+                <label class="toggle"><input type="checkbox" id="inputImage"><span class="slider"></span></label>
+              </div>
+              <div class="opt-row">
+                <span class="opt-label">Color histogram</span>
+                <label class="toggle"><input type="checkbox" id="inputHistogram"><span class="slider"></span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- REASONING -->
+          <div class="opt-section open" id="secReasoning">
+            <div class="opt-header" onclick="toggleSection('secReasoning')">
+              <span>Reasoning</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <div class="opt-row">
+                <span class="opt-label">LLM Mode</span>
+              </div>
+              <div class="opt-row">
+                <div class="triswitch" id="reasoningMode">
+                  <label><input type="radio" name="reasonMode" value="off"><span>Off</span></label>
+                  <label><input type="radio" name="reasonMode" value="on" checked><span>On</span></label>
+                  <label><input type="radio" name="reasonMode" value="adaptive"><span>Adaptive</span></label>
+                </div>
+              </div>
+              <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
+                On = ask every step &nbsp;|&nbsp; Adaptive = when stuck
+              </div>
+              <div class="opt-row">
+                <span class="opt-label">Tool analysis</span>
+              </div>
+              <div class="opt-row">
+                <div class="triswitch" id="toolsMode">
+                  <label><input type="radio" name="toolsMode" value="off" checked><span>Off</span></label>
+                  <label><input type="radio" name="toolsMode" value="on"><span>On</span></label>
+                  <label><input type="radio" name="toolsMode" value="adaptive"><span>Adaptive</span></label>
+                </div>
+              </div>
+              <div style="font-size:10px;color:var(--text-dim);">
+                On = histogram + regions &nbsp;|&nbsp; Adaptive = after 10 stuck steps
+              </div>
+            </div>
+          </div>
+
+          <!-- MODEL -->
+          <div class="opt-section open" id="secModel">
+            <div class="opt-header" onclick="toggleSection('secModel')">
+              <span>Model</span><span class="chevron">&#9654;</span>
+            </div>
+            <div class="opt-body">
+              <select id="modelSelect"><option value="">Loading...</option></select>
+              <div class="model-caps" id="modelCaps"></div>
+              <input type="text" class="text-input" id="modelCustom" placeholder="Or type model name..." style="margin-top:6px;">
+              <div style="display:flex;gap:6px;margin-top:10px;">
+                <button class="btn btn-primary" onclick="askLLM()" style="flex:1;">Ask LLM</button>
+                <button class="btn btn-green" onclick="autoPlay()" id="autoPlayBtn" style="flex:1;">Auto-Play</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ════ REASONING TAB ════ -->
+        <div class="tab-pane" id="tabReasoning">
+          <div class="reasoning-scroll" id="reasoningContent">
+            <div class="empty-state" style="height:auto;font-size:12px;">
+              Start a game and enable LLM reasoning to see analysis here.
+            </div>
           </div>
         </div>
-        <div class="model-select">
-          <label>Change Map Settings</label>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-            <label style="font-size:11px;color:var(--text-dim);">Overlay opacity</label>
-            <input type="range" id="changeOpacity" min="0" max="100" value="40" style="flex:1;">
-            <span id="changeOpacityVal" style="font-size:11px;color:var(--text-dim);width:30px;">40%</span>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-            <label style="font-size:11px;color:var(--text-dim);">Highlight color</label>
-            <input type="color" id="changeColor" value="#ff0000" style="width:28px;height:22px;border:none;background:none;cursor:pointer;">
-            <label class="toggle" style="margin-left:auto;">
-              <input type="checkbox" id="sendChangesToLLM" checked>
-              <span class="slider"></span>
-            </label>
-            <span style="font-size:11px;color:var(--text-dim);">Send to LLM</span>
-          </div>
-          <hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">
-          <label>Model</label>
-          <select id="modelSelect"><option value="">Loading...</option></select>
-          <input type="text" id="modelCustom" placeholder="Or type model name..." style="margin-top:4px;">
-          <div class="row" style="margin-top:8px;">
-            <button class="controls" onclick="askLLM()" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;">
-              Ask LLM Now
-            </button>
-            <button class="controls" onclick="autoPlay()" id="autoPlayBtn" style="background:#1f6feb;color:var(--text);border:1px solid #1f6feb;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;">
-              Auto-Play
-            </button>
-          </div>
-        </div>
+
       </div>
     </div>
   </div>
 </div>
 
 <script>
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+
 const COLORS = {{ color_map | tojson }};
-const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACTION5',6:'CLICK(x,y)',7:'ACTION7'};
+const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACT5',6:'CLICK',7:'ACT7'};
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -208,26 +327,94 @@ let stepCount = 0;
 let moveHistory = [];
 let autoPlaying = false;
 let action6Mode = false;
+let modelsData = [];  // {name, provider, capabilities, available}
 
-// Change map settings listeners
+// ═══════════════════════════════════════════════════════════════════════════
+// COLLAPSIBLE SECTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toggleSection(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  if (tab === 'settings') {
+    document.querySelector('.tab-bar button:first-child').classList.add('active');
+    document.getElementById('tabSettings').classList.add('active');
+  } else {
+    document.querySelector('.tab-bar button:last-child').classList.add('active');
+    document.getElementById('tabReasoning').classList.add('active');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRAPHICS LISTENERS
+// ═══════════════════════════════════════════════════════════════════════════
+
 document.getElementById('changeOpacity').addEventListener('input', (e) => {
   document.getElementById('changeOpacityVal').textContent = e.target.value + '%';
-  if (currentChangeMap && currentGrid) renderGridWithChanges(currentGrid, currentChangeMap);
+  redrawGrid();
 });
-document.getElementById('showChanges').addEventListener('change', () => {
-  if (currentGrid) {
-    if (currentChangeMap && document.getElementById('showChanges').checked) {
-      renderGridWithChanges(currentGrid, currentChangeMap);
-    } else {
-      renderGrid(currentGrid);
-    }
-  }
-});
-document.getElementById('changeColor').addEventListener('input', () => {
-  if (currentChangeMap && currentGrid) renderGridWithChanges(currentGrid, currentChangeMap);
-});
+document.getElementById('showChanges').addEventListener('change', redrawGrid);
+document.getElementById('changeColor').addEventListener('input', redrawGrid);
 
-// ---------- Rendering ----------
+function redrawGrid() {
+  if (!currentGrid) return;
+  if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
+    renderGridWithChanges(currentGrid, currentChangeMap);
+  } else {
+    renderGrid(currentGrid);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODEL CAPABILITIES → auto-disable image toggle
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getSelectedModel() {
+  const custom = document.getElementById('modelCustom').value.trim();
+  return custom || document.getElementById('modelSelect').value;
+}
+
+function getModelInfo(key) {
+  return modelsData.find(m => m.name === key);
+}
+
+function updateModelCaps() {
+  const key = getSelectedModel();
+  const info = getModelInfo(key);
+  const caps = info?.capabilities || {};
+  const el = document.getElementById('modelCaps');
+
+  const badges = [];
+  if (caps.image) badges.push('<span class="opt-badge badge-img">IMAGE</span>');
+  else badges.push('<span class="opt-badge badge-off">no image</span>');
+  if (caps.reasoning) badges.push('<span class="opt-badge badge-reason">REASONING</span>');
+  if (caps.tools) badges.push('<span class="opt-badge badge-tools">TOOLS</span>');
+  el.innerHTML = badges.join(' ');
+
+  // Disable image toggle if model doesn't support it
+  const imgToggle = document.getElementById('inputImage');
+  const imgRow = document.getElementById('imageRow');
+  if (!caps.image) {
+    imgToggle.checked = false;
+    imgToggle.disabled = true;
+    imgRow.classList.add('disabled');
+  } else {
+    imgToggle.disabled = false;
+    imgRow.classList.remove('disabled');
+  }
+}
+
+document.getElementById('modelSelect').addEventListener('change', updateModelCaps);
+document.getElementById('modelCustom').addEventListener('input', updateModelCaps);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════════════════
+
 function renderGrid(grid) {
   if (!grid || !grid.length) return;
   currentGrid = grid;
@@ -235,10 +422,9 @@ function renderGrid(grid) {
   const scale = Math.floor(512 / Math.max(h, w));
   canvas.width = w * scale;
   canvas.height = h * scale;
-
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      ctx.fillStyle = COLORS[grid[y][x]] || '#000000';
+      ctx.fillStyle = COLORS[grid[y][x]] || '#000';
       ctx.fillRect(x * scale, y * scale, scale, scale);
     }
   }
@@ -246,33 +432,24 @@ function renderGrid(grid) {
 
 function renderGridWithChanges(grid, changeMap) {
   renderGrid(grid);
-  if (!changeMap || !changeMap.changes || !changeMap.changes.length) return;
+  if (!changeMap?.changes?.length) return;
   if (!document.getElementById('showChanges').checked) return;
-
   const h = grid.length, w = grid[0].length;
   const scale = Math.floor(512 / Math.max(h, w));
   const opacity = parseInt(document.getElementById('changeOpacity').value) / 100;
   const color = document.getElementById('changeColor').value;
-
-  // Parse hex color to rgb
-  const r = parseInt(color.slice(1,3), 16);
-  const g = parseInt(color.slice(3,5), 16);
-  const b = parseInt(color.slice(5,7), 16);
-
+  const r = parseInt(color.slice(1,3), 16), g = parseInt(color.slice(3,5), 16), b = parseInt(color.slice(5,7), 16);
   ctx.fillStyle = `rgba(${r},${g},${b},${opacity})`;
-  for (const c of changeMap.changes) {
-    ctx.fillRect(c.x * scale, c.y * scale, scale, scale);
-  }
-
-  // Draw a thin border around changed cells for visibility
+  for (const c of changeMap.changes) ctx.fillRect(c.x * scale, c.y * scale, scale, scale);
   ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(opacity + 0.3, 1)})`;
   ctx.lineWidth = 1;
-  for (const c of changeMap.changes) {
-    ctx.strokeRect(c.x * scale + 0.5, c.y * scale + 0.5, scale - 1, scale - 1);
-  }
+  for (const c of changeMap.changes) ctx.strokeRect(c.x * scale + 0.5, c.y * scale + 0.5, scale - 1, scale - 1);
 }
 
-// ---------- API ----------
+// ═══════════════════════════════════════════════════════════════════════════
+// API
+// ═══════════════════════════════════════════════════════════════════════════
+
 async function fetchJSON(url, body) {
   const r = await fetch(url, {
     method: body ? 'POST' : 'GET',
@@ -289,18 +466,17 @@ async function loadGames() {
   games.forEach(g => {
     const div = document.createElement('div');
     div.className = 'game-card';
-    div.innerHTML = `<div class="title">${g.title}</div><div class="meta">${g.game_id} &middot; ${g.default_fps} FPS</div>`;
+    div.innerHTML = `<div class="title">${g.title}</div><div class="meta">${g.game_id}</div>`;
     div.onclick = () => startGame(g.game_id);
     el.appendChild(div);
   });
 }
 
 async function startGame(gameId) {
-  // Highlight active card
-  document.querySelectorAll('.game-card').forEach((c, i) => c.classList.remove('active'));
-  const cards = document.querySelectorAll('.game-card');
-  cards.forEach(c => { if (c.querySelector('.meta').textContent.includes(gameId.split('-')[0])) c.classList.add('active'); });
-
+  document.querySelectorAll('.game-card').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.game-card').forEach(c => {
+    if (c.querySelector('.meta').textContent.includes(gameId.split('-')[0])) c.classList.add('active');
+  });
   const data = await fetchJSON('/api/start', { game_id: gameId });
   if (data.error) { alert(data.error); return; }
 
@@ -310,166 +486,130 @@ async function startGame(gameId) {
   autoPlaying = false;
   updateUI(data);
 
-  // Auto-enable click mode for click-based games
-  if ((data.available_actions || []).includes(6)) {
-    action6Mode = true;
-    canvas.style.cursor = 'crosshair';
-  }
-
+  if ((data.available_actions || []).includes(6)) { action6Mode = true; canvas.style.cursor = 'crosshair'; }
   document.getElementById('emptyState').style.display = 'none';
   canvas.style.display = 'block';
   document.getElementById('controls').style.display = 'flex';
-  document.getElementById('reasoningContent').innerHTML = '<div class="empty-state" style="height:auto;">Game started. Make a move or enable LLM reasoning.</div>';
+  document.getElementById('reasoningContent').innerHTML =
+    '<div class="empty-state" style="height:auto;font-size:12px;">Game started. Make a move or click Ask LLM.</div>';
 
-  // If LLM enabled, ask for initial analysis
-  if (document.getElementById('llmEnabled').checked) {
-    askLLM();
-  }
+  // Auto-ask if reasoning is "on"
+  if (getReasoningMode() === 'on') askLLM();
 }
 
 function updateUI(data) {
   currentState = data;
   currentChangeMap = data.change_map || null;
-
-  if (currentChangeMap && currentChangeMap.change_count > 0) {
+  if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
     renderGridWithChanges(data.grid, currentChangeMap);
   } else {
     renderGrid(data.grid);
   }
-
   document.getElementById('gameTitle').textContent = data.game_id || 'Game';
   const statusEl = document.getElementById('gameStatus');
-  statusEl.textContent = data.state;
-  statusEl.className = 'status status-' + data.state;
+  statusEl.textContent = data.state; statusEl.className = 'status status-' + data.state;
   document.getElementById('levelInfo').textContent = `Level ${data.levels_completed}/${data.win_levels}`;
-  const changeInfo = currentChangeMap && currentChangeMap.change_count > 0
-    ? ` | ${currentChangeMap.change_count} cells changed` : '';
-  document.getElementById('stepCounter').textContent = `Step ${stepCount}${changeInfo}`;
+  const ci = currentChangeMap?.change_count > 0 ? ` | ${currentChangeMap.change_count} cells` : '';
+  document.getElementById('stepCounter').textContent = `Step ${stepCount}${ci}`;
 }
 
-async function doAction(actionId, isAction6Click) {
-  if (!sessionId) return;
+// ═══════════════════════════════════════════════════════════════════════════
+// ACTIONS
+// ═══════════════════════════════════════════════════════════════════════════
 
-  // For ACTION6, we need x,y from click
-  if (isAction6Click || actionId === 6) {
-    action6Mode = true;
-    canvas.style.cursor = 'crosshair';
-    canvas.title = 'Click to place ACTION6 (x, y)';
+async function doAction(actionId, isClick) {
+  if (!sessionId) return;
+  if (isClick || actionId === 6) {
+    action6Mode = true; canvas.style.cursor = 'crosshair'; canvas.title = 'Click grid for ACTION6';
     return;
   }
-
-  const body = { session_id: sessionId, action: actionId, data: {} };
   stepCount++;
-
-  const data = await fetchJSON('/api/step', body);
+  const data = await fetchJSON('/api/step', { session_id: sessionId, action: actionId, data: {} });
   if (data.error) { alert(data.error); return; }
-
-  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state });
+  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed });
   updateUI(data);
 
-  // Auto-ask LLM after each move if enabled
-  if (document.getElementById('llmEnabled').checked && data.state === 'NOT_FINISHED') {
-    askLLM();
+  // Reasoning logic
+  const mode = getReasoningMode();
+  if (data.state === 'NOT_FINISHED') {
+    if (mode === 'on') askLLM();
+    else if (mode === 'adaptive' && shouldAskAdaptive()) askLLM();
   }
 }
 
-// ACTION6 click handler
 canvas.addEventListener('click', async (e) => {
   if (!action6Mode || !sessionId) return;
-  canvas.style.cursor = 'crosshair';
-
   const rect = canvas.getBoundingClientRect();
-  const scaleX = 64 / canvas.clientWidth;
-  const scaleY = 64 / canvas.clientHeight;
-  const x = Math.floor((e.clientX - rect.left) * scaleX);
-  const y = Math.floor((e.clientY - rect.top) * scaleY);
-
+  const x = Math.floor((e.clientX - rect.left) * 64 / canvas.clientWidth);
+  const y = Math.floor((e.clientY - rect.top) * 64 / canvas.clientHeight);
   stepCount++;
-  const body = { session_id: sessionId, action: 6, data: { x, y } };
-  const data = await fetchJSON('/api/step', body);
+  const data = await fetchJSON('/api/step', { session_id: sessionId, action: 6, data: { x, y } });
   if (data.error) { alert(data.error); return; }
-
-  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y });
+  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed });
   updateUI(data);
-
-  // Re-enable click mode if action 6 is still available (click-based games)
   action6Mode = (data.available_actions || []).includes(6);
   if (!action6Mode) canvas.style.cursor = 'default';
-
-  if (document.getElementById('llmEnabled').checked && data.state === 'NOT_FINISHED') {
-    askLLM();
+  const mode = getReasoningMode();
+  if (data.state === 'NOT_FINISHED') {
+    if (mode === 'on') askLLM();
+    else if (mode === 'adaptive' && shouldAskAdaptive()) askLLM();
   }
 });
 
-// Keyboard controls
 document.addEventListener('keydown', (e) => {
   if (!sessionId) return;
-  const map = {
-    'ArrowUp': 1, 'ArrowDown': 2, 'ArrowLeft': 3, 'ArrowRight': 4,
-    'w': 1, 's': 2, 'a': 3, 'd': 4,
-    'z': 5, 'x': 7, 'r': 0,
-  };
-  const action = map[e.key];
-  if (action !== undefined) {
-    e.preventDefault();
-    doAction(action);
-  }
+  const map = {'ArrowUp':1,'ArrowDown':2,'ArrowLeft':3,'ArrowRight':4,'w':1,'s':2,'a':3,'d':4,'z':5,'x':7,'r':0};
+  if (map[e.key] !== undefined) { e.preventDefault(); doAction(map[e.key]); }
 });
 
-// ---------- LLM ----------
-async function loadModels() {
-  const data = await fetchJSON('/api/llm/models');
-  const sel = document.getElementById('modelSelect');
-  sel.innerHTML = '';
-  if (data.models && data.models.length) {
-    // Group by provider
-    const gemini = data.models.filter(m => m.provider === 'gemini');
-    const ollama = data.models.filter(m => m.provider === 'ollama');
+// ═══════════════════════════════════════════════════════════════════════════
+// REASONING MODE HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
 
-    if (gemini.length) {
-      const grp = document.createElement('optgroup');
-      grp.label = 'Gemini (API)';
-      gemini.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.name;
-        opt.textContent = `${m.name}  —  ${m.price}`;
-        grp.appendChild(opt);
-      });
-      sel.appendChild(grp);
-    }
-    if (ollama.length) {
-      const grp = document.createElement('optgroup');
-      grp.label = 'Ollama (Local)';
-      ollama.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.name;
-        opt.textContent = `${m.name}  —  ${m.price}`;
-        grp.appendChild(opt);
-      });
-      sel.appendChild(grp);
-    }
-  } else {
-    const opt = document.createElement('option');
-    opt.value = ''; opt.textContent = 'No models found';
-    sel.appendChild(opt);
-  }
+function getReasoningMode() {
+  return document.querySelector('input[name="reasonMode"]:checked')?.value || 'on';
+}
+function getToolsMode() {
+  return document.querySelector('input[name="toolsMode"]:checked')?.value || 'off';
 }
 
-function getSelectedModel() {
-  const custom = document.getElementById('modelCustom').value.trim();
-  if (custom) return custom;
-  return document.getElementById('modelSelect').value;
+function shouldAskAdaptive() {
+  // In adaptive mode, ask the LLM if no level progress in last 5 steps
+  if (moveHistory.length < 5) return false;
+  const last5 = moveHistory.slice(-5);
+  const levels = last5.map(h => h.levels ?? 0);
+  return new Set(levels).size <= 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LLM
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getCanvasScreenshotB64() {
+  // Return the canvas content as base64 PNG (without data URL prefix)
+  const dataUrl = canvas.toDataURL('image/png');
+  return dataUrl.replace(/^data:image\/png;base64,/, '');
+}
+
+function getInputSettings() {
+  return {
+    diff: document.getElementById('inputDiff').checked,
+    full_grid: document.getElementById('inputGrid').checked,
+    image: document.getElementById('inputImage').checked,
+    color_histogram: document.getElementById('inputHistogram').checked,
+  };
 }
 
 async function askLLM() {
   if (!currentState.grid) return;
-
   const model = getSelectedModel();
   if (!model) { alert('Select or type a model name'); return; }
 
   document.getElementById('llmSpinner').style.display = 'inline';
+  document.getElementById('topSpinner').style.display = 'inline';
 
   try {
+    const inputSettings = getInputSettings();
     const payload = {
       grid: currentState.grid,
       state: currentState.state,
@@ -478,43 +618,64 @@ async function askLLM() {
       win_levels: currentState.win_levels,
       game_id: currentState.game_id,
       history: moveHistory.slice(-10),
-      model: model,
+      change_map: currentChangeMap,
+      settings: {
+        model: model,
+        input: inputSettings,
+        reasoning_mode: getReasoningMode(),
+        tools_mode: getToolsMode(),
+      },
     };
-    // Include change map in LLM prompt if enabled
-    if (document.getElementById('sendChangesToLLM').checked && currentChangeMap) {
-      payload.change_map = currentChangeMap;
-    }
-    const resp = await fetchJSON('/api/llm/ask', payload);
 
+    // Attach screenshot if image input is enabled
+    if (inputSettings.image) {
+      payload.image_b64 = getCanvasScreenshotB64();
+    }
+
+    const resp = await fetchJSON('/api/llm/ask', payload);
     const content = document.getElementById('reasoningContent');
+
+    // Clear empty state on first entry
+    if (content.querySelector('.empty-state')) content.innerHTML = '';
+
     const entry = document.createElement('div');
     entry.className = 'reasoning-entry';
 
     if (resp.error) {
-      entry.innerHTML = `<div class="step-label">Error</div><div style="color:var(--red);">${resp.error}</div>`;
+      entry.innerHTML = `<div class="step-label">Error (${resp.model || model})</div>
+        <div style="color:var(--red);">${resp.error}</div>`;
     } else if (resp.parsed) {
       const p = resp.parsed;
-      const thinkHtml = resp.thinking ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:11px;">Model thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${resp.thinking}</div></details>` : '';
-      const changeHtml = currentChangeMap && currentChangeMap.change_count > 0
-        ? `<div style="margin-top:4px;font-size:11px;color:var(--yellow);"><strong>Changes:</strong> ${currentChangeMap.change_count} cells changed</div>` : '';
+      const thinkHtml = resp.thinking
+        ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary>
+           <div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${resp.thinking}</div></details>` : '';
+      const toolsBadge = resp.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
+      const analysisHtml = p.analysis
+        ? `<div style="margin-top:4px;font-size:11px;color:var(--purple);"><strong>Analysis:</strong> ${p.analysis}</div>` : '';
+      const ci = currentChangeMap?.change_count > 0
+        ? `<div style="font-size:11px;color:var(--yellow);">${currentChangeMap.change_count} cells changed</div>` : '';
+
       entry.innerHTML = `
-        <div class="step-label">Step ${stepCount} Analysis (${resp.model})</div>
-        ${changeHtml}
-        <div class="observation"><strong>Sees:</strong> ${p.observation || ''}</div>
-        <div style="margin-top:4px;"><strong>Plan:</strong> ${p.reasoning || ''}</div>
-        <div class="action-rec">Action: ${p.action !== undefined ? p.action : 'None'} (${ACTION_NAMES[p.action] || '?'})${p.data && (p.data.x !== undefined) ? ` at (${p.data.x}, ${p.data.y})` : ''}</div>
-        ${thinkHtml}
-      `;
+        <div class="step-label">Step ${stepCount} — ${resp.model}${toolsBadge}</div>
+        ${ci}
+        <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
+        <div style="margin-top:4px;"><strong>Plan:</strong> ${p.reasoning || '—'}</div>
+        ${analysisHtml}
+        <div class="action-rec">→ Action ${p.action ?? '?'} (${ACTION_NAMES[p.action] || '?'})${
+          p.data?.x !== undefined ? ` at (${p.data.x}, ${p.data.y})` : ''}</div>
+        ${thinkHtml}`;
     } else {
-      entry.innerHTML = `<div class="step-label">Step ${stepCount} (${resp.model})</div><div style="white-space:pre-wrap;">${resp.raw || 'No response'}</div>`;
+      entry.innerHTML = `<div class="step-label">Step ${stepCount} — ${resp.model}</div>
+        <div style="white-space:pre-wrap;font-size:11px;">${resp.raw || 'No response'}</div>`;
     }
 
-    // Prepend (newest first)
     content.insertBefore(entry, content.firstChild);
-
+    // Auto-switch to reasoning tab so user sees the result
+    switchTab('reasoning');
     return resp;
   } finally {
     document.getElementById('llmSpinner').style.display = 'none';
+    document.getElementById('topSpinner').style.display = 'none';
   }
 }
 
@@ -528,31 +689,83 @@ async function autoPlay() {
   while (autoPlaying && currentState.state === 'NOT_FINISHED') {
     const resp = await askLLM();
     if (!resp || resp.error || !resp.parsed) { autoPlaying = false; break; }
-
     const p = resp.parsed;
-    const actionId = p.action;
-    if (actionId === undefined || actionId === null) { autoPlaying = false; break; }
+    if (p.action === undefined || p.action === null) { autoPlaying = false; break; }
 
-    // Small delay for visibility
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 400));
 
-    // Execute the suggested action
-    const body = { session_id: sessionId, action: actionId, data: p.data || {} };
     stepCount++;
+    const body = { session_id: sessionId, action: p.action, data: p.data || {} };
     const data = await fetchJSON('/api/step', body);
     if (data.error) { autoPlaying = false; break; }
-
-    moveHistory.push({ step: stepCount, action: actionId, result_state: data.state });
+    moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed });
     updateUI(data);
-
     await new Promise(r => setTimeout(r, 300));
   }
-
   autoPlaying = false;
   document.getElementById('autoPlayBtn').textContent = 'Auto-Play';
 }
 
-// ---------- Init ----------
+// ═══════════════════════════════════════════════════════════════════════════
+// MODELS LIST
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadModels() {
+  const data = await fetchJSON('/api/llm/models');
+  modelsData = data.models || [];
+  const sel = document.getElementById('modelSelect');
+  sel.innerHTML = '';
+
+  // Group by provider
+  const groups = {};
+  for (const m of modelsData) {
+    if (!m.available) continue;
+    const key = m.provider.charAt(0).toUpperCase() + m.provider.slice(1);
+    (groups[key] ??= []).push(m);
+  }
+
+  const providerOrder = ['Gemini', 'Anthropic', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
+  for (const prov of providerOrder) {
+    const models = groups[prov];
+    if (!models?.length) continue;
+    const grp = document.createElement('optgroup');
+    grp.label = prov;
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      const caps = [];
+      if (m.capabilities?.image) caps.push('IMG');
+      if (m.capabilities?.reasoning) caps.push('RSN');
+      if (m.capabilities?.tools) caps.push('TLS');
+      const capStr = caps.length ? ` [${caps.join(',')}]` : '';
+      opt.textContent = `${m.name} — ${m.price}${capStr}`;
+      grp.appendChild(opt);
+    }
+    sel.appendChild(grp);
+  }
+
+  // Unavailable models (greyed out)
+  const unavail = modelsData.filter(m => !m.available);
+  if (unavail.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = '⚠ Missing API key';
+    for (const m of unavail) {
+      const opt = document.createElement('option');
+      opt.value = m.name; opt.textContent = `${m.name} (no key)`; opt.disabled = true;
+      grp.appendChild(opt);
+    }
+    sel.appendChild(grp);
+  }
+
+  if (!sel.options.length) sel.innerHTML = '<option value="">No models</option>';
+
+  updateModelCaps();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+
 loadGames();
 loadModels();
 </script>
