@@ -536,13 +536,13 @@
                     </div>
                     <div class="opt-row">
                       <div class="triswitch" id="toolsMode">
-                        <label><input type="radio" name="toolsMode" value="off"><span>Off</span></label>
-                        <label><input type="radio" name="toolsMode" value="on" checked><span>On</span></label>
+                        <label><input type="radio" name="toolsMode" value="off" checked><span>Off</span></label>
+                        <label><input type="radio" name="toolsMode" value="on"><span>On</span></label>
                         <label><input type="radio" name="toolsMode" value="adaptive"><span>Adaptive</span></label>
                       </div>
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      On = Python execution &nbsp;|&nbsp; Adaptive = after 10 stuck steps
+                      On = Python sandbox (Pyodide, ~10MB) &nbsp;|&nbsp; Adaptive = after 10 stuck steps
                     </div>
                     <div class="opt-row">
                       <span class="opt-label">Compact history</span>
@@ -669,6 +669,193 @@ const clientId = 'client_' + Math.random().toString(36).slice(2, 10);
 
 // Compact context: accumulate LLM observations across the session
 let llmObservations = []; // [{step, observation, reasoning, action, analysis}]
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PYODIDE — Client-side Python sandbox (Web Worker)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _pyodideWorker = null;
+let _pyodideReady = false;
+let _pyodideLoading = false;
+let _pyodideCallId = 0;
+const _pyodidePending = new Map(); // callId → {resolve, reject}
+
+function _initPyodideWorker() {
+  if (_pyodideWorker) return;
+  _pyodideLoading = true;
+  const workerSrc = `
+    importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.4/full/pyodide.js');
+    let pyodide = null;
+    let ns = null;
+
+    self.onmessage = async (e) => {
+      const {type, id, code, grid, prev_grid} = e.data;
+      if (type === 'init') {
+        try {
+          pyodide = await loadPyodide();
+          await pyodide.loadPackage('numpy');
+          ns = pyodide.globals.get('dict')();
+          pyodide.runPython(\`
+import numpy as np
+import collections
+from collections import Counter, defaultdict
+import itertools
+import math
+\`, {globals: ns});
+          self.postMessage({type: 'ready', id});
+        } catch (err) {
+          self.postMessage({type: 'error', id, error: err.message});
+        }
+      } else if (type === 'execute') {
+        try {
+          // Set grid/prev_grid in namespace
+          const gridArr = grid ? pyodide.toPy(grid) : pyodide.toPy([[]]);
+          const prevArr = prev_grid ? pyodide.toPy(prev_grid) : pyodide.globals.get('None');
+          pyodide.runPython('import numpy as np', {globals: ns});
+          ns.set('grid', pyodide.runPython('np.array(' + JSON.stringify(grid || [[]]) + ')', {globals: ns}));
+          if (prev_grid) {
+            ns.set('prev_grid', pyodide.runPython('np.array(' + JSON.stringify(prev_grid) + ')', {globals: ns}));
+          } else {
+            ns.set('prev_grid', pyodide.globals.get('None'));
+          }
+
+          // Capture stdout
+          pyodide.runPython(\`
+import io as _io, sys as _sys
+_stdout_buf = _io.StringIO()
+_old_stdout = _sys.stdout
+_sys.stdout = _stdout_buf
+\`, {globals: ns});
+
+          pyodide.runPython(code, {globals: ns});
+
+          const output = pyodide.runPython(\`
+_sys.stdout = _old_stdout
+_out = _stdout_buf.getvalue()
+_stdout_buf.close()
+_out
+\`, {globals: ns});
+
+          let result = output || '(no output)';
+          if (result.length > 4000) result = result.substring(0, 4000) + '\\n... [truncated]';
+          self.postMessage({type: 'result', id, output: result});
+        } catch (err) {
+          // Restore stdout on error
+          try { pyodide.runPython('_sys.stdout = _old_stdout', {globals: ns}); } catch(_){}
+          self.postMessage({type: 'result', id, output: err.message});
+        }
+      }
+    };
+  `;
+  const blob = new Blob([workerSrc], {type: 'application/javascript'});
+  _pyodideWorker = new Worker(URL.createObjectURL(blob));
+  _pyodideWorker.onmessage = (e) => {
+    const {type, id, output, error} = e.data;
+    if (type === 'ready') {
+      _pyodideReady = true;
+      _pyodideLoading = false;
+      console.log('Pyodide ready');
+      const cb = _pyodidePending.get(id);
+      if (cb) { cb.resolve('ready'); _pyodidePending.delete(id); }
+    } else if (type === 'error') {
+      _pyodideLoading = false;
+      console.error('Pyodide init failed:', error);
+      const cb = _pyodidePending.get(id);
+      if (cb) { cb.reject(new Error(error)); _pyodidePending.delete(id); }
+    } else if (type === 'result') {
+      const cb = _pyodidePending.get(id);
+      if (cb) { cb.resolve(output); _pyodidePending.delete(id); }
+    }
+  };
+  // Start init
+  const initId = ++_pyodideCallId;
+  return new Promise((resolve, reject) => {
+    _pyodidePending.set(initId, {resolve, reject});
+    _pyodideWorker.postMessage({type: 'init', id: initId});
+  });
+}
+
+async function ensurePyodide() {
+  if (_pyodideReady) return;
+  if (_pyodideLoading) {
+    // Wait for existing init
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        if (_pyodideReady) { clearInterval(check); resolve(); }
+      }, 200);
+    });
+  }
+  await _initPyodideWorker();
+}
+
+async function runPyodide(code, grid, prev_grid) {
+  if (!_pyodideReady) throw new Error('Pyodide not loaded');
+  const id = ++_pyodideCallId;
+  return new Promise((resolve, reject) => {
+    _pyodidePending.set(id, {resolve, reject});
+    _pyodideWorker.postMessage({type: 'execute', id, code, grid, prev_grid});
+    // Timeout after 10s
+    setTimeout(() => {
+      if (_pyodidePending.has(id)) {
+        _pyodidePending.delete(id);
+        resolve('[TIMEOUT] Code execution exceeded 10 seconds.');
+      }
+    }, 10000);
+  });
+}
+
+// ── Tools mode confirmation ──────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('input[name="toolsMode"]').forEach(radio => {
+    radio.addEventListener('change', async (e) => {
+      if (e.target.value === 'off') return;
+      if (_pyodideReady) return; // already loaded
+      const ok = confirm(
+        'Tool calls require Pyodide (Python in WebAssembly).\n\n' +
+        'This will download ~10 MB on first use (cached after).\n' +
+        'Load Pyodide now?'
+      );
+      if (!ok) {
+        // Revert to off
+        document.querySelector('input[name="toolsMode"][value="off"]').checked = true;
+        return;
+      }
+      // Show loading indicator
+      e.target.closest('.triswitch').style.opacity = '0.5';
+      try {
+        await ensurePyodide();
+      } catch (err) {
+        alert('Failed to load Pyodide: ' + err.message);
+        document.querySelector('input[name="toolsMode"][value="off"]').checked = true;
+      }
+      e.target.closest('.triswitch').style.opacity = '1';
+    });
+  });
+});
+
+// Extract ```python code blocks from LLM response text
+function extractPythonBlocks(text) {
+  const blocks = [];
+  const re = /```python\s*\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    blocks.push(m[1].trim());
+  }
+  return blocks;
+}
+
+// Run tool calls from LLM response, return tool_calls array
+async function executeToolBlocks(text, grid, prev_grid) {
+  const blocks = extractPythonBlocks(text);
+  if (!blocks.length) return [];
+  if (!_pyodideReady) return [];
+  const toolCalls = [];
+  for (const code of blocks) {
+    const output = await runPyodide(code, grid, prev_grid);
+    toolCalls.push({name: 'run_python', arguments: {code}, output});
+  }
+  return toolCalls;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COLLAPSIBLE SECTIONS
@@ -1259,6 +1446,11 @@ async function askLLM() {
       };
       if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
       resp = await fetchJSON('/api/llm/ask', payload);
+      // For non-Gemini server models: extract code blocks from response and run via Pyodide
+      if (resp && !resp.error && resp.tools_active && !resp.tool_calls?.length && _pyodideReady && resp.raw) {
+        const toolCalls = await executeToolBlocks(resp.raw, currentState.grid, previousGrid);
+        if (toolCalls.length) resp.tool_calls = toolCalls;
+      }
     } else {
       // ── Client-side LLM (online mode: Puter.js or BYOK) ─────────────
       const prompt = buildClientPrompt(currentState, historyForLLM, currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
@@ -1278,6 +1470,13 @@ async function askLLM() {
       if (rawContent) {
         resp = parseClientLLMResponse(rawContent, model);
         resp.tools_active = getToolsMode() === 'on';
+        // Execute Python code blocks via Pyodide if tools are on
+        if (resp.tools_active && _pyodideReady && rawContent) {
+          const toolCalls = await executeToolBlocks(rawContent, currentState.grid, previousGrid);
+          if (toolCalls.length) {
+            resp.tool_calls = toolCalls;
+          }
+        }
         // Merge usage data from Puter.js if available
         if (askLLMPuter._lastUsage) {
           resp.usage = askLLMPuter._lastUsage;
@@ -1811,6 +2010,9 @@ function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, 
   const pm = planningMode && planningMode !== 'off';
   const planN = pm ? parseInt(planningMode) : 0;
 
+  const toolInstr = tm ? `\n- You can write Python code blocks to analyse the grid. Wrap code in \\\`\\\`\\\`python fences. The variable \`grid\` is a numpy 2D int array. numpy, collections, itertools, math are available. Use print() for output. Code will be executed and results appended before your final answer.\n- Include "analysis" in your JSON with a summary of what you found.` : '';
+  const analysisField = tm ? ', "analysis": "<detailed spatial analysis>"' : '';
+
   if (pm) {
     parts.push(`## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
@@ -1818,12 +2020,12 @@ function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, 
 3. Plan a sequence of actions (up to ${planN} steps).
 
 Respond with EXACTLY this JSON (nothing else):
-{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{"action": <n>, "data": {}}, ...]${tm ? ', "analysis": "<detailed spatial analysis>"' : ''}}
+{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{"action": <n>, "data": {}}, ...]${analysisField}}
 
 Rules:
 - Return a "plan" array of up to ${planN} steps. Each step has "action" (0-7) and "data" ({} or {"x": <0-63>, "y": <0-63>}).
 - ACTION6: set "data" to {"x": <0-63>, "y": <0-63>}.
-- Other actions: set "data" to {}.`);
+- Other actions: set "data" to {}.${toolInstr}`);
   } else {
     parts.push(`## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
@@ -1831,12 +2033,12 @@ Rules:
 3. Choose the best action.
 
 Respond with EXACTLY this JSON (nothing else):
-{"observation": "<what you see>", "reasoning": "<your plan>", "action": <number>, "data": {}${tm ? ', "analysis": "<detailed spatial analysis>"' : ''}}
+{"observation": "<what you see>", "reasoning": "<your plan>", "action": <number>, "data": {}${analysisField}}
 
 Rules:
 - "action" must be a plain integer (0-7).
 - ACTION6: set "data" to {"x": <0-63>, "y": <0-63>}.
-- Other actions: set "data" to {}.`);
+- Other actions: set "data" to {}.${toolInstr}`);
   }
 
   return parts.join('\n\n');
