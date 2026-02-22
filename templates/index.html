@@ -392,7 +392,7 @@
           <!-- ── Settings subtab ── -->
           <div class="subtab-pane active" id="subtabSettings" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
             <div class="settings-columns">
-              <!-- LEFT COLUMN: Model, Game Source, Copilot/BYOK -->
+              <!-- LEFT COLUMN: Model, Input, Reasoning/Tools -->
               <div class="settings-col">
 
                 <!-- MODEL -->
@@ -405,109 +405,6 @@
                     <div class="model-caps" id="modelCaps"></div>
                     <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
                     <input type="text" class="text-input" id="modelCustom" placeholder="Or type model name..." style="margin-top:6px;">
-                  </div>
-                </div>
-
-                <!-- GAME SOURCE -->
-                <div class="opt-section open" id="secGameSource">
-                  <div class="opt-header" onclick="toggleSection('secGameSource')">
-                    <span>Game Source</span><span class="chevron">&#9654;</span>
-                  </div>
-                  <div class="opt-body">
-                    <div class="mode-toggle" id="apiModeToggle">
-                      <label><input type="radio" name="apiMode" value="local" checked onchange="onApiModeChange('local')">Local</label>
-                      <label><input type="radio" name="apiMode" value="official" onchange="onApiModeChange('official')">Official API</label>
-                    </div>
-                    <div class="api-warning" id="apiWarning">
-                      &#9888; This will use the official ARC-AGI-3 API at three.arcprize.org. Your current game will be reset. Results count toward your leaderboard score.
-                    </div>
-                    <div class="api-key-input" id="apiKeySection">
-                      <input type="password" class="text-input" id="arcApiKey" placeholder="ARC-AGI-3 API Key" style="margin-bottom:6px;">
-                      <button class="btn btn-primary" onclick="saveArcApiKey()" style="width:100%;font-size:11px;">Save API Key</button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- GITHUB COPILOT (local only) -->
-                {% if features.copilot %}
-                <div class="opt-section" id="secCopilot">
-                  <div class="opt-header" onclick="toggleSection('secCopilot')">
-                    <span>GitHub Copilot</span><span class="chevron">&#9654;</span>
-                  </div>
-                  <div class="opt-body">
-                    <div id="copilotNotAuth">
-                      <button class="btn btn-primary" onclick="copilotStartAuth()" style="width:100%;font-size:11px;">Connect GitHub Copilot</button>
-                      <div id="copilotDeviceCode" style="display:none;">
-                        <div class="copilot-code" id="copilotUserCode">————</div>
-                        <div style="text-align:center;">
-                          <a id="copilotVerifyLink" href="#" target="_blank" class="copilot-link">Open GitHub to enter code</a>
-                        </div>
-                        <div style="font-size:10px;color:var(--text-dim);margin-top:6px;text-align:center;">Waiting for authorization...</div>
-                      </div>
-                    </div>
-                    <div id="copilotAuthed" style="display:none;">
-                      <div class="copilot-status">
-                        <span class="dot dot-green"></span>
-                        <span style="color:var(--green);font-weight:600;">Connected</span>
-                      </div>
-                      <div style="font-size:10px;color:var(--text-dim);margin-top:6px;">
-                        Models: gpt-4.1, gpt-4o, gpt-5-mini<span class="tier-badge tier-free">FREE</span><br>
-                        claude-sonnet-4, gemini-2.5-pro<span class="tier-badge tier-premium">PREMIUM</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {% endif %}
-
-                <!-- BYOK — Bring Your Own Key (online only) -->
-                {% if features.byok %}
-                <div class="opt-section" id="secBYOK">
-                  <div class="opt-header" onclick="toggleSection('secBYOK')">
-                    <span>API Key (BYOK)</span><span class="chevron">&#9654;</span>
-                  </div>
-                  <div class="opt-body">
-                    <div class="opt-row">
-                      <span class="opt-label">Provider</span>
-                      <select id="byokProvider" style="width:140px;">
-                        <option value="openai">OpenAI</option>
-                        <option value="gemini">Google Gemini</option>
-                      </select>
-                    </div>
-                    <div class="opt-row">
-                      <input type="password" class="text-input" id="byokKey" placeholder="Paste API key here...">
-                    </div>
-                    <button class="btn btn-primary" onclick="saveBYOK()" style="width:100%;font-size:11px;">Save locally</button>
-                    <div class="byok-notice">
-                      Your key is stored in localStorage only — never sent to our server.<br>
-                      Anthropic keys won't work (CORS blocked). Use Puter.js for Claude models.
-                    </div>
-                  </div>
-                </div>
-                {% endif %}
-              </div>
-
-              <!-- RIGHT COLUMN: Graphics, Input, Reasoning/Tools -->
-              <div class="settings-col">
-
-                <!-- GRAPHICS -->
-                <div class="opt-section open" id="secGraphics">
-                  <div class="opt-header" onclick="toggleSection('secGraphics')">
-                    <span>Graphics</span><span class="chevron">&#9654;</span>
-                  </div>
-                  <div class="opt-body">
-                    <div class="opt-row">
-                      <span class="opt-label">Diff overlay</span>
-                      <label class="toggle"><input type="checkbox" id="showChanges" checked><span class="slider"></span></label>
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Opacity</span>
-                      <input type="range" id="changeOpacity" min="0" max="100" value="40" style="width:100px;">
-                      <span id="changeOpacityVal" style="font-size:11px;width:28px;color:var(--text-dim);">40%</span>
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Highlight color</span>
-                      <input type="color" id="changeColor" value="#ff0000" style="width:28px;height:20px;border:none;background:none;cursor:pointer;">
-                    </div>
                   </div>
                 </div>
 
@@ -598,6 +495,110 @@
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);">
                       LLM returns a multi-step plan instead of one action. Saves tokens.
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- RIGHT COLUMN: Game Source, Copilot/BYOK, Graphics -->
+              <div class="settings-col">
+
+                <!-- GAME SOURCE -->
+                <div class="opt-section open" id="secGameSource">
+                  <div class="opt-header" onclick="toggleSection('secGameSource')">
+                    <span>Game Source</span><span class="chevron">&#9654;</span>
+                  </div>
+                  <div class="opt-body">
+                    <div class="mode-toggle" id="apiModeToggle">
+                      <label><input type="radio" name="apiMode" value="local" checked onchange="onApiModeChange('local')">Local</label>
+                      <label><input type="radio" name="apiMode" value="official" onchange="onApiModeChange('official')">Official API</label>
+                    </div>
+                    <div class="api-warning" id="apiWarning">
+                      &#9888; This will use the official ARC-AGI-3 API at three.arcprize.org. Your current game will be reset. Results count toward your leaderboard score.
+                    </div>
+                    <div class="api-key-input" id="apiKeySection">
+                      <input type="password" class="text-input" id="arcApiKey" placeholder="ARC-AGI-3 API Key" style="margin-bottom:6px;">
+                      <button class="btn btn-primary" onclick="saveArcApiKey()" style="width:100%;font-size:11px;">Save API Key</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- GITHUB COPILOT (local only) -->
+                {% if features.copilot %}
+                <div class="opt-section" id="secCopilot">
+                  <div class="opt-header" onclick="toggleSection('secCopilot')">
+                    <span>GitHub Copilot</span><span class="chevron">&#9654;</span>
+                  </div>
+                  <div class="opt-body">
+                    <div id="copilotNotAuth">
+                      <button class="btn btn-primary" onclick="copilotStartAuth()" style="width:100%;font-size:11px;">Connect GitHub Copilot</button>
+                      <div id="copilotDeviceCode" style="display:none;">
+                        <div class="copilot-code" id="copilotUserCode">————</div>
+                        <div style="text-align:center;">
+                          <a id="copilotVerifyLink" href="#" target="_blank" class="copilot-link">Open GitHub to enter code</a>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:6px;text-align:center;">Waiting for authorization...</div>
+                      </div>
+                    </div>
+                    <div id="copilotAuthed" style="display:none;">
+                      <div class="copilot-status">
+                        <span class="dot dot-green"></span>
+                        <span style="color:var(--green);font-weight:600;">Connected</span>
+                      </div>
+                      <div style="font-size:10px;color:var(--text-dim);margin-top:6px;">
+                        Models: gpt-4.1, gpt-4o, gpt-5-mini<span class="tier-badge tier-free">FREE</span><br>
+                        claude-sonnet-4, gemini-2.5-pro<span class="tier-badge tier-premium">PREMIUM</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {% endif %}
+
+                <!-- BYOK — Bring Your Own Key (online only) -->
+                {% if features.byok %}
+                <div class="opt-section" id="secBYOK">
+                  <div class="opt-header" onclick="toggleSection('secBYOK')">
+                    <span>API Key (BYOK)</span><span class="chevron">&#9654;</span>
+                  </div>
+                  <div class="opt-body">
+                    <div class="opt-row">
+                      <span class="opt-label">Provider</span>
+                      <select id="byokProvider" style="width:140px;">
+                        <option value="openai">OpenAI</option>
+                        <option value="gemini">Google Gemini</option>
+                      </select>
+                    </div>
+                    <div class="opt-row">
+                      <input type="password" class="text-input" id="byokKey" placeholder="Paste API key here...">
+                    </div>
+                    <button class="btn btn-primary" onclick="saveBYOK()" style="width:100%;font-size:11px;">Save locally</button>
+                    <div class="byok-notice">
+                      Your key is stored in localStorage only — never sent to our server.<br>
+                      Anthropic keys won't work (CORS blocked). Use Puter.js for Claude models.
+                    </div>
+                  </div>
+                </div>
+                {% endif %}
+
+                <!-- GRAPHICS -->
+                <div class="opt-section open" id="secGraphics">
+                  <div class="opt-header" onclick="toggleSection('secGraphics')">
+                    <span>Graphics</span><span class="chevron">&#9654;</span>
+                  </div>
+                  <div class="opt-body">
+                    <div class="opt-row">
+                      <span class="opt-label">Diff overlay</span>
+                      <label class="toggle"><input type="checkbox" id="showChanges" checked><span class="slider"></span></label>
+                    </div>
+                    <div class="opt-row">
+                      <span class="opt-label">Opacity</span>
+                      <input type="range" id="changeOpacity" min="0" max="100" value="40" style="width:100px;">
+                      <span id="changeOpacityVal" style="font-size:11px;width:28px;color:var(--text-dim);">40%</span>
+                    </div>
+                    <div class="opt-row">
+                      <span class="opt-label">Highlight color</span>
+                      <input type="color" id="changeColor" value="#ff0000" style="width:28px;height:20px;border:none;background:none;cursor:pointer;">
                     </div>
                   </div>
                 </div>
@@ -1085,7 +1086,9 @@ async function startGame(gameId) {
 }
 
 function updateUI(data) {
+  previousGrid = currentGrid;
   currentState = data;
+  currentGrid = data.grid;
   currentChangeMap = data.change_map || null;
   if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
     renderGridWithChanges(data.grid, currentChangeMap);
