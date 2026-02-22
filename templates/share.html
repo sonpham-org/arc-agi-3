@@ -121,6 +121,7 @@ const COLORS = {{ color_map | tojson }};
 const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACT5',6:'CLICK',7:'ACT7'};
 const SESSION = {{ session | tojson }};
 const STEPS = {{ steps | tojson }};
+const BRANCH_AT_STEP = {{ branch_at_step | default(0) }};
 
 const canvas = document.getElementById('replayCanvas');
 const ctx = canvas.getContext('2d');
@@ -206,46 +207,92 @@ function renderGrid(grid) {
 
 function esc(s) { return s ? s.replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
 
-function buildReasoningEntry(step, idx, isCurrent) {
-  const hasReasoning = !!step.llm_response;
-  const lr = step.llm_response || {};
-  const p = lr.parsed || lr;
-  const actionName = ACTION_NAMES[step.action] || `ACTION${step.action}`;
-  const coordStr = step.data?.x !== undefined ? ` (${step.data.x},${step.data.y})` : '';
-
-  if (!hasReasoning) {
-    // Human or multi-step execution step
-    return `<div class="reasoning-entry human${isCurrent ? ' current' : ''}" id="entry-${idx}">
-      <div class="step-label">Step ${step.step_num}</div>
-      <div class="action-rec">&rarr; ${actionName}${coordStr}</div>
-    </div>`;
+// ── Group steps into plan groups (same logic as main app) ────────────
+const stepGroups = [];
+{
+  let currentGroup = null;
+  let planCapacity = 0;
+  for (const s of STEPS) {
+    const hasLLM = s.llm_response && typeof s.llm_response === 'object' && s.llm_response.parsed;
+    if (hasLLM) {
+      const plan = s.llm_response.parsed.plan;
+      const planSize = (plan && Array.isArray(plan)) ? plan.length : 1;
+      currentGroup = { type: 'llm', steps: [s], llm: s.llm_response };
+      planCapacity = planSize - 1;
+      stepGroups.push(currentGroup);
+    } else if (currentGroup && currentGroup.type === 'llm' && planCapacity > 0) {
+      currentGroup.steps.push(s);
+      planCapacity--;
+    } else {
+      stepGroups.push({ type: 'human', steps: [s], llm: null });
+      currentGroup = null;
+      planCapacity = 0;
+    }
   }
+}
 
-  const obs = p.observation || '';
-  const reasoning = p.reasoning || '';
-  const analysis = p.analysis || '';
-  const plan = p.plan;
+// Build a lookup: step_num → group index
+const stepToGroup = {};
+stepGroups.forEach((g, gi) => {
+  g.steps.forEach(s => { stepToGroup[s.step_num] = gi; });
+});
 
-  let planHtml = '';
-  if (plan && Array.isArray(plan)) {
-    planHtml = '<div style="margin-top:4px;">' + plan.map((s, i) => {
+function buildAllReasoningEntries() {
+  let html = '';
+  let branchMarkerInserted = !BRANCH_AT_STEP; // skip if no branching
+  for (let gi = 0; gi < stepGroups.length; gi++) {
+    const g = stepGroups[gi];
+    const stepNums = g.steps.map(s => s.step_num).join(',');
+
+    // Insert branch marker when transitioning from parent to own steps
+    if (!branchMarkerInserted && g.steps.some(s => !s.from_parent)) {
+      branchMarkerInserted = true;
+      html += `<div class="reasoning-entry" style="opacity:0.8;">
+        <div class="step-label" style="color:var(--purple);">&#8627; Branched here (from parent session)</div>
+      </div>`;
+    }
+
+    const isParent = g.steps[0].from_parent;
+
+    if (g.type === 'llm' && g.llm && g.llm.parsed) {
+      const llm = g.llm;
+      const p = llm.parsed;
+      const firstStep = g.steps[0].step_num;
+      const lastStep = g.steps[g.steps.length - 1].step_num;
+      const stepLabel = g.steps.length > 1 ? `Steps ${firstStep}-${lastStep}` : `Step ${firstStep}`;
+      const durationHtml = llm.call_duration_ms
+        ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(llm.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
+
+      const planSteps = (p.plan && Array.isArray(p.plan))
+        ? p.plan : [{ action: p.action, data: p.data || {} }];
+      const planHtml = planSteps.map((ps, i) => {
+        const aName = ACTION_NAMES[ps.action] || `ACTION${ps.action}`;
+        const dStr = ps.data?.x !== undefined ? ` (${ps.data.x},${ps.data.y})` : '';
+        return `<div class="plan-step" data-plan-idx="${i}">${i + 1}. <span class="action-btn">${aName}</span>${dStr}</div>`;
+      }).join('');
+
+      const obs = p.observation || '';
+      const reasoning = p.reasoning || '';
+      const analysis = p.analysis || '';
+
+      html += `<div class="reasoning-entry" data-group="${gi}" data-step-nums="${stepNums}">
+        <div class="step-label">${stepLabel} — ${llm.model || SESSION.model || 'LLM'}${durationHtml}${isParent ? ' <span style="font-size:10px;color:var(--purple);">[parent]</span>' : ''}</div>
+        ${obs ? `<div class="observation"><strong>Obs:</strong> ${esc(obs)}</div>` : ''}
+        ${reasoning ? `<div style="margin-top:4px;"><strong>Reasoning:</strong> ${esc(reasoning)}</div>` : ''}
+        ${analysis ? `<div style="margin-top:4px;font-size:11px;color:var(--purple);"><strong>Analysis:</strong> ${esc(analysis)}</div>` : ''}
+        <div class="plan-progress">${planHtml}</div>
+      </div>`;
+    } else {
+      const s = g.steps[0];
       const aName = ACTION_NAMES[s.action] || `ACTION${s.action}`;
-      const dStr = s.data?.x !== undefined ? ` (${s.data.x},${s.data.y})` : '';
-      return `<div class="plan-step">${i + 1}. <span class="action-btn">${aName}</span>${dStr}</div>`;
-    }).join('') + '</div>';
+      const coordStr = s.data?.x !== undefined ? ` (${s.data.x},${s.data.y})` : '';
+      html += `<div class="reasoning-entry human" data-group="${gi}" data-step-nums="${stepNums}">
+        <div class="step-label" style="color:var(--yellow);">Step ${s.step_num} — Human${isParent ? ' <span style="font-size:10px;color:var(--purple);">[parent]</span>' : ''}</div>
+        <div class="action-rec">&rarr; ${aName}${coordStr}</div>
+      </div>`;
+    }
   }
-
-  const durationMs = lr.call_duration_ms;
-  const durationHtml = durationMs ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(durationMs / 1000).toFixed(1)}s</span>` : '';
-
-  return `<div class="reasoning-entry${isCurrent ? ' current' : ''}" id="entry-${idx}">
-    <div class="step-label">Step ${step.step_num} — ${SESSION.model || 'LLM'}${durationHtml}</div>
-    ${obs ? `<div class="observation"><strong>Obs:</strong> ${esc(obs)}</div>` : ''}
-    ${reasoning ? `<div style="margin-top:4px;"><strong>Reasoning:</strong> ${esc(reasoning)}</div>` : ''}
-    ${analysis ? `<div style="margin-top:4px;font-size:11px;color:var(--purple);"><strong>Analysis:</strong> ${esc(analysis)}</div>` : ''}
-    <div class="action-rec">&rarr; ${actionName}${coordStr}</div>
-    ${planHtml}
-  </div>`;
+  return html;
 }
 
 function showStep(idx) {
@@ -255,33 +302,44 @@ function showStep(idx) {
   if (step.grid) renderGrid(step.grid);
   scrubber.value = idx;
   stepCounter.textContent = `Step ${idx + 1} / ${STEPS.length}`;
-
-  // Update reasoning panel — show current + recent entries
-  updateReasoningPanel(idx);
+  highlightCurrentStep(step.step_num);
 }
 
-function updateReasoningPanel(currentStepIdx) {
-  // Find surrounding reasoning context: show entries from a few reasoning blocks back
-  let startIdx = 0;
-  let count = 0;
-  for (let i = currentStepIdx; i >= 0; i--) {
-    if (STEPS[i].llm_response) count++;
-    if (count > 5) { startIdx = i; break; }
-  }
+function highlightCurrentStep(stepNum) {
+  // Reset all highlights
+  reasoningScroll.querySelectorAll('.reasoning-entry').forEach(e => {
+    e.classList.remove('current');
+  });
+  reasoningScroll.querySelectorAll('.plan-step .action-btn').forEach(btn => {
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  });
 
-  let html = '';
-  for (let i = startIdx; i <= Math.min(currentStepIdx + 3, STEPS.length - 1); i++) {
-    const isCurrent = i === currentStepIdx;
-    const isFuture = i > currentStepIdx;
-    if (isFuture) break; // don't show future steps
-    html += buildReasoningEntry(STEPS[i], i, isCurrent);
-  }
-  reasoningScroll.innerHTML = html || '<div class="empty-reasoning">No reasoning data</div>';
+  // Find the group this step belongs to
+  const gi = stepToGroup[stepNum];
+  if (gi === undefined) return;
+  const g = stepGroups[gi];
+  const entry = reasoningScroll.querySelector(`[data-group="${gi}"]`);
+  if (!entry) return;
 
-  // Scroll to current entry
-  const el = document.getElementById(`entry-${currentStepIdx}`);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  entry.classList.add('current');
+  entry.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // Light up plan steps progressively
+  const stepIdx = g.steps.findIndex(s => s.step_num === stepNum);
+  if (stepIdx >= 0) {
+    const planBtns = entry.querySelectorAll('.plan-step .action-btn');
+    for (let i = 0; i <= stepIdx && i < planBtns.length; i++) {
+      planBtns[i].style.background = 'var(--green)';
+      planBtns[i].style.color = '#000';
+      planBtns[i].style.borderColor = 'var(--green)';
+    }
+  }
 }
+
+// Render all reasoning entries once on load
+reasoningScroll.innerHTML = buildAllReasoningEntries() || '<div class="empty-reasoning">No reasoning data</div>';
 
 // ── Playback ──────────────────────────────────────────────────────────
 const STEP_DELAY = 80;       // ms between steps during fast-forward

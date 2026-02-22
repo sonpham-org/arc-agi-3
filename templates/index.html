@@ -493,7 +493,7 @@
                     <div class="opt-row">
                       <span class="opt-label">Context limit</span>
                       <span class="spin-wrap">
-                        <input type="number" id="compactContextPct" value="60" min="1" step="1" style="width:68px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">
+                        <input type="number" id="compactContextPct" value="64000" min="1" step="1" style="width:68px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">
                         <span class="spin-btns">
                           <button class="spin-btn" onclick="spinContextLimit(1)">&#9650;</button>
                           <button class="spin-btn" onclick="spinContextLimit(-1)">&#9660;</button>
@@ -501,11 +501,17 @@
                       </span>
                       <select id="contextLimitUnit" style="width:62px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:11px;margin-left:4px;" onchange="onContextLimitUnitChange()">
                         <option value="pct">%</option>
-                        <option value="tokens">tok</option>
+                        <option value="tokens" selected>tok</option>
                       </select>
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
                       Compacts history when prompt exceeds limit (% of context window, or token count). Optional: also after N calls.
+                    </div>
+                    <div class="opt-row">
+                      <span class="opt-label">Compact model</span>
+                      <select id="compactModelSelect" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:11px;">
+                        <option value="auto">Auto (cheapest)</option>
+                      </select>
                     </div>
                     <div class="opt-row">
                       <span class="opt-label">Compact on new level</span>
@@ -660,6 +666,10 @@
                   <label>Agent Memory (hard priors)</label>
                   <textarea id="memoryHardMemory" style="flex:1;min-height:120px;" placeholder="Agent strategy priors..."></textarea>
                 </div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
+                <label>Compact Prompt <span style="font-size:10px;color:var(--text-dim);">(sent to compact model)</span></label>
+                <textarea id="memoryCompactPrompt" style="flex:1;min-height:60px;opacity:0.8;" readonly placeholder="No compact prompt yet. The prompt sent to the compact model will appear here after compaction."></textarea>
               </div>
               <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
                 <label>Compact Summary <span style="font-size:10px;color:var(--text-dim);">(auto-generated, editable)</span></label>
@@ -1239,7 +1249,7 @@ function getCompactSettings() {
   const afterVal = document.getElementById('compactAfter').value;
   const after = afterVal ? parseInt(afterVal) : null;  // null = disabled
   const unit = document.getElementById('contextLimitUnit').value; // 'pct' or 'tokens'
-  const rawVal = parseInt(document.getElementById('compactContextPct').value) || 60;
+  const rawVal = parseInt(document.getElementById('compactContextPct').value) || 64000;
   return { enabled, after, contextLimitUnit: unit, contextLimitVal: rawVal };
 }
 
@@ -1324,10 +1334,15 @@ function collectObservation(resp) {
 
 let _cachedCompactSummary = '';  // LLM-generated summary, cached until refreshed
 let _compactSummaryAtCall = 0;   // llmCallCount when summary was last generated
+let _lastCompactPrompt = '';     // last prompt sent to compact model
 
 function _syncCompactToMemoryTab() {
   const el = document.getElementById('memoryCompactSummary');
   if (el) el.value = _cachedCompactSummary;
+}
+function _syncCompactPromptToMemoryTab() {
+  const el = document.getElementById('memoryCompactPrompt');
+  if (el) el.value = _lastCompactPrompt;
 }
 
 function applyCompactEdit() {
@@ -1383,12 +1398,13 @@ async function buildCompactContext() {
     `Step ${h.step}: ${ACTION_NAMES[h.action] || '?'} -> ${h.result_state || '?'}`
   ).join('\n');
 
-  const summaryPrompt = `You are a game analyst. Given the following game history and agent observations, produce a CONCISE summary (max 300 words) of:
-1. What the game seems to be about (mechanics, objectives)
-2. What actions do what (discovered effects)
-3. Current progress and situation
-4. Key patterns or strategies discovered
-5. What to try next
+  const summaryPrompt = `Summarize the rules and objectives of this game that you have learned so far from the observations and history below. Be concise but thorough (max 300 words).
+
+Cover:
+1. RULES: What are the game mechanics? What does each action do? What constraints exist?
+2. OBJECTIVES: What is the goal? How do you win/complete a level?
+3. STRATEGIES: What patterns or strategies have proven effective?
+4. CURRENT STATE: Where are we now? What should we try next?
 
 OBSERVATIONS:
 ${obsText}
@@ -1400,13 +1416,21 @@ Current levels completed: ${currentState.levels_completed || 0}/${currentState.w
 
 Respond with ONLY the summary text, no JSON.`;
 
+  // Store the prompt for display in Memory tab
+  _lastCompactPrompt = summaryPrompt;
+  _syncCompactPromptToMemoryTab();
+
+  // Determine compact model
+  const compactModelSel = document.getElementById('compactModelSelect').value;
+  const agentModel = getSelectedModel();
+  const compactModel = compactModelSel === 'same' ? agentModel : (compactModelSel !== 'auto' ? compactModelSel : null);
+
   try {
     let summary;
     if (FEATURES.server_llm) {
-      const data = await fetchJSON('/api/llm/summarize', {
-        prompt: summaryPrompt,
-        session_id: sessionId,
-      });
+      const body = { prompt: summaryPrompt, session_id: sessionId, agent_model: agentModel };
+      if (compactModel) body.model = compactModel;
+      const data = await fetchJSON('/api/llm/summarize', body);
       summary = data.summary;
     } else if (FEATURES.puter_js) {
       summary = await askLLMPuter(summaryPrompt, 'gpt-4o-mini');
@@ -1603,9 +1627,19 @@ async function askLLM() {
     // Also trigger compact if estimated history tokens exceed % of model context
     const histTokenEst = estimateTokens(JSON.stringify(moveHistory));
     const tokenTrigger = compact.enabled && histTokenEst > maxHistTokens;
-    const compactBlock = (callTrigger || tokenTrigger) ? await buildCompactContext() : '';
-    if (compactBlock && (callTrigger || tokenTrigger)) {
+    const needsCompact = callTrigger || tokenTrigger;
+    const prevCompactCall = _compactSummaryAtCall;
+    const compactBlock = needsCompact ? await buildCompactContext() : '';
+    // Only show reasoning entry when a NEW compact was generated (not cached)
+    if (compactBlock && _compactSummaryAtCall !== prevCompactCall) {
       logSessionEvent('compact', stepCount, { trigger: callTrigger ? 'calls' : 'tokens', call_count: llmCallCount });
+      const content = document.getElementById('reasoningContent');
+      if (content.querySelector('.empty-state')) content.innerHTML = '';
+      const cEntry = document.createElement('div');
+      cEntry.className = 'reasoning-entry';
+      const trigger = callTrigger ? `after ${llmCallCount} calls` : `tokens exceeded ${maxHistTokens}`;
+      cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">&#128220; Auto-compacted at step ${stepCount} (${trigger})</div>`;
+      content.insertBefore(cEntry, content.firstChild);
     }
 
     // Trim history grids if approaching context limit
@@ -2192,6 +2226,29 @@ async function loadModels() {
 
   if (!sel.options.length) sel.innerHTML = '<option value="">No models</option>';
 
+  // Populate compact model selector with same available models
+  const csel = document.getElementById('compactModelSelect');
+  const autoOpt = csel.querySelector('option[value="auto"]');
+  csel.innerHTML = '';
+  csel.appendChild(autoOpt);
+  // Add "Same as agent" option
+  const sameOpt = document.createElement('option');
+  sameOpt.value = 'same'; sameOpt.textContent = 'Same as agent';
+  csel.appendChild(sameOpt);
+  for (const prov of providerOrder) {
+    const models = groups[prov];
+    if (!models?.length) continue;
+    const grp = document.createElement('optgroup');
+    grp.label = prov;
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = `${m.name} — ${m.price}`;
+      grp.appendChild(opt);
+    }
+    csel.appendChild(grp);
+  }
+
   updateModelCaps();
 }
 
@@ -2597,7 +2654,6 @@ async function loadReplay(sid) {
     let data;
     if (MODE === 'online') {
       data = getLocalSessionData(sid);
-      // Fall back to server (Turso) if not in localStorage
       if (!data) {
         data = await fetchJSON(`/api/sessions/${sid}`);
         if (data.error) { alert('Session not found locally or on server.'); return; }
@@ -2611,7 +2667,6 @@ async function loadReplay(sid) {
     // Show the replay bar in the canvas area
     const bar = document.getElementById('replayBar');
     bar.style.display = 'block';
-    // Hide game controls during replay
     document.getElementById('controls').style.display = 'none';
 
     const scrubber = document.getElementById('replayScrubber');
@@ -2621,9 +2676,17 @@ async function loadReplay(sid) {
     document.getElementById('replayInfo').textContent =
       `Replay: ${data.session.game_id} — Step 0 / ${totalSteps}`;
 
-    // Show reasoning panel in History tab
-    document.getElementById('replayReasoningPanel').style.display = 'block';
-    document.getElementById('replayReasoning').textContent = 'Move scrubber to view steps.';
+    // Render full reasoning in the Reasoning tab (same format as live/resumed sessions)
+    const sess = data.session || {};
+    const resultLabel = sess.result || 'REPLAY';
+    renderRestoredReasoning(data.steps || [],
+      `Replay: ${sess.game_id || '?'} — ${totalSteps} steps — ${resultLabel}`, 'var(--accent)', { replay: true });
+    // Switch to Agent tab so user sees the reasoning
+    switchTopTab('agent');
+    switchSubTab('reasoning');
+
+    // Hide the old History-tab reasoning panel (we use the main Reasoning tab now)
+    document.getElementById('replayReasoningPanel').style.display = 'none';
 
     scrubber.oninput = () => showReplayStep(parseInt(scrubber.value));
     if (totalSteps > 0) showReplayStep(0);
@@ -2636,7 +2699,6 @@ function showReplayStep(stepIdx) {
   const info = document.getElementById('replayInfo');
   info.textContent = `Replay: ${replayData.session.game_id} — Step ${stepIdx + 1} / ${total}`;
 
-  // Update scrubber position
   document.getElementById('replayScrubber').value = stepIdx;
 
   if (stepIdx >= 0 && stepIdx < total) {
@@ -2646,24 +2708,37 @@ function showReplayStep(stepIdx) {
       document.getElementById('emptyState').style.display = 'none';
       canvas.style.display = 'block';
     }
-    // Show reasoning in the History tab panel
-    const rDiv = document.getElementById('replayReasoning');
-    const fromParent = step.from_parent ? '<span style="color:var(--purple);font-size:10px;">[parent]</span> ' : '';
-    const llm = step.llm_response;
-    if (llm && llm.parsed) {
-      const replayToolCalls = renderToolCallsHtml(llm.tool_calls || llm.parsed.tool_calls || []);
-      const replayAnalysis = llm.parsed.analysis
-        ? `<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">${llm.parsed.analysis}</div></details>` : '';
-      const replayInput = llm.prompt_length
-        ? `<details class="analysis-wrap"><summary>Input (${llm.prompt_length.toLocaleString()} chars)</summary><div class="analysis-content">${llm.raw ? escapeHtml(llm.raw.substring(0, 500)) + (llm.raw.length > 500 ? '...' : '') : '—'}</div></details>` : '';
-      rDiv.innerHTML = `${fromParent}<strong>Action ${step.action} (${ACTION_NAMES[step.action] || '?'})</strong>\n` +
-        `<strong>Obs:</strong> ${llm.parsed.observation || '—'}\n` +
-        `<strong>Plan:</strong> ${llm.parsed.reasoning || '—'}\n` +
-        replayAnalysis + replayToolCalls + replayInput +
-        (llm.thinking ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking</summary><div style="color:var(--text-dim);font-size:11px;white-space:pre-wrap;">${llm.thinking}</div></details>` : '');
-    } else {
-      rDiv.innerHTML = `${fromParent}Action ${step.action} (${ACTION_NAMES[step.action] || '?'})`;
-    }
+
+    // Highlight the matching reasoning entry and plan step in Reasoning tab
+    const content = document.getElementById('reasoningContent');
+    // Reset all highlights
+    content.querySelectorAll('.reasoning-entry').forEach(e => {
+      e.style.outline = '';
+      e.style.outlineOffset = '';
+    });
+    content.querySelectorAll('.plan-step .action-btn').forEach(btn => {
+      btn.style.background = '';
+      btn.style.color = '';
+      btn.style.borderColor = '';
+    });
+    // Find and highlight the active entry + plan step
+    const entries = content.querySelectorAll('.reasoning-entry[data-step-num]');
+    entries.forEach(e => {
+      const stepNums = (e.dataset.stepNum || '').split(',').map(Number);
+      const idx = stepNums.indexOf(step.step_num);
+      if (idx !== -1) {
+        e.style.outline = '2px solid var(--accent)';
+        e.style.outlineOffset = '-2px';
+        e.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Light up this and all previous plan steps (progressive fill)
+        const planBtns = e.querySelectorAll('.plan-step .action-btn');
+        for (let pi = 0; pi <= idx && pi < planBtns.length; pi++) {
+          planBtns[pi].style.background = 'var(--green)';
+          planBtns[pi].style.color = '#000';
+          planBtns[pi].style.borderColor = 'var(--green)';
+        }
+      }
+    });
   }
 }
 
@@ -2958,7 +3033,8 @@ function dismissResumeBanner(kvKey) {
 // RESTORED REASONING PANEL (shared by resume + branch)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function renderRestoredReasoning(steps, bannerText, bannerColor) {
+function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
+  const isReplay = opts.replay || false;
   const content = document.getElementById('reasoningContent');
   content.innerHTML = '';
 
@@ -2973,13 +3049,15 @@ function renderRestoredReasoning(steps, bannerText, bannerColor) {
   let currentGroup = null;
   let planCapacity = 0;
   for (const s of steps) {
-    if (s.llm_response && s.llm_response.parsed) {
+    const hasLLM = s.llm_response && typeof s.llm_response === 'object' && s.llm_response.parsed;
+    if (hasLLM) {
       const plan = s.llm_response.parsed.plan;
       const planSize = (plan && Array.isArray(plan)) ? plan.length : 1;
       currentGroup = { type: 'llm', steps: [s], llm: s.llm_response };
       planCapacity = planSize - 1;
       groups.push(currentGroup);
-    } else if (currentGroup && currentGroup.type === 'llm' && planCapacity > 0 && !s.llm_response) {
+    } else if (currentGroup && currentGroup.type === 'llm' && planCapacity > 0) {
+      // Plan follower: no LLM response of its own, belongs to current plan group
       currentGroup.steps.push(s);
       planCapacity--;
     } else {
@@ -3018,6 +3096,8 @@ function renderRestoredReasoning(steps, bannerText, bannerColor) {
     const entry = document.createElement('div');
     entry.className = 'reasoning-entry';
     entry.style.opacity = '0.7';
+    // Tag with step numbers for scrubber highlighting
+    entry.dataset.stepNum = g.steps.map(s => s.step_num).join(',');
 
     // Level badge
     const levelChanged = g.levelsAfter > g.levelsBefore;
@@ -3066,8 +3146,8 @@ function renderRestoredReasoning(steps, bannerText, bannerColor) {
       const planHtml = planSteps.map((ps, i) => {
         const aName = ACTION_NAMES[ps.action] || `ACTION${ps.action}`;
         const dataStr = ps.data?.x !== undefined ? ` (${ps.data.x},${ps.data.y})` : '';
-        const done = i < g.steps.length;
-        const cls = done ? 'plan-step done' : 'plan-step skipped';
+        const done = !isReplay && i < g.steps.length;
+        const cls = done ? 'plan-step done' : 'plan-step';
         const btnStyle = done ? 'style="background:var(--green);color:#000;border-color:var(--green);"' : '';
         return `<div class="${cls}">${i + 1}. <span class="action-btn" ${btnStyle}>${aName}</span>${dataStr}</div>`;
       }).join('');

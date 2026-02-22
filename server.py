@@ -1023,7 +1023,10 @@ def _get_tool_declarations():
                 "Available variables: `grid` (numpy 2D int array of current grid), "
                 "`prev_grid` (numpy 2D int array of previous grid, or None). "
                 "Variables you define persist across calls within the same turn. "
-                "Use print() to return results."
+                "Use print() to return results. "
+                "IMPORTANT: Keep code short and simple — use numpy vectorized ops, "
+                "avoid nested loops over large arrays. Combine analyses into one call "
+                "when possible. You have max 3 tool calls per turn, so be efficient."
             ),
             parameters={
                 "type": "OBJECT",
@@ -1480,9 +1483,13 @@ def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
         config.cached_content = cached_content_name
 
     tool_calls_log = []
-    max_rounds = 5
+    max_rounds = 3
 
     for round_i in range(max_rounds):
+        # On the last round, remove tools to force a text answer
+        if round_i == max_rounds - 1 and config.tools:
+            config.tools = None
+
         response = client.models.generate_content(
             model=model_name, contents=contents, config=config,
         )
@@ -2026,21 +2033,58 @@ def llm_summarize():
     prompt = payload.get("prompt", "")
     if not prompt:
         return jsonify({"error": "No prompt"}), 400
-    # Use the cheapest available model for summarization
-    summary_models = ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
-    for m in summary_models:
-        info = MODEL_REGISTRY.get(m)
-        if not info:
-            continue
+
+    # If a specific model is requested, use it directly
+    requested_model = payload.get("model")
+    if requested_model and requested_model in MODEL_REGISTRY:
+        info = MODEL_REGISTRY[requested_model]
         env_key = info.get("env_key", "")
-        if env_key and not os.environ.get(env_key):
-            continue
-        try:
-            result = _route_model_call(m, prompt, None)
-            return jsonify({"summary": result})
-        except Exception as e:
-            app.logger.warning("Summarize with %s failed: %s", m, e)
-            continue
+        if not env_key or os.environ.get(env_key):
+            try:
+                result = _route_model_call(requested_model, prompt, None)
+                text = result.get("text", result) if isinstance(result, dict) else result
+                return jsonify({"summary": text, "model_used": requested_model})
+            except Exception as e:
+                app.logger.warning("Summarize with requested %s failed: %s", requested_model, e)
+
+    # Fallback: use the cheapest available model from the same provider as the agent
+    agent_model = payload.get("agent_model", "")
+    agent_provider = MODEL_REGISTRY.get(agent_model, {}).get("provider", "gemini")
+
+    # Build priority list: cheapest models per provider (smallest/fastest first)
+    CHEAPEST_BY_PROVIDER = {
+        "gemini":     ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
+        "groq":       ["gemma2-9b", "mixtral-8x7b", "llama-3.3-70b"],
+        "mistral":    ["open-mistral-nemo", "mistral-small"],
+        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
+        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
+        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
+    }
+
+    # Try same provider first, then fall back to any provider
+    providers_to_try = [agent_provider] + [p for p in CHEAPEST_BY_PROVIDER if p != agent_provider]
+    for provider in providers_to_try:
+        candidates = CHEAPEST_BY_PROVIDER.get(provider, [])
+        for candidate in candidates:
+            # Find matching model in registry (partial match)
+            matched = None
+            for reg_name, reg_info in MODEL_REGISTRY.items():
+                if reg_info.get("provider") == provider and candidate in reg_name:
+                    env_key = reg_info.get("env_key", "")
+                    if env_key and not os.environ.get(env_key):
+                        continue
+                    matched = reg_name
+                    break
+            if not matched:
+                continue
+            try:
+                result = _route_model_call(matched, prompt, None)
+                text = result.get("text", result) if isinstance(result, dict) else result
+                return jsonify({"summary": text, "model_used": matched})
+            except Exception as e:
+                app.logger.warning("Summarize with %s failed: %s", matched, e)
+                continue
     return jsonify({"error": "No summarization model available"}), 500
 
 
@@ -2149,19 +2193,6 @@ def llm_ask():
                     app.logger.info("Disabling tools for retry — model may be stuck in tool loops")
                     real_tools = False
                 continue
-
-            # If all retries exhausted with no parsed response, generate fallback action
-            if not result.get("parsed") and attempt == max_retries - 1:
-                available = payload.get("available_actions", [])
-                fallback_action = available[0] if available else 0
-                result["parsed"] = {
-                    "observation": "(auto-fallback: LLM returned no parseable action)",
-                    "reasoning": "Model failed to produce a valid response after retries. Firing a default action to keep the game moving.",
-                    "action": fallback_action,
-                    "data": {},
-                }
-                result["fallback"] = True
-                app.logger.warning(f"Using fallback action {fallback_action} after {max_retries} failed attempts")
 
             result["tools_active"] = tools_mode == "on"
             result["thinking_level"] = thinking_level
@@ -2883,7 +2914,8 @@ def get_session_step(session_id, step_num):
 @app.route("/share/<session_id>")
 def share_session(session_id):
     """Public replay page for a session — no auth required.
-    Reads from Turso first (persistent), falls back to local SQLite."""
+    Reads from Turso first (persistent), falls back to local SQLite.
+    For branched sessions, traces back through parents to include full history."""
     try:
         sess = None
         step_list = []
@@ -2893,7 +2925,8 @@ def share_session(session_id):
         if turso_conn:
             try:
                 cur = turso_conn.execute(
-                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost "
+                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
+                    "parent_session_id, branch_at_step "
                     "FROM sessions WHERE id = ?",
                     (session_id,),
                 )
@@ -2914,7 +2947,8 @@ def share_session(session_id):
         if not sess:
             conn = _get_db()
             sess_row = conn.execute(
-                "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost "
+                "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
+                "parent_session_id, branch_at_step "
                 "FROM sessions WHERE id = ?",
                 (session_id,),
             ).fetchone()
@@ -2929,11 +2963,51 @@ def share_session(session_id):
             conn.close()
             step_list = [_format_step_row(dict(s)) for s in steps_rows]
 
+        # Trace back through parent sessions to build full history
+        parent_steps = []
+        trace_id = sess.get("parent_session_id")
+        trace_step = sess.get("branch_at_step")
+        max_depth = 10  # prevent infinite loops
+        while trace_id and trace_step is not None and max_depth > 0:
+            max_depth -= 1
+            parent_sess = None
+            p_steps = []
+            # Try local SQLite
+            conn = _get_db()
+            p_row = conn.execute(
+                "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+                (trace_id,),
+            ).fetchone()
+            p_steps_rows = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                (trace_id, trace_step),
+            ).fetchall()
+            conn.close()
+            if p_row:
+                parent_sess = dict(p_row)
+            for s in p_steps_rows:
+                st = _format_step_row(dict(s))
+                st["from_parent"] = True
+                p_steps.append(st)
+            # Prepend parent steps (oldest ancestor first)
+            parent_steps = p_steps + parent_steps
+            # Continue tracing
+            if parent_sess:
+                trace_id = parent_sess.get("parent_session_id")
+                trace_step = parent_sess.get("branch_at_step")
+            else:
+                break
+
+        # Combine: parent steps first, then own steps
+        if parent_steps:
+            step_list = parent_steps + step_list
+
         return render_template(
             "share.html",
             session=sess,
             steps=step_list,
             color_map=COLOR_MAP,
+            branch_at_step=len(parent_steps) if parent_steps else 0,
         )
     except Exception as e:
         app.logger.warning(f"Share page error: {e}")
