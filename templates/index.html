@@ -17,6 +17,16 @@
     --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  input[type=number] { -moz-appearance: textfield; }
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+  #compactContextPct { position: relative; }
+  .spin-wrap { display: inline-flex; align-items: center; position: relative; }
+  .spin-wrap .spin-btns { display: flex; flex-direction: column; margin-left: -1px; }
+  .spin-wrap .spin-btn { background: transparent; border: 1px solid var(--border); color: var(--text); cursor: pointer;
+    width: 20px; height: 13px; display: flex; align-items: center; justify-content: center; font-size: 8px; padding: 0; line-height: 1; }
+  .spin-wrap .spin-btn:first-child { border-radius: 0 4px 0 0; border-bottom: none; }
+  .spin-wrap .spin-btn:last-child { border-radius: 0 0 4px 0; }
+  .spin-wrap .spin-btn:hover { background: var(--border); }
   body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace; font-size: 13px; }
 
   .layout { display: flex; height: 100vh; }
@@ -130,7 +140,12 @@
   /* Reasoning content */
   .reasoning-scroll { flex: 1; overflow-y: auto; padding: 10px 14px; }
   .reasoning-entry { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
-    font-size: 12px; line-height: 1.6; }
+    font-size: 12px; line-height: 1.6; position: relative; }
+  .reasoning-entry .branch-btn { position: absolute; top: 0; right: 0; opacity: 0; transition: opacity 0.15s;
+    font-size: 10px; padding: 2px 8px; cursor: pointer; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text-dim); }
+  .reasoning-entry:hover .branch-btn { opacity: 1; }
+  .reasoning-entry .branch-btn:hover { border-color: var(--purple); color: var(--purple); }
   .reasoning-entry .step-label { color: var(--accent); font-weight: 600; margin-bottom: 4px; font-size: 11px; }
   .reasoning-entry .observation { color: var(--text-dim); }
   .reasoning-entry .action-rec { color: var(--green); font-weight: 600; margin-top: 4px; }
@@ -363,6 +378,7 @@
           <div style="display:flex;gap:6px;justify-content:center;">
             <button class="btn btn-step" onclick="replayPrev()" style="padding:4px 12px;">&#9664; Prev</button>
             <button class="btn btn-step" onclick="replayNext()" style="padding:4px 12px;">Next &#9654;</button>
+            <button class="btn" onclick="branchHere()" style="padding:4px 12px;border-color:var(--purple);color:var(--purple);">&#8627; Branch</button>
             <button class="btn btn-danger" onclick="closeReplay()" style="padding:4px 12px;">Close</button>
           </div>
         </div>
@@ -458,8 +474,8 @@
                     </div>
                     <div class="opt-row">
                       <div class="triswitch" id="toolsMode">
-                        <label><input type="radio" name="toolsMode" value="off" checked><span>Off</span></label>
-                        <label><input type="radio" name="toolsMode" value="on"><span>On</span></label>
+                        <label><input type="radio" name="toolsMode" value="off"><span>Off</span></label>
+                        <label><input type="radio" name="toolsMode" value="on" checked><span>On</span></label>
                         <label><input type="radio" name="toolsMode" value="adaptive"><span>Adaptive</span></label>
                       </div>
                     </div>
@@ -475,12 +491,25 @@
                       <input type="number" id="compactAfter" placeholder="—" min="1" max="200" style="width:55px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;">
                     </div>
                     <div class="opt-row">
-                      <span class="opt-label">Context % limit</span>
-                      <input type="number" id="compactContextPct" value="60" min="10" max="95" style="width:55px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;">
-                      <span style="font-size:10px;color:var(--text-dim);">%</span>
+                      <span class="opt-label">Context limit</span>
+                      <span class="spin-wrap">
+                        <input type="number" id="compactContextPct" value="60" min="1" step="1" style="width:68px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">
+                        <span class="spin-btns">
+                          <button class="spin-btn" onclick="spinContextLimit(1)">&#9650;</button>
+                          <button class="spin-btn" onclick="spinContextLimit(-1)">&#9660;</button>
+                        </span>
+                      </span>
+                      <select id="contextLimitUnit" style="width:62px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:11px;margin-left:4px;" onchange="onContextLimitUnitChange()">
+                        <option value="pct">%</option>
+                        <option value="tokens">tok</option>
+                      </select>
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      Compacts history when prompt exceeds N% of the selected model's context window. Optional: also after N calls.
+                      Compacts history when prompt exceeds limit (% of context window, or token count). Optional: also after N calls.
+                    </div>
+                    <div class="opt-row">
+                      <span class="opt-label">Compact on new level</span>
+                      <label class="toggle"><input type="checkbox" id="compactOnLevel" checked><span class="slider"></span></label>
                     </div>
                     <div class="opt-row">
                       <span class="opt-label">Planning horizon</span>
@@ -611,6 +640,7 @@
               <div class="transport-bar">
                 <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled title="Undo last step">&#9198; Undo</button>
                 <button class="btn" onclick="resetSession()" id="resetBtn" title="Restart current game from scratch" style="border-color:var(--red);color:var(--red);">&#8635; Reset</button>
+                <button class="btn" onclick="manualCompact()" id="compactBtn" title="Manually compact context now" style="background:#445;">&#128220; Compact</button>
                 <button class="btn btn-step" onclick="stepOnce()" id="stepBtn" title="Ask LLM + execute one step">&#9654; Step</button>
                 <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn" title="Auto-play continuously">&#9193; Auto</button>
                 <button class="btn" onclick="testModel()" id="testBtn" title="Test model connectivity + latency" style="background:#445;">&#128267; Test</button>
@@ -631,9 +661,14 @@
                   <textarea id="memoryHardMemory" style="flex:1;min-height:120px;" placeholder="Agent strategy priors..."></textarea>
                 </div>
               </div>
+              <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
+                <label>Compact Summary <span style="font-size:10px;color:var(--text-dim);">(auto-generated, editable)</span></label>
+                <textarea id="memoryCompactSummary" style="flex:1;min-height:80px;" placeholder="No compact summary yet. Play a game and compact context to see the LLM-generated summary of game rules and objectives here."></textarea>
+              </div>
               <div class="memory-actions">
                 <button class="btn btn-primary" onclick="saveMemoryEdits()">Save</button>
                 <button class="btn" onclick="resetMemoryDefaults()">Reset defaults</button>
+                <button class="btn" onclick="applyCompactEdit()" style="background:#445;">Apply compact</button>
                 <span id="memorySaveStatus" style="font-size:10px;color:var(--green);display:none;">Saved!</span>
               </div>
             </div>
@@ -1127,6 +1162,7 @@ function logHumanAction(actionId, actionData, changeMap) {
   const ci = changeMap?.change_count > 0 ? ` | ${changeMap.change_count} cells changed` : '';
   const coordStr = actionData?.x !== undefined ? ` at (${actionData.x}, ${actionData.y})` : '';
   entry.innerHTML = `
+    <button class="branch-btn" onclick="branchFromStep(${stepCount})" title="Branch from step ${stepCount}">&#8627; branch</button>
     <div class="step-label" style="color:var(--yellow);">Step ${stepCount} — Human</div>
     <div class="action-rec" style="color:var(--yellow);">\u2192 Action ${actionId} (${ACTION_NAMES[actionId] || '?'})${coordStr}${ci}</div>`;
   content.insertBefore(entry, content.firstChild);
@@ -1187,6 +1223,9 @@ canvas.addEventListener('click', async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (!sessionId) return;
+  // Don't capture keyboard when user is interacting with inputs/settings
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   const map = {'ArrowUp':1,'ArrowDown':2,'ArrowLeft':3,'ArrowRight':4,'w':1,'s':2,'a':3,'d':4,'z':5,'x':7,'r':0};
   if (map[e.key] !== undefined) { e.preventDefault(); doAction(map[e.key]); }
 });
@@ -1199,8 +1238,42 @@ function getCompactSettings() {
   const enabled = document.getElementById('compactContext').checked;
   const afterVal = document.getElementById('compactAfter').value;
   const after = afterVal ? parseInt(afterVal) : null;  // null = disabled
-  const contextPct = parseInt(document.getElementById('compactContextPct').value) || 60;
-  return { enabled, after, contextPct };
+  const unit = document.getElementById('contextLimitUnit').value; // 'pct' or 'tokens'
+  const rawVal = parseInt(document.getElementById('compactContextPct').value) || 60;
+  return { enabled, after, contextLimitUnit: unit, contextLimitVal: rawVal };
+}
+
+function onContextLimitUnitChange() {
+  const unit = document.getElementById('contextLimitUnit').value;
+  const input = document.getElementById('compactContextPct');
+  if (unit === 'pct') {
+    input.value = 60;
+  } else {
+    input.value = 32000;
+  }
+}
+
+// Spin context limit: dir=1 up, dir=-1 down
+function spinContextLimit(dir) {
+  const unit = document.getElementById('contextLimitUnit').value;
+  const input = document.getElementById('compactContextPct');
+  const val = parseInt(input.value) || 0;
+  if (unit === 'tokens') {
+    input.value = dir > 0 ? Math.min(val * 2, 2000000) : Math.max(Math.floor(val / 2), 1000);
+  } else {
+    input.value = dir > 0 ? Math.min(val + 5, 99) : Math.max(val - 5, 1);
+  }
+}
+
+// ArrowUp/Down: ×2/÷2 for tokens, ±5 for pct
+document.getElementById('compactContextPct').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowUp') { e.preventDefault(); spinContextLimit(1); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); spinContextLimit(-1); }
+});
+
+function getContextTokenLimit(compact, contextWindow) {
+  if (compact.contextLimitUnit === 'tokens') return compact.contextLimitVal;
+  return Math.floor(contextWindow * compact.contextLimitVal / 100);
 }
 
 function getSelectedModelContextWindow() {
@@ -1251,6 +1324,19 @@ function collectObservation(resp) {
 
 let _cachedCompactSummary = '';  // LLM-generated summary, cached until refreshed
 let _compactSummaryAtCall = 0;   // llmCallCount when summary was last generated
+
+function _syncCompactToMemoryTab() {
+  const el = document.getElementById('memoryCompactSummary');
+  if (el) el.value = _cachedCompactSummary;
+}
+
+function applyCompactEdit() {
+  const el = document.getElementById('memoryCompactSummary');
+  if (el) {
+    _cachedCompactSummary = el.value;
+    _compactSummaryAtCall = llmCallCount;
+  }
+}
 
 function buildCompactContextFallback() {
   // Heuristic fallback when LLM summary is not available yet.
@@ -1328,12 +1414,54 @@ Respond with ONLY the summary text, no JSON.`;
     if (summary) {
       _cachedCompactSummary = `## COMPACT CONTEXT (LLM-summarized game knowledge)\n${summary}`;
       _compactSummaryAtCall = llmCallCount;
+      _syncCompactToMemoryTab();
       return _cachedCompactSummary;
     }
   } catch (e) {
     console.warn('Compact summary LLM call failed, using fallback:', e);
   }
-  return buildCompactContextFallback();
+  const fallback = buildCompactContextFallback();
+  if (fallback) {
+    _cachedCompactSummary = fallback;
+    _syncCompactToMemoryTab();
+  }
+  return fallback;
+}
+
+// ── Session event logging ──────────────────────────────────────────────
+function logSessionEvent(eventType, stepNum, data = {}) {
+  if (!sessionId) return;
+  fetchJSON(`/api/sessions/${sessionId}/event`, {
+    event_type: eventType,
+    step_num: stepNum,
+    data: data,
+  }).catch(() => {});  // fire and forget
+}
+
+async function manualCompact() {
+  if (!sessionId || moveHistory.length === 0) return;
+  const btn = document.getElementById('compactBtn');
+  btn.disabled = true;
+  btn.textContent = '\u23f3 Compacting...';
+  try {
+    _cachedCompactSummary = '';  // force refresh
+    const summary = await buildCompactContext();
+    if (summary) {
+      _cachedCompactSummary = summary;
+      _syncCompactToMemoryTab();
+      _compactSummaryAtCall = llmCallCount;
+      logSessionEvent('compact', stepCount, { call_count: llmCallCount, history_length: moveHistory.length, trigger: 'manual' });
+      const content = document.getElementById('reasoningContent');
+      if (content.querySelector('.empty-state')) content.innerHTML = '';
+      const entry = document.createElement('div');
+      entry.className = 'reasoning-entry';
+      entry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context compacted at step ${stepCount} (${llmCallCount} calls)</div>`;
+      content.insertBefore(entry, content.firstChild);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '\ud83d\udcdc Compact';
+  }
 }
 
 function getThinkingLevel() {
@@ -1470,12 +1598,15 @@ async function askLLM() {
     llmCallCount++;
     const compact = getCompactSettings();
     const contextWindow = getSelectedModelContextWindow();
-    const maxHistTokens = Math.floor(contextWindow * compact.contextPct / 100);
+    const maxHistTokens = getContextTokenLimit(compact, contextWindow);
     const callTrigger = compact.enabled && compact.after && llmCallCount >= compact.after;
     // Also trigger compact if estimated history tokens exceed % of model context
     const histTokenEst = estimateTokens(JSON.stringify(moveHistory));
     const tokenTrigger = compact.enabled && histTokenEst > maxHistTokens;
     const compactBlock = (callTrigger || tokenTrigger) ? await buildCompactContext() : '';
+    if (compactBlock && (callTrigger || tokenTrigger)) {
+      logSessionEvent('compact', stepCount, { trigger: callTrigger ? 'calls' : 'tokens', call_count: llmCallCount });
+    }
 
     // Trim history grids if approaching context limit
     const historyForLLM = compact.enabled
@@ -1601,7 +1732,9 @@ async function askLLM() {
       const stepLabel = steps.length > 1
         ? `Steps ${stepCount + 1}-${stepCount + steps.length}`
         : `Step ${stepCount + 1}`;
+      entry.dataset.branchStep = stepCount + steps.length;
       entry.innerHTML = `
+        <button class="branch-btn" onclick="branchFromStep(${stepCount + steps.length})" title="Branch from here">&#8627; branch</button>
         <div class="step-label">${stepLabel} — ${resp.model}${durationHtml}${thinkBadge}${toolsBadge}${cacheBadge}${compactBadge}${planBadge}</div>
         ${tokensHtml}${ci}
         <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
@@ -1610,7 +1743,10 @@ async function askLLM() {
         <div class="plan-progress">${planHtml}</div>
         ${thinkHtml}`;
     } else {
-      entry.innerHTML = `<div class="step-label">Step ${stepCount} — ${resp.model}</div>
+      entry.dataset.branchStep = stepCount;
+      entry.innerHTML = `
+        <button class="branch-btn" onclick="branchFromStep(${stepCount})" title="Branch from here">&#8627; branch</button>
+        <div class="step-label">Step ${stepCount} — ${resp.model}</div>
         <div style="white-space:pre-wrap;font-size:11px;">${resp.raw || 'No response'}</div>`;
     }
 
@@ -1650,6 +1786,7 @@ async function executePlan(plan, resp, entry) {
   // Execute a multi-step plan, updating UI live
   const planSteps = entry ? entry.querySelectorAll('.plan-step') : [];
   let consecutiveNoChange = 0;
+  const levelsBefore = currentState.levels_completed || 0;
   let completed = 0;
 
   for (let i = 0; i < plan.length; i++) {
@@ -1720,6 +1857,40 @@ async function executePlan(plan, resp, entry) {
     await new Promise(r => setTimeout(r, 100));
   }
 
+  // Detect level change and show indicator + auto-compact
+  const levelsAfter = currentState.levels_completed || 0;
+  if (levelsAfter > levelsBefore) {
+    const lvlEntry = document.createElement('div');
+    lvlEntry.className = 'reasoning-entry';
+    lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${currentState.win_levels} \u2192 ${levelsAfter}/${currentState.win_levels})</div>`;
+    const content = document.getElementById('reasoningContent');
+    content.insertBefore(lvlEntry, content.firstChild);
+    if (document.getElementById('compactOnLevel').checked) {
+      _cachedCompactSummary = '';
+      const summary = await buildCompactContext();
+      if (summary) {
+        _cachedCompactSummary = summary;
+        _syncCompactToMemoryTab();
+        _compactSummaryAtCall = llmCallCount;
+        logSessionEvent('compact', stepCount, { trigger: 'level_up', level: levelsAfter });
+        const cEntry = document.createElement('div');
+        cEntry.className = 'reasoning-entry';
+        cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context auto-compacted on level ${levelsAfter}</div>`;
+        content.insertBefore(cEntry, content.firstChild);
+      }
+    }
+  }
+  // Update the entry with level info
+  if (entry) {
+    const levelBadge = document.createElement('span');
+    levelBadge.className = 'tools-badge';
+    levelBadge.style.cssText = levelsAfter > levelsBefore
+      ? 'background:#3fb95033;color:var(--green);' : 'background:var(--bg);color:var(--text-dim);';
+    levelBadge.textContent = `L${levelsAfter}/${currentState.win_levels || '?'}`;
+    const stepLabel = entry.querySelector('.step-label');
+    if (stepLabel) stepLabel.appendChild(levelBadge);
+  }
+
   checkSessionEndAndUpload();
   return { completed, total: plan.length, interrupted: completed < plan.length };
 }
@@ -1727,6 +1898,7 @@ async function executePlan(plan, resp, entry) {
 async function executeOneAction(resp) {
   // Execute a single action from LLM response
   const p = resp.parsed;
+  const levelsBefore = currentState.levels_completed || 0;
   undoStack.push({
     grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
     state: currentState.state,
@@ -1743,6 +1915,31 @@ async function executeOneAction(resp) {
   recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
   updateUI(data);
   updateUndoBtn();
+
+  // Detect level change
+  const levelsAfter = data.levels_completed || 0;
+  if (levelsAfter > levelsBefore) {
+    const content = document.getElementById('reasoningContent');
+    const lvlEntry = document.createElement('div');
+    lvlEntry.className = 'reasoning-entry';
+    lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${data.win_levels} \u2192 ${levelsAfter}/${data.win_levels})</div>`;
+    content.insertBefore(lvlEntry, content.firstChild);
+    if (document.getElementById('compactOnLevel').checked) {
+      _cachedCompactSummary = '';
+      const summary = await buildCompactContext();
+      if (summary) {
+        _cachedCompactSummary = summary;
+        _syncCompactToMemoryTab();
+        _compactSummaryAtCall = llmCallCount;
+        logSessionEvent('compact', stepCount, { trigger: 'level_up', level: levelsAfter });
+        const cEntry = document.createElement('div');
+        cEntry.className = 'reasoning-entry';
+        cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context auto-compacted on level ${levelsAfter}</div>`;
+        content.insertBefore(cEntry, content.firstChild);
+      }
+    }
+  }
+
   checkSessionEndAndUpload();
   return data;
 }
@@ -2379,6 +2576,14 @@ async function loadSessionHistory() {
 `;
       div.style.cursor = 'pointer';
       div.onclick = () => window.open(`/share/${s.id}`, '_blank');
+      if (s.result === 'NOT_FINISHED') {
+        const resumeBtn = document.createElement('button');
+        resumeBtn.className = 'btn btn-primary';
+        resumeBtn.style.cssText = 'padding:2px 8px;font-size:10px;margin-left:6px;';
+        resumeBtn.textContent = '\u25b6 Resume';
+        resumeBtn.onclick = (e) => { e.stopPropagation(); resumeSession(s.id); };
+        div.appendChild(resumeBtn);
+      }
       list.appendChild(div);
     }
   } catch (e) {
@@ -2586,8 +2791,8 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
     if (payload) saveLocalSession(payload.session, payload.steps);
   }
 
-  // Fire-and-forget puter.kv write
-  if (FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+  // Fire-and-forget puter.kv write (online mode only)
+  if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
     const payload = buildSessionPayload();
     if (payload) {
       puter.kv.set(puterKvKey(sessionId), JSON.stringify(payload)).catch(() => {});
@@ -2627,8 +2832,8 @@ function checkSessionEndAndUpload() {
     }
     // Auto-upload completed session to server
     autoUploadSession().then(() => {
-      // Clean up puter.kv entry on success
-      if (FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+      // Clean up puter.kv entry on success (online mode only)
+      if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
         puter.kv.del(puterKvKey(sessionId)).catch(() => {});
       }
     });
@@ -2669,7 +2874,7 @@ function showShareLink(sid) {
 }
 
 async function puterKvCheckResume() {
-  if (!FEATURES.puter_js || typeof puter === 'undefined' || !puter.kv) return;
+  if (MODE !== 'online' || !FEATURES.puter_js || typeof puter === 'undefined' || !puter.kv) return;
   try {
     // Scan for in-progress sessions
     const keys = await puter.kv.list();
@@ -2744,14 +2949,352 @@ async function resumeFromPuterKv(kvKey) {
 
 function dismissResumeBanner(kvKey) {
   document.getElementById('resumeBanner')?.remove();
-  if (FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+  if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
     puter.kv.del(kvKey).catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESTORED REASONING PANEL (shared by resume + branch)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderRestoredReasoning(steps, bannerText, bannerColor) {
+  const content = document.getElementById('reasoningContent');
+  content.innerHTML = '';
+
+  // Banner
+  const bannerEntry = document.createElement('div');
+  bannerEntry.className = 'reasoning-entry';
+  bannerEntry.innerHTML = `<div class="step-label" style="color:${bannerColor};">${bannerText}</div>`;
+  content.appendChild(bannerEntry);
+
+  // Group steps into LLM calls (plan groups) and human actions
+  const groups = [];
+  let currentGroup = null;
+  let planCapacity = 0;
+  for (const s of steps) {
+    if (s.llm_response && s.llm_response.parsed) {
+      const plan = s.llm_response.parsed.plan;
+      const planSize = (plan && Array.isArray(plan)) ? plan.length : 1;
+      currentGroup = { type: 'llm', steps: [s], llm: s.llm_response };
+      planCapacity = planSize - 1;
+      groups.push(currentGroup);
+    } else if (currentGroup && currentGroup.type === 'llm' && planCapacity > 0 && !s.llm_response) {
+      currentGroup.steps.push(s);
+      planCapacity--;
+    } else {
+      groups.push({ type: 'human', steps: [s], llm: null });
+      currentGroup = null;
+      planCapacity = 0;
+    }
+  }
+
+  // Compute per-group level info: level at end of each group
+  for (const g of groups) {
+    const lastS = g.steps[g.steps.length - 1];
+    g.levelsAfter = lastS.levels_completed || 0;
+  }
+  // Level at start of first group
+  let prevGroupLevel = 0;
+  for (const g of groups) {
+    g.levelsBefore = prevGroupLevel;
+    prevGroupLevel = g.levelsAfter;
+  }
+
+  // Render groups (most recent first), inserting level-up markers
+  for (let gi = groups.length - 1; gi >= 0; gi--) {
+    const g = groups[gi];
+
+    // Insert level-up marker if this group caused a level change
+    if (g.levelsAfter > g.levelsBefore) {
+      const lvlEntry = document.createElement('div');
+      lvlEntry.className = 'reasoning-entry';
+      lvlEntry.style.opacity = '0.7';
+      const winLevels = steps[steps.length - 1]?.levels_completed !== undefined ? '' : '';
+      lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${g.levelsBefore} completed! (${g.levelsBefore} \u2192 ${g.levelsAfter})</div>`;
+      content.appendChild(lvlEntry);
+    }
+
+    const entry = document.createElement('div');
+    entry.className = 'reasoning-entry';
+    entry.style.opacity = '0.7';
+
+    // Level badge
+    const levelChanged = g.levelsAfter > g.levelsBefore;
+    const levelBadgeStyle = levelChanged ? 'background:#3fb95033;color:var(--green);' : 'background:var(--bg);color:var(--text-dim);';
+    const levelBadge = `<span class="tools-badge" style="${levelBadgeStyle}">L${g.levelsAfter}</span>`;
+
+    if (g.type === 'llm' && g.llm && g.llm.parsed) {
+      const llm = g.llm;
+      const p = llm.parsed;
+      const firstStep = g.steps[0].step_num;
+      const lastStep = g.steps[g.steps.length - 1].step_num;
+
+      const toolsBadge = llm.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
+      const thinkLevel = llm.thinking_level || '';
+      const thinkBadge = thinkLevel && thinkLevel !== 'off'
+        ? `<span class="tools-badge" style="background:#58a6ff22;color:var(--accent);">${thinkLevel.toUpperCase()}</span>` : '';
+      const cacheBadge = llm.cache_active ? '<span class="tools-badge" style="background:#e3b34133;color:var(--yellow);">CACHED</span>' : '';
+
+      let tokensHtml = '';
+      const inputTok = llm.usage?.input_tokens || llm.usage?.prompt_tokens || 0;
+      const outputTok = llm.usage?.output_tokens || llm.usage?.completion_tokens || 0;
+      const totalTok = inputTok + outputTok;
+      if (totalTok) {
+        const prices = TOKEN_PRICES[llm.model || ''] || null;
+        let costStr = '';
+        if (prices) {
+          const cost = (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
+          costStr = ` \u00b7 $${cost.toFixed(4)}`;
+        }
+        tokensHtml = `<div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;">${inputTok.toLocaleString()} in + ${outputTok.toLocaleString()} out = ${totalTok.toLocaleString()} tok${costStr}</div>`;
+      }
+
+      const thinkHtml = llm.thinking
+        ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${llm.thinking}</div></details>` : '';
+      const analysisHtml = p.analysis
+        ? `<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">${p.analysis}</div></details>` : '';
+      const toolCallsHtml = renderToolCallsHtml(llm.tool_calls || p.tool_calls || []);
+
+      const firstCm = g.steps[0].change_map;
+      const ci = firstCm?.change_count > 0
+        ? `<div style="font-size:11px;color:var(--yellow);">${firstCm.change_count} cells changed</div>` : '';
+
+      const planSteps = (p.plan && Array.isArray(p.plan))
+        ? p.plan
+        : [{ action: p.action, data: p.data || {} }];
+      const planHtml = planSteps.map((ps, i) => {
+        const aName = ACTION_NAMES[ps.action] || `ACTION${ps.action}`;
+        const dataStr = ps.data?.x !== undefined ? ` (${ps.data.x},${ps.data.y})` : '';
+        const done = i < g.steps.length;
+        const cls = done ? 'plan-step done' : 'plan-step skipped';
+        const btnStyle = done ? 'style="background:var(--green);color:#000;border-color:var(--green);"' : '';
+        return `<div class="${cls}">${i + 1}. <span class="action-btn" ${btnStyle}>${aName}</span>${dataStr}</div>`;
+      }).join('');
+
+      const planBadge = planSteps.length > 1 ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
+      const stepLabel = g.steps.length > 1
+        ? `Steps ${firstStep}-${lastStep}`
+        : `Step ${firstStep}`;
+      const durationHtml = llm.call_duration_ms
+        ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(llm.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
+
+      entry.innerHTML = `
+        <button class="branch-btn" onclick="branchFromStep(${lastStep})" title="Branch from step ${lastStep}">&#8627; branch</button>
+        <div class="step-label">${stepLabel} — ${llm.model || '?'}${durationHtml}${thinkBadge}${toolsBadge}${cacheBadge}${planBadge}${levelBadge} <span style="font-size:10px;color:var(--text-dim);">[restored]</span></div>
+        ${tokensHtml}${ci}
+        <div class="observation"><strong>Obs:</strong> ${p.observation || '\u2014'}</div>
+        <div style="margin-top:4px;"><strong>Reasoning:</strong> ${p.reasoning || '\u2014'}</div>
+        ${analysisHtml}${toolCallsHtml}
+        <div class="plan-progress">${planHtml}</div>
+        ${thinkHtml}`;
+    } else {
+      const s = g.steps[0];
+      const aName = ACTION_NAMES[s.action] || `ACTION${s.action}`;
+      const ci = s.change_map?.change_count > 0 ? ` | ${s.change_map.change_count} cells changed` : '';
+      entry.innerHTML = `
+        <button class="branch-btn" onclick="branchFromStep(${s.step_num})" title="Branch from step ${s.step_num}">&#8627; branch</button>
+        <div class="step-label" style="color:var(--yellow);">Step ${s.step_num} — Human${levelBadge} <span style="font-size:10px;color:var(--text-dim);">[restored]</span></div>
+        <div class="action-rec" style="color:var(--yellow);">\u2192 Action ${s.action} (${aName})${ci}</div>`;
+    }
+    content.appendChild(entry);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION RESUME (resume NOT_FINISHED sessions from history)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function resumeSession(sid) {
+  try {
+    const data = await fetchJSON('/api/sessions/resume', { session_id: sid });
+    if (data.error) { alert(data.error); return; }
+
+    // Set up client state for live play
+    sessionId = sid;
+    stepCount = data.resumed_step_count || 0;
+    autoPlaying = false;
+    _cachedCompactSummary = '';
+    _compactSummaryAtCall = 0;
+    undoStack = [];
+    syncStepCounter = 0;
+
+    // Rebuild moveHistory, sessionStepsBuffer, llmObservations, and token totals from step history
+    moveHistory = [];
+    sessionStepsBuffer = [];
+    llmObservations = [];
+    llmCallCount = 0;
+    sessionTotalTokens = { input: 0, output: 0, cost: 0 };
+    const steps = data.steps || [];
+    for (const s of steps) {
+      // Rebuild moveHistory (with per-step game stats from server replay)
+      moveHistory.push({
+        step: s.step_num,
+        action: s.action,
+        result_state: s.result_state || 'NOT_FINISHED',
+        levels: s.levels_completed || 0,
+        grid: s.grid || null,
+        change_map: s.change_map || null,
+      });
+      // Rebuild sessionStepsBuffer
+      sessionStepsBuffer.push({
+        step_num: s.step_num,
+        action: s.action,
+        data: s.data || {},
+        grid: s.grid || null,
+        change_map: s.change_map || null,
+        llm_response: s.llm_response || null,
+        timestamp: s.timestamp || 0,
+      });
+      // Rebuild llmObservations from LLM responses
+      const llm = s.llm_response;
+      if (llm && llm.parsed) {
+        llmCallCount++;
+        llmObservations.push({
+          step: s.step_num,
+          observation: llm.parsed.observation || '',
+          reasoning: llm.parsed.reasoning || '',
+          action: llm.parsed.action,
+          analysis: llm.parsed.analysis || '',
+        });
+      }
+      // Rebuild sessionTotalTokens from LLM usage
+      if (llm && llm.usage) {
+        const inputTok = llm.usage.input_tokens || llm.usage.prompt_tokens || 0;
+        const outputTok = llm.usage.output_tokens || llm.usage.completion_tokens || 0;
+        sessionTotalTokens.input += inputTok;
+        sessionTotalTokens.output += outputTok;
+        const model = llm.model || data.model || '';
+        const prices = TOKEN_PRICES[model] || null;
+        if (prices) {
+          sessionTotalTokens.cost += (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
+        }
+      }
+    }
+    sessionStartTime = Date.now() / 1000;
+
+    // Close replay if open
+    closeReplay();
+
+    updateUI(data);
+    updateUndoBtn();
+
+    // Show controls
+    document.getElementById('emptyState').style.display = 'none';
+    canvas.style.display = 'block';
+    document.getElementById('controls').style.display = 'flex';
+
+    if ((data.available_actions || []).includes(6)) {
+      action6Mode = true;
+      canvas.style.cursor = 'crosshair';
+    }
+
+    // Switch to Agent tab
+    switchTopTab('agent');
+
+    // Log the resume event
+    logSessionEvent('resumed', stepCount, {});
+
+    // Rebuild reasoning panel
+    renderRestoredReasoning(steps, `Session resumed at step ${stepCount} (${llmCallCount} prior LLM calls, ${sessionTotalTokens.input + sessionTotalTokens.output} tokens restored)`, 'var(--green)');
+  } catch (e) {
+    alert('Resume failed: ' + e.message);
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SESSION BRANCHING (client-side)
 // ═══════════════════════════════════════════════════════════════════════════
+
+async function branchFromStep(stepNum) {
+  // Branch the current live session at a given step number
+  if (!sessionId) return;
+  if (!confirm(`Branch from step ${stepNum}? This creates a new session from that point.`)) return;
+  try {
+    const data = await fetchJSON('/api/sessions/branch', {
+      parent_session_id: sessionId,
+      step_num: stepNum,
+    });
+    if (data.error) { alert(data.error); return; }
+
+    const parentId = sessionId;
+    sessionId = data.session_id;
+    stepCount = stepNum;
+    undoStack = [];
+    syncStepCounter = 0;
+    _cachedCompactSummary = '';
+    _compactSummaryAtCall = 0;
+    autoPlaying = false;
+
+    // Rebuild state from returned steps (same as resume)
+    moveHistory = [];
+    sessionStepsBuffer = [];
+    llmObservations = [];
+    llmCallCount = 0;
+    sessionTotalTokens = { input: 0, output: 0, cost: 0 };
+    const steps = data.steps || [];
+    for (const s of steps) {
+      moveHistory.push({
+        step: s.step_num,
+        action: s.action,
+        result_state: s.result_state || 'NOT_FINISHED',
+        levels: s.levels_completed || 0,
+        grid: s.grid || null,
+        change_map: s.change_map || null,
+      });
+      sessionStepsBuffer.push({
+        step_num: s.step_num,
+        action: s.action,
+        data: s.data || {},
+        grid: s.grid || null,
+        change_map: s.change_map || null,
+        llm_response: s.llm_response || null,
+        timestamp: s.timestamp || 0,
+      });
+      const llm = s.llm_response;
+      if (llm && llm.parsed) {
+        llmCallCount++;
+        llmObservations.push({
+          step: s.step_num,
+          observation: llm.parsed.observation || '',
+          reasoning: llm.parsed.reasoning || '',
+          action: llm.parsed.action,
+          analysis: llm.parsed.analysis || '',
+        });
+      }
+      if (llm && llm.usage) {
+        const inputTok = llm.usage.input_tokens || llm.usage.prompt_tokens || 0;
+        const outputTok = llm.usage.output_tokens || llm.usage.completion_tokens || 0;
+        sessionTotalTokens.input += inputTok;
+        sessionTotalTokens.output += outputTok;
+        const model = llm.model || '';
+        const prices = TOKEN_PRICES[model] || null;
+        if (prices) {
+          sessionTotalTokens.cost += (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
+        }
+      }
+    }
+    sessionStartTime = Date.now() / 1000;
+
+    updateUI(data);
+    updateUndoBtn();
+
+    if ((data.available_actions || []).includes(6)) {
+      action6Mode = true;
+      canvas.style.cursor = 'crosshair';
+    }
+
+    logSessionEvent('branch_created', stepNum, { parent_session_id: parentId });
+    switchTopTab('agent');
+
+    // Render reasoning trace from parent steps
+    renderRestoredReasoning(steps,
+      `Branched from step ${stepNum} (${llmCallCount} prior LLM calls, $${sessionTotalTokens.cost.toFixed(3)} cost)`,
+      'var(--purple)');
+  } catch (e) {
+    alert('Branch failed: ' + e.message);
+  }
+}
 
 async function branchHere() {
   if (!replayData || !replayData.session) return;
@@ -2769,13 +3312,51 @@ async function branchHere() {
     // Transition from replay to live play
     sessionId = data.session_id;
     stepCount = stepNum;
-    moveHistory = [];
     undoStack = [];
-    sessionStepsBuffer = [];
-    sessionStartTime = Date.now() / 1000;
     syncStepCounter = 0;
+    _cachedCompactSummary = '';
+    _compactSummaryAtCall = 0;
     autoPlaying = false;
     replayData = null;
+
+    // Rebuild state from returned steps
+    moveHistory = [];
+    sessionStepsBuffer = [];
+    llmObservations = [];
+    llmCallCount = 0;
+    sessionTotalTokens = { input: 0, output: 0, cost: 0 };
+    const steps = data.steps || [];
+    for (const s of steps) {
+      moveHistory.push({
+        step: s.step_num, action: s.action,
+        result_state: s.result_state || 'NOT_FINISHED',
+        levels: s.levels_completed || 0,
+        grid: s.grid || null, change_map: s.change_map || null,
+      });
+      sessionStepsBuffer.push({
+        step_num: s.step_num, action: s.action, data: s.data || {},
+        grid: s.grid || null, change_map: s.change_map || null,
+        llm_response: s.llm_response || null, timestamp: s.timestamp || 0,
+      });
+      const llm = s.llm_response;
+      if (llm && llm.parsed) {
+        llmCallCount++;
+        llmObservations.push({
+          step: s.step_num, observation: llm.parsed.observation || '',
+          reasoning: llm.parsed.reasoning || '', action: llm.parsed.action,
+          analysis: llm.parsed.analysis || '',
+        });
+      }
+      if (llm && llm.usage) {
+        const inTok = llm.usage.input_tokens || llm.usage.prompt_tokens || 0;
+        const outTok = llm.usage.output_tokens || llm.usage.completion_tokens || 0;
+        sessionTotalTokens.input += inTok;
+        sessionTotalTokens.output += outTok;
+        const prices = TOKEN_PRICES[llm.model || ''] || null;
+        if (prices) sessionTotalTokens.cost += (inTok * prices[0] + outTok * prices[1]) / 1_000_000;
+      }
+    }
+    sessionStartTime = Date.now() / 1000;
 
     // Hide replay bar, show controls
     document.getElementById('replayBar').style.display = 'none';
@@ -2789,6 +3370,15 @@ async function branchHere() {
       action6Mode = true;
       canvas.style.cursor = 'crosshair';
     }
+
+    // Log the branch event on the new session
+    logSessionEvent('branch_created', stepNum, { parent_session_id: parentId });
+
+    // Switch to Agent tab and render reasoning trace
+    switchTopTab('agent');
+    renderRestoredReasoning(steps,
+      `Branched from replay at step ${stepNum} (${llmCallCount} prior LLM calls)`,
+      'var(--purple)');
   } catch (e) {
     alert('Branch failed: ' + e.message);
   }

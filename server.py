@@ -35,6 +35,7 @@ from arcengine import GameAction, GameState
 load_dotenv(Path(__file__).parent / ".env")
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.logger.setLevel(logging.INFO)
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -302,6 +303,18 @@ def _init_db():
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
             pass  # column already exists
+    # Session events table (compaction, branch, resume tracking)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            step_num INTEGER,
+            data_json TEXT DEFAULT '{}',
+            timestamp REAL NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -378,12 +391,14 @@ def _db_update_session(session_id: str, **kwargs):
     except Exception as e:
         app.logger.warning(f"DB update session failed: {e}")
 
-def _reconstruct_session(game_id: str, actions: list[dict]):
-    """Replay a list of {action, data} dicts on a fresh env. Returns (env, state_dict)."""
+def _reconstruct_session(game_id: str, actions: list[dict], capture_per_step: bool = False):
+    """Replay a list of {action, data} dicts on a fresh env. Returns (env, state_dict).
+    If capture_per_step=True, also returns list of per-step state dicts."""
     bare_id = game_id.split("-")[0]
     arc = get_arcade()
     env = arc.make(bare_id)
     state = env_state_dict(env)
+    per_step_states = [] if capture_per_step else None
     for act in actions:
         action = GameAction.from_id(int(act["action"]))
         data = act.get("data") or None
@@ -392,6 +407,13 @@ def _reconstruct_session(game_id: str, actions: list[dict]):
         frame_data = env.step(action, data=data if data else None)
         if frame_data is not None:
             state = env_state_dict(env, frame_data)
+        if capture_per_step:
+            per_step_states.append({
+                "state": state.get("state", "NOT_FINISHED"),
+                "levels_completed": state.get("levels_completed", 0),
+            })
+    if capture_per_step:
+        return env, state, per_step_states
     return env, state
 
 
@@ -2122,7 +2144,24 @@ def llm_ask():
                 app.logger.warning(
                     f"LLM returned no parsed response (attempt {attempt + 1}/{max_retries}), retrying..."
                 )
+                # If tools were on but produced no parseable answer, retry without tools
+                if real_tools:
+                    app.logger.info("Disabling tools for retry — model may be stuck in tool loops")
+                    real_tools = False
                 continue
+
+            # If all retries exhausted with no parsed response, generate fallback action
+            if not result.get("parsed") and attempt == max_retries - 1:
+                available = payload.get("available_actions", [])
+                fallback_action = available[0] if available else 0
+                result["parsed"] = {
+                    "observation": "(auto-fallback: LLM returned no parseable action)",
+                    "reasoning": "Model failed to produce a valid response after retries. Firing a default action to keep the game moving.",
+                    "action": fallback_action,
+                    "data": {},
+                }
+                result["fallback"] = True
+                app.logger.warning(f"Using fallback action {fallback_action} after {max_retries} failed attempts")
 
             result["tools_active"] = tools_mode == "on"
             result["thinking_level"] = thinking_level
@@ -2539,6 +2578,96 @@ def import_session():
         return _cors_resp({"error": str(e)}, 500)
 
 
+@app.route("/api/sessions/resume", methods=["POST"])
+@bot_protection
+@turnstile_required
+def resume_session():
+    """Resume an unfinished session. Replays all steps and returns live state."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 400
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id")
+    if not session_id:
+        return jsonify({"error": "session_id required"}), 400
+    # Fetch session metadata and step rows from DB
+    try:
+        conn = _get_db()
+        sess = conn.execute(
+            "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if not sess:
+            conn.close()
+            return jsonify({"error": "Session not found"}), 404
+
+        # For branched sessions, collect parent steps up to branch point first
+        parent_rows = []
+        if sess["parent_session_id"] and sess["branch_at_step"] is not None:
+            parent_rows = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                (sess["parent_session_id"], sess["branch_at_step"]),
+            ).fetchall()
+
+        # Then this session's own steps (taken after branching)
+        own_rows = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": f"DB error: {e}"}), 500
+
+    # Combine: parent steps + own steps = full action history
+    all_rows = list(parent_rows) + list(own_rows)
+
+    # Replay all moves to get correct env state + per-step game stats
+    actions = [{"action": r["action"], "data": r["data_json"]} for r in all_rows]
+    env, state, per_step_states = _reconstruct_session(sess["game_id"], actions, capture_per_step=True)
+
+    # Register the recovered env in global state
+    with session_lock:
+        game_sessions[session_id] = env
+        session_grids[session_id] = state.get("grid", [])
+        session_snapshots[session_id] = []
+        session_step_counts[session_id] = len(actions)
+
+    state["session_id"] = session_id
+    state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(resumed)"}
+    state["resumed_step_count"] = len(actions)
+
+    # Build step history with per-step game stats from replay
+    step_list = [_format_step_row(dict(r)) for r in all_rows]
+    for i, s in enumerate(step_list):
+        if i < len(per_step_states):
+            s["result_state"] = per_step_states[i]["state"]
+            s["levels_completed"] = per_step_states[i]["levels_completed"]
+    state["steps"] = step_list
+    state["model"] = sess["model"] or ""
+    return jsonify(state)
+
+
+@app.route("/api/sessions/<session_id>/event", methods=["POST"])
+@bot_protection
+def log_session_event(session_id):
+    """Log a session event (compact, branch, resume)."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 400
+    payload = request.get_json(force=True)
+    event_type = payload.get("event_type")
+    step_num = payload.get("step_num")
+    event_data = payload.get("data", {})
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT INTO session_events (session_id, event_type, step_num, data_json, timestamp) VALUES (?, ?, ?, ?, ?)",
+            (session_id, event_type, step_num, json.dumps(event_data), time.time()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"Event log failed: {e}")
+    return jsonify({"status": "ok"})
+
+
 @app.route("/api/sessions/branch", methods=["POST"])
 @bot_protection
 @turnstile_required
@@ -2557,14 +2686,19 @@ def branch_session():
         if not sess:
             conn.close()
             return jsonify({"error": "Parent session not found"}), 404
-        rows = conn.execute(
+        action_rows = conn.execute(
             "SELECT action, data_json FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+            (parent_id, step_num),
+        ).fetchall()
+        # Also fetch full step rows for reasoning trace
+        full_rows = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
             (parent_id, step_num),
         ).fetchall()
         conn.close()
 
-        actions = [{"action": r["action"], "data": r["data_json"]} for r in rows]
-        env, state = _reconstruct_session(sess["game_id"], actions)
+        actions = [{"action": r["action"], "data": r["data_json"]} for r in action_rows]
+        env, state, per_step_states = _reconstruct_session(sess["game_id"], actions, capture_per_step=True)
 
         # Generate new session ID
         new_session_id = env._guid if hasattr(env, "_guid") else secrets.token_hex(16)
@@ -2591,6 +2725,14 @@ def branch_session():
         state["parent_session_id"] = parent_id
         state["branch_at_step"] = step_num
         state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(branch)"}
+
+        # Include step history with per-step game stats for reasoning trace
+        step_list = [_format_step_row(dict(r)) for r in full_rows]
+        for i, s in enumerate(step_list):
+            if i < len(per_step_states):
+                s["result_state"] = per_step_states[i]["state"]
+                s["levels_completed"] = per_step_states[i]["levels_completed"]
+        state["steps"] = step_list
         return jsonify(state)
     except Exception as e:
         app.logger.warning(f"Session branch failed: {e}")
