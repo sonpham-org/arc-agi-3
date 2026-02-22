@@ -2054,13 +2054,23 @@ async function loadSessionHistory() {
   const list = document.getElementById('historyList');
   try {
     let sessions = [];
-    if (MODE === 'online') {
-      // Online mode: load from localStorage (per-user)
-      sessions = getLocalSessions();
-    } else {
-      // Local mode: load from server DB
+    // Always fetch from server DB (includes Turso sessions)
+    try {
       const data = await fetchJSON('/api/sessions');
-      sessions = data.sessions || [];
+      const serverSessions = data.sessions || [];
+      // Merge with localStorage sessions (online mode), dedup by id
+      const byId = {};
+      for (const s of serverSessions) byId[s.id] = s;
+      if (MODE === 'online') {
+        for (const s of getLocalSessions()) {
+          if (!byId[s.id]) byId[s.id] = s;
+        }
+      }
+      sessions = Object.values(byId);
+      sessions.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    } catch (e) {
+      // Fallback to localStorage only
+      sessions = MODE === 'online' ? getLocalSessions() : [];
     }
     if (!sessions.length) {
       list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No sessions yet. Play a game!</div>';
@@ -2102,7 +2112,11 @@ async function loadReplay(sid) {
     let data;
     if (MODE === 'online') {
       data = getLocalSessionData(sid);
-      if (!data) { alert('Session data not found locally.'); return; }
+      // Fall back to server (Turso) if not in localStorage
+      if (!data) {
+        data = await fetchJSON(`/api/sessions/${sid}`);
+        if (data.error) { alert('Session not found locally or on server.'); return; }
+      }
     } else {
       data = await fetchJSON(`/api/sessions/${sid}`);
       if (data.error) { alert(data.error); return; }

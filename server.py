@@ -2547,10 +2547,12 @@ def branch_session():
 @bot_protection
 @turnstile_required
 def list_sessions():
-    """List recent sessions (last 100)."""
+    """List recent sessions (last 100). Merges local SQLite + Turso."""
     if not feature_enabled("session_db"):
         return jsonify({"sessions": []})
     try:
+        sessions_by_id = {}
+        # Local SQLite
         conn = _get_db()
         rows = conn.execute(
             "SELECT id, game_id, model, mode, created_at, result, steps, levels, "
@@ -2558,7 +2560,27 @@ def list_sessions():
             "FROM sessions ORDER BY created_at DESC LIMIT 100"
         ).fetchall()
         conn.close()
-        return jsonify({"sessions": [dict(r) for r in rows]})
+        for r in rows:
+            d = dict(r)
+            sessions_by_id[d["id"]] = d
+        # Turso (merge in, dedup by id)
+        turso_conn = _get_turso_db()
+        if turso_conn:
+            try:
+                cur = turso_conn.execute(
+                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, "
+                    "parent_session_id, branch_at_step, total_cost "
+                    "FROM sessions ORDER BY created_at DESC LIMIT 100"
+                )
+                for d in _turso_dict_fetchall(cur):
+                    if d["id"] not in sessions_by_id:
+                        sessions_by_id[d["id"]] = d
+                turso_conn.close()
+            except Exception as e:
+                app.logger.warning(f"Turso list_sessions failed: {e}")
+        # Sort by created_at desc
+        merged = sorted(sessions_by_id.values(), key=lambda s: s.get("created_at", 0), reverse=True)
+        return jsonify({"sessions": merged[:100]})
     except Exception as e:
         return jsonify({"sessions": [], "error": str(e)})
 
@@ -2585,37 +2607,50 @@ def _format_step_row(d: dict) -> dict:
 @bot_protection
 @turnstile_required
 def get_session(session_id):
-    """Get full session with all steps and decompressed grids."""
+    """Get full session with all steps and decompressed grids.
+    Tries local SQLite first, falls back to Turso."""
     if not feature_enabled("session_db"):
         return jsonify({"error": "Session DB not enabled"}), 404
     try:
+        sess_dict = None
+        step_list = []
+
+        # Try local SQLite first
         conn = _get_db()
         sess = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if not sess:
-            conn.close()
-            return jsonify({"error": "Session not found"}), 404
-        steps = conn.execute(
-            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-            (session_id,),
-        ).fetchall()
-        conn.close()
-        step_list = []
-        # For branched sessions, prepend parent steps up to branch point
-        sess_dict = dict(sess)
-        parent_id = sess_dict.get("parent_session_id")
-        branch_at = sess_dict.get("branch_at_step")
-        if parent_id and branch_at is not None:
-            parent_steps = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                (parent_id, branch_at),
+        if sess:
+            steps = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                (session_id,),
             ).fetchall()
-            for s in parent_steps:
-                d = _format_step_row(dict(s))
-                d["from_parent"] = True
-                step_list.append(d)
-        for s in steps:
-            d = _format_step_row(dict(s))
-            step_list.append(d)
+            conn.close()
+            sess_dict = dict(sess)
+            for s in steps:
+                step_list.append(_format_step_row(dict(s)))
+        else:
+            conn.close()
+
+        # Fall back to Turso
+        if not sess_dict:
+            turso_conn = _get_turso_db()
+            if turso_conn:
+                try:
+                    cur = turso_conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+                    sess_dict = _turso_dict_fetchone(cur)
+                    if sess_dict:
+                        cur2 = turso_conn.execute(
+                            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                            (session_id,),
+                        )
+                        for s in _turso_dict_fetchall(cur2):
+                            step_list.append(_format_step_row(s))
+                    turso_conn.close()
+                except Exception as e:
+                    app.logger.warning(f"Turso get_session failed: {e}")
+
+        if not sess_dict:
+            return jsonify({"error": "Session not found"}), 404
+
         return jsonify({"session": sess_dict, "steps": step_list})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
