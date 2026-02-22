@@ -10,6 +10,10 @@ import os
 import re
 import secrets
 import sqlite3
+try:
+    import libsql_experimental as libsql
+except ImportError:
+    libsql = None
 import sys
 import io
 import threading
@@ -434,6 +438,140 @@ def _try_recover_session(session_id: str):
 
 # Initialize DB at import time (for gunicorn/Railway)
 _init_db()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TURSO — shared remote DB for persistent session replays
+# ═══════════════════════════════════════════════════════════════════════════
+
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+
+
+def _get_turso_db():
+    """Return a libsql connection to Turso, or None if not configured."""
+    if not libsql or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
+        return None
+    try:
+        conn = libsql.connect("turso_replica.db",
+                              sync_url=TURSO_DATABASE_URL,
+                              auth_token=TURSO_AUTH_TOKEN)
+        conn.sync()
+        return conn
+    except Exception as e:
+        logging.warning(f"Turso connection failed: {e}")
+        return None
+
+
+def _turso_dict_fetchone(cursor):
+    """Convert a single libsql tuple row to dict using cursor.description."""
+    row = cursor.fetchone()
+    if not row:
+        return None
+    cols = [d[0].lower() for d in cursor.description]
+    return dict(zip(cols, row))
+
+
+def _turso_dict_fetchall(cursor):
+    """Convert all libsql tuple rows to dicts using cursor.description."""
+    rows = cursor.fetchall()
+    if not rows:
+        return []
+    cols = [d[0].lower() for d in cursor.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def _init_turso_db():
+    """Create tables on Turso (idempotent). Called at import time."""
+    conn = _get_turso_db()
+    if not conn:
+        return
+    try:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                model TEXT DEFAULT '',
+                mode TEXT DEFAULT 'local',
+                created_at REAL NOT NULL,
+                result TEXT DEFAULT 'NOT_FINISHED',
+                steps INTEGER DEFAULT 0,
+                levels INTEGER DEFAULT 0,
+                parent_session_id TEXT DEFAULT NULL,
+                branch_at_step INTEGER DEFAULT NULL,
+                total_cost REAL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS session_steps (
+                session_id TEXT NOT NULL,
+                step_num INTEGER NOT NULL,
+                action INTEGER NOT NULL,
+                data_json TEXT DEFAULT '{}',
+                grid_snapshot TEXT,
+                change_map_json TEXT,
+                llm_response_json TEXT,
+                timestamp REAL NOT NULL,
+                PRIMARY KEY (session_id, step_num),
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+        """)
+        conn.commit()
+        conn.sync()
+        conn.close()
+        logging.info("Turso DB initialized successfully")
+    except Exception as e:
+        logging.warning(f"Turso DB init failed: {e}")
+
+
+def _turso_import_session(payload):
+    """Write a session + steps to Turso. Reuses same compression logic as local DB."""
+    conn = _get_turso_db()
+    if not conn:
+        return False
+    try:
+        sess = payload.get("session")
+        steps = payload.get("steps", [])
+        conn.execute(
+            """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
+                                     parent_session_id, branch_at_step)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 result = excluded.result, steps = excluded.steps, levels = excluded.levels,
+                 model = COALESCE(excluded.model, sessions.model)""",
+            (sess["id"], sess["game_id"], sess.get("model", ""),
+             sess.get("mode", "online"), sess.get("created_at", time.time()),
+             sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
+             sess.get("levels", 0), sess.get("parent_session_id"),
+             sess.get("branch_at_step")),
+        )
+        for s in steps:
+            grid_snapshot = None
+            if s.get("grid"):
+                grid_snapshot = _compress_grid(s["grid"])
+            conn.execute(
+                """INSERT OR REPLACE INTO session_steps
+                   (session_id, step_num, action, data_json, grid_snapshot,
+                    change_map_json, llm_response_json, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sess["id"], s.get("step_num", 0), s.get("action", 0),
+                 json.dumps(s.get("data", {})),
+                 grid_snapshot,
+                 json.dumps(s.get("change_map")) if s.get("change_map") else None,
+                 json.dumps(s.get("llm_response")) if s.get("llm_response") else None,
+                 s.get("timestamp", time.time())),
+            )
+        conn.commit()
+        conn.sync()
+        conn.close()
+        logging.info(f"Turso: imported session {sess['id']} ({len(steps)} steps)")
+        return True
+    except Exception as e:
+        logging.warning(f"Turso import failed: {e}")
+        return False
+
+
+# Initialize Turso DB at import time
+_init_turso_db()
+
 
 COLOR_MAP = {
     0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999", 3: "#666666",
@@ -2335,6 +2473,8 @@ def import_session():
             )
         conn.commit()
         conn.close()
+        # Also persist to Turso for durable shared replays
+        _turso_import_session(payload)
         return _cors_resp({"status": "ok", "session_id": sess["id"], "steps_imported": len(steps)})
     except Exception as e:
         app.logger.warning(f"Session import failed: {e}")
@@ -2509,26 +2649,56 @@ def get_session_step(session_id, step_num):
 
 @app.route("/share/<session_id>")
 def share_session(session_id):
-    """Public replay page for a session — no auth required."""
+    """Public replay page for a session — no auth required.
+    Reads from Turso first (persistent), falls back to local SQLite."""
     try:
-        conn = _get_db()
-        sess = conn.execute(
-            "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost "
-            "FROM sessions WHERE id = ?",
-            (session_id,),
-        ).fetchone()
+        sess = None
+        step_list = []
+
+        # Try Turso first (durable shared DB)
+        turso_conn = _get_turso_db()
+        if turso_conn:
+            try:
+                cur = turso_conn.execute(
+                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost "
+                    "FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+                sess = _turso_dict_fetchone(cur)
+                if sess:
+                    cur2 = turso_conn.execute(
+                        "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                        (session_id,),
+                    )
+                    steps_rows = _turso_dict_fetchall(cur2)
+                    step_list = [_format_step_row(s) for s in steps_rows]
+                turso_conn.close()
+            except Exception as e:
+                app.logger.warning(f"Turso share read failed, falling back to local: {e}")
+                sess = None
+
+        # Fall back to local SQLite
         if not sess:
+            conn = _get_db()
+            sess_row = conn.execute(
+                "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost "
+                "FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            if not sess_row:
+                conn.close()
+                return "<h1>Session not found</h1><p>This session does not exist.</p>", 404
+            sess = dict(sess_row)
+            steps_rows = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                (session_id,),
+            ).fetchall()
             conn.close()
-            return "<h1>Session not found</h1><p>This session does not exist.</p>", 404
-        steps = conn.execute(
-            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-            (session_id,),
-        ).fetchall()
-        conn.close()
-        step_list = [_format_step_row(dict(s)) for s in steps]
+            step_list = [_format_step_row(dict(s)) for s in steps_rows]
+
         return render_template(
             "share.html",
-            session=dict(sess),
+            session=sess,
             steps=step_list,
             color_map=COLOR_MAP,
         )
