@@ -1164,7 +1164,7 @@ def _get_or_create_gemini_cache(model: str, static_content: str) -> str | None:
             config=genai.types.CreateCachedContentConfig(
                 contents=[genai.types.Content(
                     role="user",
-                    parts=[genai.types.Part.from_text(static_content)],
+                    parts=[genai.types.Part.from_text(text=static_content)],
                 )],
                 ttl=f"{_GEMINI_CACHE_TTL_MINUTES * 60}s",
                 display_name=f"arc-agi-{content_hash[:8]}",
@@ -1438,7 +1438,7 @@ def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
     if image_b64:
         image_bytes = base64.b64decode(image_b64)
         parts.append(genai.types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
-    parts.append(genai.types.Part.from_text(f"{SYSTEM_MSG}\n\n{prompt}"))
+    parts.append(genai.types.Part.from_text(text=f"{SYSTEM_MSG}\n\n{prompt}"))
     contents = [genai.types.Content(role="user", parts=parts)]
 
     is_thinking_model = any(x in model_name for x in ("2.5", "3-pro", "3-flash", "3.1"))
