@@ -4,12 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ARC-AGI-3 Player</title>
+{% if umami_url and umami_website_id %}
+<script defer src="{{ umami_url }}/script.js" data-website-id="{{ umami_website_id }}"></script>
+{% endif %}
 {% if turnstile_site_key %}
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 {% endif %}
-{% if features.puter_js %}
-<script src="https://js.puter.com/v2/"></script>
-{% endif %}
+<!-- Puter.js loaded lazily when a Puter model is selected -->
 <style>
   :root {
     --bg: #0d1117; --surface: #161b22; --surface2: #1c2129; --border: #30363d;
@@ -151,6 +152,24 @@
   .reasoning-entry .action-rec { color: var(--green); font-weight: 600; margin-top: 4px; }
   .reasoning-entry .tools-badge { font-size: 10px; background: #3fb95033; color: var(--green);
     padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
+  .coord-ref { cursor: pointer; border-bottom: 1px dashed var(--accent); transition: background 0.15s; }
+  .coord-ref:hover { background: rgba(88, 166, 255, 0.2); border-radius: 2px; }
+  .ad-banner { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--surface); flex-shrink: 0; }
+  .ad-banner-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .ad-support-msg { font-size: 9px; color: var(--dim); font-style: italic; }
+  .ad-close-btn { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 14px;
+    padding: 0 4px; line-height: 1; }
+  .ad-close-btn:hover { color: var(--text); }
+  .bmc-slot { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+  .bmc-link { flex-shrink: 0; }
+  .bmc-img { height: 36px; border-radius: 4px; }
+  .bmc-text { font-size: 11px; color: var(--dim); line-height: 1.4; }
+  .ad-banner.hidden { display: none; }
+  .ad-show-btn { display: none; border-top: 1px solid var(--border); padding: 4px 10px;
+    background: var(--surface); flex-shrink: 0; text-align: center; }
+  .ad-show-btn button { background: none; border: none; color: var(--dim); cursor: pointer;
+    font-size: 9px; font-style: italic; }
+  .ad-show-btn button:hover { color: var(--text); }
 
   /* Plan progress display */
   .plan-progress { font-size: 11px; margin: 6px 0 2px; }
@@ -353,6 +372,7 @@
           Configure input, reasoning, and model in the right panel.
         </div>
         <canvas id="gameCanvas" width="512" height="512" style="display:none;"></canvas>
+        <div id="coordTooltip" style="display:none;position:fixed;pointer-events:none;background:rgba(0,0,0,0.85);color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;font-family:monospace;z-index:1000;border:1px solid var(--border);"></div>
         <div class="controls" id="controls" style="display:none;">
           <button class="btn btn-danger" onclick="doAction(0)">Reset <span class="kbd">R</span></button>
           <div class="dpad">
@@ -369,6 +389,9 @@
           <button class="btn" onclick="doAction(5)">ACT5 <span class="kbd">Z</span></button>
           <button class="btn" onclick="doAction(7)">ACT7 <span class="kbd">X</span></button>
           <button class="btn btn-primary" onclick="doAction(6,true)">Click grid <span class="kbd">Click</span></button>
+          <label style="font-size:10px;color:var(--dim);margin-left:8px;cursor:pointer;user-select:none;">
+            <input type="checkbox" id="coordToggle" checked> Coords
+          </label>
           <div id="noChangeMsg" style="display:none;"></div>
         </div>
         <!-- Replay scrubber (shown during session replay) -->
@@ -691,6 +714,21 @@
                 Start a game and enable LLM reasoning to see analysis here.
               </div>
             </div>
+            <div id="adBanner" class="ad-banner">
+              <div class="ad-banner-header">
+                <span class="ad-support-msg">Support this project</span>
+                <button class="ad-close-btn" onclick="toggleAdBanner()" title="Hide">&times;</button>
+              </div>
+              <div class="bmc-slot">
+                <a href="https://buymeacoffee.com/sonphamnet" target="_blank" rel="noopener" class="bmc-link">
+                  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="bmc-img">
+                </a>
+                <div class="bmc-text">Enjoying ARC-AGI-3? A coffee helps keep development going.</div>
+              </div>
+            </div>
+            <div class="ad-show-btn" id="adShowBtn">
+              <button onclick="toggleAdBanner()">Support this project</button>
+            </div>
           </div>
 
         </div>
@@ -973,6 +1011,18 @@ function switchSubTab(tab) {
   if (tab === 'memory') loadMemoryContent();
 }
 
+function toggleAdBanner() {
+  const banner = document.getElementById('adBanner');
+  const showBtn = document.getElementById('adShowBtn');
+  const hidden = !banner.classList.contains('hidden');
+  banner.classList.toggle('hidden', hidden);
+  showBtn.style.display = hidden ? 'block' : 'none';
+  try { localStorage.setItem('adHidden', hidden ? '1' : ''); } catch {}
+}
+// Restore ad preference
+try { if (localStorage.getItem('adHidden') === '1') toggleAdBanner(); } catch {}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // GRAPHICS LISTENERS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1032,7 +1082,13 @@ function updateModelCaps() {
   }
 }
 
-document.getElementById('modelSelect').addEventListener('change', updateModelCaps);
+document.getElementById('modelSelect').addEventListener('change', function() {
+  updateModelCaps();
+  // Lazy-load Puter.js when a Puter model is selected
+  const model = this.value;
+  const isPuter = modelsData.some(m => m.name === model && m.provider === 'puter');
+  if (isPuter) loadPuterJS();
+});
 document.getElementById('modelCustom').addEventListener('input', updateModelCaps);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1069,6 +1125,174 @@ function renderGridWithChanges(grid, changeMap) {
   ctx.lineWidth = 1;
   for (const c of changeMap.changes) ctx.strokeRect(c.x * scale + 0.5, c.y * scale + 0.5, scale - 1, scale - 1);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COORDINATE TOOLTIP & HIGHLIGHT
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _canvasHoverCell = null;  // {row, col} of cell under cursor
+
+function drawCanvasHover(row, col) {
+  if (!currentGrid) return;
+  const h = currentGrid.length, w = currentGrid[0].length;
+  if (row < 0 || row >= h || col < 0 || col >= w) return;
+  const scale = Math.floor(512 / Math.max(h, w));
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.fillRect(col * scale, row * scale, scale, scale);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(col * scale + 0.5, row * scale + 0.5, scale - 1, scale - 1);
+  ctx.restore();
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  const tip = document.getElementById('coordTooltip');
+  if (!currentGrid) { tip.style.display = 'none'; _canvasHoverCell = null; return; }
+  const rect = canvas.getBoundingClientRect();
+  const h = currentGrid.length, w = currentGrid[0].length;
+  const scale = Math.floor(512 / Math.max(h, w));
+  const gx = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width) / scale);
+  const gy = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height) / scale);
+  if (gx < 0 || gx >= w || gy < 0 || gy >= h) {
+    tip.style.display = 'none';
+    if (_canvasHoverCell) { _canvasHoverCell = null; renderGrid(currentGrid); }
+    return;
+  }
+  // Tooltip
+  if (document.getElementById('coordToggle').checked) {
+    tip.textContent = `(${gy}, ${gx})`;
+    tip.style.display = 'block';
+    tip.style.left = (e.clientX + 12) + 'px';
+    tip.style.top = (e.clientY - 8) + 'px';
+  } else {
+    tip.style.display = 'none';
+  }
+  // Cell hover highlight
+  if (!_canvasHoverCell || _canvasHoverCell.row !== gy || _canvasHoverCell.col !== gx) {
+    _canvasHoverCell = {row: gy, col: gx};
+    renderGrid(currentGrid);
+    if (_highlightCells.length) drawCellHighlights(_highlightCells);
+    drawCanvasHover(gy, gx);
+  }
+});
+
+canvas.addEventListener('mouseleave', () => {
+  document.getElementById('coordTooltip').style.display = 'none';
+  if (_canvasHoverCell) {
+    _canvasHoverCell = null;
+    renderGrid(currentGrid);
+    if (_highlightCells.length) drawCellHighlights(_highlightCells);
+  }
+});
+
+let _highlightCells = [];
+
+function drawCellHighlights(cells) {
+  if (!cells.length || !currentGrid) return;
+  const h = currentGrid.length, w = currentGrid[0].length;
+  const scale = Math.floor(512 / Math.max(h, w));
+  ctx.save();
+  for (const {row, col} of cells) {
+    if (row < 0 || row >= h || col < 0 || col >= w) continue;
+    ctx.fillStyle = 'rgba(255, 255, 100, 0.4)';
+    ctx.fillRect(col * scale, row * scale, scale, scale);
+    ctx.strokeStyle = 'rgba(255, 255, 100, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(col * scale + 1, row * scale + 1, scale - 2, scale - 2);
+  }
+  ctx.restore();
+}
+
+function highlightCellsOnCanvas(cells) {
+  _highlightCells = cells;
+  if (currentGrid) {
+    renderGrid(currentGrid);
+    drawCellHighlights(cells);
+  }
+}
+
+function clearCellHighlights() {
+  _highlightCells = [];
+  if (currentGrid) renderGrid(currentGrid);
+}
+
+function annotateCoordRefs(element) {
+  // Combined regex: (row, col) | rows? N[-N] | cols? N[-N]
+  const COORD_RE = /\((\d+),\s*(\d+)\)|(?:rows?)\s+(\d+)(?:\s*[-–]\s*(\d+))?|(?:cols?)\s+(\d+)(?:\s*[-–]\s*(\d+))?/gi;
+
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  for (const node of textNodes) {
+    const text = node.textContent;
+    COORD_RE.lastIndex = 0;
+    if (!COORD_RE.test(text)) continue;
+    COORD_RE.lastIndex = 0;
+
+    const frag = document.createDocumentFragment();
+    let lastIdx = 0;
+    let match;
+    while ((match = COORD_RE.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        frag.appendChild(document.createTextNode(text.slice(lastIdx, match.index)));
+      }
+      const span = document.createElement('span');
+      span.className = 'coord-ref';
+      if (match[1] !== undefined) {
+        // (row, col) point
+        span.dataset.row = match[1];
+        span.dataset.col = match[2];
+      } else if (match[3] !== undefined) {
+        // rows N or rows N-M
+        span.dataset.rows = match[4] !== undefined ? `${match[3]}-${match[4]}` : match[3];
+      } else if (match[5] !== undefined) {
+        // cols N or cols N-M
+        span.dataset.cols = match[6] !== undefined ? `${match[5]}-${match[6]}` : match[5];
+      }
+      span.textContent = match[0];
+      frag.appendChild(span);
+      lastIdx = COORD_RE.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+    }
+    if (lastIdx > 0) node.parentNode.replaceChild(frag, node);
+  }
+}
+
+function cellsFromCoordRef(ref) {
+  const cells = [];
+  if (!currentGrid) return cells;
+  const h = currentGrid.length, w = currentGrid[0].length;
+  if (ref.dataset.row !== undefined && ref.dataset.col !== undefined) {
+    cells.push({row: parseInt(ref.dataset.row), col: parseInt(ref.dataset.col)});
+  } else if (ref.dataset.rows !== undefined) {
+    const parts = ref.dataset.rows.split('-').map(Number);
+    const r0 = parts[0], r1 = parts.length > 1 ? parts[1] : r0;
+    for (let r = r0; r <= r1; r++)
+      for (let c = 0; c < w; c++) cells.push({row: r, col: c});
+  } else if (ref.dataset.cols !== undefined) {
+    const parts = ref.dataset.cols.split('-').map(Number);
+    const c0 = parts[0], c1 = parts.length > 1 ? parts[1] : c0;
+    for (let r = 0; r < h; r++)
+      for (let c = c0; c <= c1; c++) cells.push({row: r, col: c});
+  }
+  return cells;
+}
+
+// Event delegation for coord-ref hover on reasoning content
+document.addEventListener('mouseover', (e) => {
+  const ref = e.target.closest('.coord-ref');
+  if (!ref) return;
+  highlightCellsOnCanvas(cellsFromCoordRef(ref));
+});
+document.addEventListener('mouseout', (e) => {
+  const ref = e.target.closest('.coord-ref');
+  if (!ref) return;
+  clearCellHighlights();
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // API
@@ -1176,6 +1400,7 @@ function logHumanAction(actionId, actionData, changeMap) {
     <div class="step-label" style="color:var(--yellow);">Step ${stepCount} — Human</div>
     <div class="action-rec" style="color:var(--yellow);">\u2192 Action ${actionId} (${ACTION_NAMES[actionId] || '?'})${coordStr}${ci}</div>`;
   content.insertBefore(entry, content.firstChild);
+  annotateCoordRefs(entry);
 }
 
 async function doAction(actionId, isClick) {
@@ -1785,6 +2010,7 @@ async function askLLM() {
     }
 
     content.insertBefore(entry, content.firstChild);
+    annotateCoordRefs(entry);
     switchTopTab('agent');
     switchSubTab('reasoning');
     return resp;
@@ -2151,6 +2377,11 @@ async function loadModels() {
   const sel = document.getElementById('modelSelect');
   sel.innerHTML = '';
 
+  // Default blank option — no model pre-selected
+  const defaultOpt = document.createElement('option');
+  defaultOpt.value = ''; defaultOpt.textContent = 'Select a model...';
+  sel.appendChild(defaultOpt);
+
   // Group by provider
   const groups = {};
   for (const m of modelsData) {
@@ -2404,8 +2635,24 @@ function saveBYOK() {
   alert('Key saved locally.');
 }
 
+// Lazy-load Puter.js SDK on demand
+let _puterJsLoading = null;
+function loadPuterJS() {
+  if (typeof puter !== 'undefined') return Promise.resolve();
+  if (_puterJsLoading) return _puterJsLoading;
+  _puterJsLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://js.puter.com/v2/';
+    s.onload = () => resolve();
+    s.onerror = () => { _puterJsLoading = null; reject(new Error('Failed to load Puter.js')); };
+    document.head.appendChild(s);
+  });
+  return _puterJsLoading;
+}
+
 async function askLLMPuter(prompt, model) {
-  // Use Puter.js for client-side LLM
+  // Ensure Puter.js is loaded before calling
+  await loadPuterJS();
   if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter.js not loaded');
   const resp = await puter.ai.chat(prompt, { model: model || 'gpt-4o-mini' });
   // Puter may return a string or an object with message + usage
@@ -2633,6 +2880,13 @@ async function loadSessionHistory() {
 `;
       div.style.cursor = 'pointer';
       div.onclick = () => window.open(`/share/${s.id}`, '_blank');
+      // Replay button (in-app)
+      const replayBtn = document.createElement('button');
+      replayBtn.className = 'btn';
+      replayBtn.style.cssText = 'padding:2px 8px;font-size:10px;margin-left:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text);';
+      replayBtn.textContent = '\u25b6 Replay';
+      replayBtn.onclick = (e) => { e.stopPropagation(); loadReplay(s.id); };
+      div.appendChild(replayBtn);
       if (s.result === 'NOT_FINISHED') {
         const resumeBtn = document.createElement('button');
         resumeBtn.className = 'btn btn-primary';
@@ -3178,6 +3432,7 @@ function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
         <div class="action-rec" style="color:var(--yellow);">\u2192 Action ${s.action} (${aName})${ci}</div>`;
     }
     content.appendChild(entry);
+    annotateCoordRefs(entry);
   }
 }
 

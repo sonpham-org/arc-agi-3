@@ -88,6 +88,10 @@ def get_enabled_features() -> dict[str, bool]:
 TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 
+# Analytics — Umami (set both env vars to enable)
+UMAMI_URL = os.environ.get("UMAMI_URL", "")          # e.g. https://umami.example.com
+UMAMI_WEBSITE_ID = os.environ.get("UMAMI_WEBSITE_ID", "")
+
 BOT_UA_PATTERNS = [
     "bot", "crawler", "spider", "scraper", "wget", "curl", "python-requests",
     "httpx", "aiohttp", "go-http-client", "java/", "libwww", "headlesschrome",
@@ -1802,7 +1806,8 @@ def index():
     ts_key = TURNSTILE_SITE_KEY if mode == "online" else ""
     return render_template("index.html", color_map=COLOR_MAP,
                            turnstile_site_key=ts_key,
-                           mode=mode, features=features)
+                           mode=mode, features=features,
+                           umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID)
 
 
 @app.route("/api/turnstile/verify", methods=["POST"])
@@ -3014,6 +3019,7 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
             steps=step_list,
             color_map=COLOR_MAP,
             branch_at_step=len(parent_steps) if parent_steps else 0,
+            umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
         )
     except Exception as e:
         app.logger.warning(f"Share page error: {e}")
