@@ -136,7 +136,16 @@ let currentIdx = -1;
 let autoplayTimer = null;
 let isAutoplaying = false;
 
-// Format the date in the header
+function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return '';
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  if (m > 60) return `${Math.floor(m / 60)}h${m % 60}m`;
+  if (m > 0) return `${m}m${s}s`;
+  return `${s}s`;
+}
+
+// Format the date + session duration in the header
 (function() {
   const metaSpans = document.querySelectorAll('.header .meta span');
   const dateSpan = metaSpans[metaSpans.length - 1];
@@ -144,6 +153,16 @@ let isAutoplaying = false;
   if (ts) {
     const d = new Date(ts * 1000);
     dateSpan.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+  // Compute session duration from step timestamps
+  if (STEPS.length >= 2) {
+    const first = STEPS[0].timestamp, last = STEPS[STEPS.length - 1].timestamp;
+    if (first && last) {
+      const dur = last - first;
+      const durSpan = document.createElement('span');
+      durSpan.textContent = 'Duration: ' + formatDuration(dur);
+      metaSpans[0].parentElement.appendChild(durSpan);
+    }
   }
 })();
 
@@ -216,8 +235,11 @@ function buildReasoningEntry(step, idx, isCurrent) {
     }).join('') + '</div>';
   }
 
+  const durationMs = lr.call_duration_ms;
+  const durationHtml = durationMs ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(durationMs / 1000).toFixed(1)}s</span>` : '';
+
   return `<div class="reasoning-entry${isCurrent ? ' current' : ''}" id="entry-${idx}">
-    <div class="step-label">Step ${step.step_num} — ${SESSION.model || 'LLM'}</div>
+    <div class="step-label">Step ${step.step_num} — ${SESSION.model || 'LLM'}${durationHtml}</div>
     ${obs ? `<div class="observation"><strong>Obs:</strong> ${esc(obs)}</div>` : ''}
     ${reasoning ? `<div style="margin-top:4px;"><strong>Reasoning:</strong> ${esc(reasoning)}</div>` : ''}
     ${analysis ? `<div style="margin-top:4px;font-size:11px;color:var(--purple);"><strong>Analysis:</strong> ${esc(analysis)}</div>` : ''}

@@ -1486,6 +1486,7 @@ async function askLLM() {
     const isPuterModel = modelsData.some(m => m.name === model && m.provider === 'puter');
     const useServerLLM = FEATURES.server_llm && !isPuterModel;
 
+    const _callStart = performance.now();
     if (useServerLLM) {
       // ── Server-side LLM (local mode) ─────────────────────────────────
       const payload = {
@@ -1550,6 +1551,9 @@ async function askLLM() {
       if (resp) { resp.prompt_length = prompt.length; resp._clientSide = true; }
     }
 
+    // Attach call duration
+    if (resp) resp.call_duration_ms = Math.round(performance.now() - _callStart);
+
     // Collect observation for compact context
     collectObservation(resp);
 
@@ -1579,6 +1583,8 @@ async function askLLM() {
       const ci = currentChangeMap?.change_count > 0
         ? `<div style="font-size:11px;color:var(--yellow);">${currentChangeMap.change_count} cells changed</div>` : '';
       const tokensHtml = formatTokenInfo(resp);
+      const durationHtml = resp.call_duration_ms
+        ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(resp.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
 
       // Tool calls display (collapsible)
       const toolCallsHtml = renderToolCallsHtml(resp.tool_calls || p.tool_calls || []);
@@ -1596,7 +1602,7 @@ async function askLLM() {
         ? `Steps ${stepCount + 1}-${stepCount + steps.length}`
         : `Step ${stepCount + 1}`;
       entry.innerHTML = `
-        <div class="step-label">${stepLabel} — ${resp.model}${thinkBadge}${toolsBadge}${cacheBadge}${compactBadge}${planBadge}</div>
+        <div class="step-label">${stepLabel} — ${resp.model}${durationHtml}${thinkBadge}${toolsBadge}${cacheBadge}${compactBadge}${planBadge}</div>
         ${tokensHtml}${ci}
         <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
         <div style="margin-top:4px;"><strong>Reasoning:</strong> ${p.reasoning || '—'}</div>
@@ -2314,6 +2320,15 @@ function deleteLocalSession(sid) {
   localStorage.removeItem(LOCAL_SESSION_PREFIX + sid);
 }
 
+function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return '';
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  if (m > 60) return `${Math.floor(m / 60)}h${m % 60}m`;
+  if (m > 0) return `${m}m${s}s`;
+  return `${s}s`;
+}
+
 async function loadSessionHistory() {
   const list = document.getElementById('historyList');
   try {
@@ -2359,7 +2374,7 @@ async function loadSessionHistory() {
         ${branchLabel}
         <span class="h-game">${s.game_id}</span>
         <span class="h-result ${resultClass}">${s.result || '?'}</span>
-        <span class="h-meta">${s.steps || 0} steps | ${s.model || '?'} | $${(s.total_cost || 0).toFixed(4)}</span>
+        <span class="h-meta">${s.steps || 0} steps | ${s.model || '?'} | $${(s.total_cost || 0).toFixed(4)}${s.duration ? ` | ${formatDuration(s.duration)}` : ''}</span>
         <span class="h-meta">${date}</span>
 `;
       div.style.cursor = 'pointer';

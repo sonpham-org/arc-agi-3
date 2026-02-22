@@ -2609,14 +2609,16 @@ def list_sessions():
     if not feature_enabled("session_db"):
         return jsonify({"sessions": []})
     try:
+        _sessions_query = (
+            "SELECT s.id, s.game_id, s.model, s.mode, s.created_at, s.result, s.steps, s.levels, "
+            "s.parent_session_id, s.branch_at_step, s.total_cost, "
+            "(SELECT MAX(st.timestamp) - MIN(st.timestamp) FROM session_steps st WHERE st.session_id = s.id) AS duration "
+            "FROM sessions s ORDER BY s.created_at DESC LIMIT 100"
+        )
         sessions_by_id = {}
         # Local SQLite
         conn = _get_db()
-        rows = conn.execute(
-            "SELECT id, game_id, model, mode, created_at, result, steps, levels, "
-            "parent_session_id, branch_at_step, total_cost "
-            "FROM sessions ORDER BY created_at DESC LIMIT 100"
-        ).fetchall()
+        rows = conn.execute(_sessions_query).fetchall()
         conn.close()
         for r in rows:
             d = dict(r)
@@ -2625,11 +2627,7 @@ def list_sessions():
         turso_conn = _get_turso_db()
         if turso_conn:
             try:
-                cur = turso_conn.execute(
-                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, "
-                    "parent_session_id, branch_at_step, total_cost "
-                    "FROM sessions ORDER BY created_at DESC LIMIT 100"
-                )
+                cur = turso_conn.execute(_sessions_query)
                 for d in _turso_dict_fetchall(cur):
                     if d["id"] not in sessions_by_id:
                         sessions_by_id[d["id"]] = d
