@@ -2098,7 +2098,8 @@ async function loadSessionHistory() {
         <span class="h-meta">${s.steps || 0} steps | ${s.model || '?'} | $${(s.total_cost || 0).toFixed(4)}</span>
         <span class="h-meta">${date}</span>
 `;
-      div.onclick = () => loadReplay(s.id);
+      div.style.cursor = 'pointer';
+      div.onclick = () => window.open(`/share/${s.id}`, '_blank');
       list.appendChild(div);
     }
   } catch (e) {
