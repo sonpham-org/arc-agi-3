@@ -11,8 +11,10 @@ import re
 import secrets
 import sqlite3
 import sys
+import io
 import threading
 import time
+import traceback
 import zlib
 from collections import deque
 from functools import wraps
@@ -194,6 +196,15 @@ session_api_keys: dict[str, str] = {}  # session-scoped ARC API keys
 session_lock = threading.Lock()
 session_step_counts: dict[str, int] = {}  # session_id → server-side step counter
 session_last_llm: dict[str, dict] = {}  # session_id → last LLM response (for DB storage)
+
+# ── Tool execution sessions (Python sandbox per game session) ─────────
+_tool_sessions: dict[str, dict] = {}  # session_id → {namespace: dict, created_at: float}
+_tool_session_lock = threading.Lock()
+
+# ── Gemini context caching ────────────────────────────────────────────
+# Maps (model, content_hash) → {cache_name: str, expires_at: float}
+_gemini_cache_registry: dict[tuple, dict] = {}
+_gemini_cache_lock = threading.Lock()
 
 # ── Copilot auth state ────────────────────────────────────────────────────
 _COPILOT_TOKEN_FILE = Path(__file__).parent / "data" / ".copilot_token"
@@ -836,6 +847,233 @@ def compute_region_map(grid: list) -> str:
     return "\n".join(lines)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# TOOL EXECUTION — Python sandbox for Gemini function calling
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _get_tool_declarations():
+    """Return Gemini Tool with a run_python FunctionDeclaration."""
+    from google import genai
+    return genai.types.Tool(function_declarations=[
+        genai.types.FunctionDeclaration(
+            name="run_python",
+            description=(
+                "Execute Python code to analyse the game grid. "
+                "Pre-imported: numpy (as np), collections, itertools. "
+                "Available variables: `grid` (numpy 2D int array of current grid), "
+                "`prev_grid` (numpy 2D int array of previous grid, or None). "
+                "Variables you define persist across calls within the same turn. "
+                "Use print() to return results."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "code": {
+                        "type": "STRING",
+                        "description": "Python code to execute. Use print() for output.",
+                    }
+                },
+                "required": ["code"],
+            },
+        ),
+    ])
+
+
+_BLOCKED_MODULES = frozenset({
+    'os', 'sys', 'subprocess', 'shutil', 'pathlib', 'socket', 'http',
+    'urllib', 'requests', 'httpx', 'aiohttp', 'ftplib', 'smtplib',
+    'ctypes', 'multiprocessing', 'signal', 'importlib', 'code', 'codeop',
+    'compileall', 'py_compile', 'zipimport', 'pkgutil', 'pkg_resources',
+})
+
+
+def _safe_import(name, *args, **kwargs):
+    """Restricted __import__ that blocks dangerous modules."""
+    top_level = name.split('.')[0]
+    if top_level in _BLOCKED_MODULES:
+        raise ImportError(f"Module '{name}' is not allowed in the sandbox")
+    return __builtins__['__import__'](name, *args, **kwargs) \
+        if isinstance(__builtins__, dict) \
+        else __import__(name, *args, **kwargs)
+
+
+def _get_or_create_tool_session(session_id: str, grid, prev_grid) -> dict:
+    """Get or create a sandboxed namespace for Python execution."""
+    import numpy as np
+    import collections
+    import itertools
+
+    with _tool_session_lock:
+        sess = _tool_sessions.get(session_id)
+        if sess is None:
+            # Start from real builtins, override dangerous ones
+            if isinstance(__builtins__, dict):
+                safe_builtins = dict(__builtins__)
+            else:
+                safe_builtins = {k: getattr(__builtins__, k) for k in dir(__builtins__)
+                                 if not k.startswith('_')}
+                safe_builtins['__import__'] = __builtins__.__import__
+
+            # Replace/remove dangerous builtins
+            safe_builtins['open'] = None
+            safe_builtins['eval'] = None
+            safe_builtins['exec'] = None
+            safe_builtins['compile'] = None
+            safe_builtins['breakpoint'] = None
+            safe_builtins['exit'] = None
+            safe_builtins['quit'] = None
+            safe_builtins['__import__'] = _safe_import
+
+            ns = {
+                '__builtins__': safe_builtins,
+                'np': np,
+                'numpy': np,
+                'collections': collections,
+                'itertools': itertools,
+                'Counter': collections.Counter,
+                'defaultdict': collections.defaultdict,
+            }
+            sess = {'namespace': ns, 'created_at': time.time()}
+            _tool_sessions[session_id] = sess
+
+    # Always update grid/prev_grid to current values
+    ns = sess['namespace']
+    ns['grid'] = np.array(grid) if grid else np.array([[]])
+    ns['prev_grid'] = np.array(prev_grid) if prev_grid else None
+    return sess
+
+
+def _execute_python(session_id: str, code: str, grid, prev_grid, timeout: float = 5.0) -> str:
+    """Execute Python code in a sandboxed namespace, capturing print output."""
+    sess = _get_or_create_tool_session(session_id, grid, prev_grid)
+    ns = sess['namespace']
+
+    output_buf = io.StringIO()
+    result = [None]  # mutable container for thread result
+    error = [None]
+
+    def _run():
+        import builtins
+        old_print = ns['__builtins__'].get('print', builtins.print) if isinstance(ns['__builtins__'], dict) else builtins.print
+        # Override print to capture to buffer
+        def captured_print(*args, **kwargs):
+            kwargs['file'] = output_buf
+            builtins.print(*args, **kwargs)
+        if isinstance(ns['__builtins__'], dict):
+            ns['__builtins__']['print'] = captured_print
+        try:
+            exec(code, ns)
+        except Exception as e:
+            error[0] = f"{type(e).__name__}: {e}"
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+
+    if t.is_alive():
+        return "[TIMEOUT] Code execution exceeded 5 seconds."
+
+    output = output_buf.getvalue()
+    if error[0]:
+        output = (output + "\n" + error[0]).strip()
+
+    # Truncate long output
+    if len(output) > 4000:
+        output = output[:4000] + "\n... [truncated]"
+
+    return output or "(no output)"
+
+
+def _cleanup_tool_session(session_id: str):
+    """Remove a tool session when the game session is reset/ended."""
+    with _tool_session_lock:
+        _tool_sessions.pop(session_id, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GEMINI CONTEXT CACHING
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Minimum tokens for Gemini caching (API requirement: 32,768 tokens ≈ ~130K chars)
+_GEMINI_CACHE_MIN_CHARS = 130_000
+_GEMINI_CACHE_TTL_MINUTES = 30
+
+
+def _get_or_create_gemini_cache(model: str, static_content: str) -> str | None:
+    """Create/reuse a Gemini cached content object for the static prompt parts.
+
+    Returns the cache name string, or None if content is too small for caching.
+    """
+    if len(static_content) < _GEMINI_CACHE_MIN_CHARS:
+        return None
+
+    content_hash = hashlib.sha256(static_content.encode()).hexdigest()[:16]
+    cache_key = (model, content_hash)
+
+    with _gemini_cache_lock:
+        cached = _gemini_cache_registry.get(cache_key)
+        if cached and time.time() < cached["expires_at"]:
+            return cached["cache_name"]
+
+    # Create a new cache
+    try:
+        from google import genai
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        client = genai.Client(api_key=api_key)
+
+        cache = client.caches.create(
+            model=model,
+            config=genai.types.CreateCachedContentConfig(
+                contents=[genai.types.Content(
+                    role="user",
+                    parts=[genai.types.Part.from_text(static_content)],
+                )],
+                ttl=f"{_GEMINI_CACHE_TTL_MINUTES * 60}s",
+                display_name=f"arc-agi-{content_hash[:8]}",
+            ),
+        )
+
+        with _gemini_cache_lock:
+            _gemini_cache_registry[cache_key] = {
+                "cache_name": cache.name,
+                "expires_at": time.time() + (_GEMINI_CACHE_TTL_MINUTES * 60) - 60,
+            }
+        app.logger.info(f"Created Gemini cache: {cache.name} for model {model}")
+        return cache.name
+    except Exception as e:
+        app.logger.warning(f"Gemini cache creation failed: {e}")
+        return None
+
+
+def _build_prompt_parts(payload: dict, input_settings: dict, tools_mode: str,
+                        planning_mode: str = "off") -> tuple[str, str]:
+    """Split prompt into static (cacheable) and dynamic parts.
+
+    Returns (static_str, dynamic_str).
+    """
+    grid = payload.get("grid", [])
+    history = payload.get("history", [])
+    change_map = payload.get("change_map", {})
+
+    # ── Static parts (system description, palette, memory) ────────────
+    static_parts = []
+    sys_prompt = _custom_system_prompt if _custom_system_prompt else ARC_AGI3_DESCRIPTION
+    static_parts.append(f"""{sys_prompt}
+
+COLOR PALETTE: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
+               6=Magenta 7=LightMagenta 8=Red 9=Blue 10=LightBlue 11=Yellow
+               12=Orange 13=Maroon 14=Green 15=Purple""")
+
+    if _custom_hard_memory:
+        static_parts.append(f"## AGENT MEMORY\n{_custom_hard_memory}")
+
+    static_str = "\n\n".join(static_parts)
+
+    # ── Dynamic parts (everything else) are built by _build_prompt ────
+    # We return just the static portion; the caller uses the full prompt too
+    return static_str, ""  # dynamic not needed separately
+
+
 def env_state_dict(env, frame_data=None) -> dict:
     if frame_data is None:
         frame_data = env.observation_space
@@ -903,6 +1141,13 @@ COLOR PALETTE: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
         for h in history:
             aname = ACTION_NAMES.get(h.get("action", 0), "?")
             line = f"  Step {h.get('step', '?')}: {aname} -> {h.get('result_state', '?')}"
+            cm = h.get("change_map")
+            if cm and cm.get("change_count", 0) > 0:
+                line += f" ({cm['change_count']} cells changed)"
+                if cm.get("change_map_text"):
+                    line += f"\n    Changes: {cm['change_map_text']}"
+            elif cm and cm.get("change_count") == 0:
+                line += " (no change)"
             grid_snap = h.get("grid")
             if grid_snap:
                 rle = "\n".join(f"    Row {i}: {compress_row(r)}" for i, r in enumerate(grid_snap))
@@ -945,8 +1190,10 @@ COLOR PALETTE: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
     tool_extra = ""
     if tools_mode == "on":
         tool_extra = (
-            '\n- "analysis": analyse what you see — objects, patterns, spatial relationships, '
-            "possible goals, and which areas of the grid are interactive."
+            "\n- You have access to a run_python tool. Call it to analyse the grid programmatically "
+            "(e.g. find objects, count colors, detect patterns, measure distances). "
+            "The grid is available as a numpy array variable `grid`. Use print() to see results."
+            '\n- Include "analysis" in your JSON with a summary of what the tool found.'
         )
 
     analysis_field = ', "analysis": "<detailed spatial analysis>"' if tools_mode == "on" else ''
@@ -1024,37 +1271,119 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None) -> str:
+def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
+                  tools_enabled: bool = False, session_id: str | None = None,
+                  grid=None, prev_grid=None,
+                  cached_content_name: str | None = None) -> dict | str:
+    """Call Gemini API. When tools_enabled, runs a multi-turn function-calling loop.
+
+    Returns dict {"text": str, "tool_calls": list, "usage": dict, "cache_active": bool}
+    when tools_enabled, or plain str when tools are off (backward compat).
+    """
     from google import genai
+
     api_key = os.environ.get("GEMINI_API_KEY", "")
     client = genai.Client(api_key=api_key)
 
+    # Build initial contents
+    parts = []
     if image_b64:
         image_bytes = base64.b64decode(image_b64)
-        contents = [
-            genai.types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-            f"{SYSTEM_MSG}\n\n{prompt}",
-        ]
-    else:
-        contents = f"{SYSTEM_MSG}\n\n{prompt}"
+        parts.append(genai.types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
+    parts.append(genai.types.Part.from_text(f"{SYSTEM_MSG}\n\n{prompt}"))
+    contents = [genai.types.Content(role="user", parts=parts)]
 
-    # Thinking models (2.5-*) need a large output budget because thinking
-    # tokens count against max_output_tokens.  We set a thinking budget so
-    # the model doesn't burn all tokens on reasoning and truncate the answer.
-    is_thinking = "2.5" in model_name
+    is_thinking = any(x in model_name for x in ("2.5", "3-pro", "3-flash", "3.1"))
     config = genai.types.GenerateContentConfig(
         temperature=0.3,
         max_output_tokens=16384 if is_thinking else 2048,
     )
     if is_thinking:
         config.thinking_config = genai.types.ThinkingConfig(
-            thinking_budget=8192,  # up to 8k tokens for reasoning
+            thinking_budget=8192,
+        )
+    if tools_enabled:
+        config.tools = [_get_tool_declarations()]
+    if cached_content_name:
+        config.cached_content = cached_content_name
+
+    tool_calls_log = []
+    max_rounds = 5
+
+    for round_i in range(max_rounds):
+        response = client.models.generate_content(
+            model=model_name, contents=contents, config=config,
         )
 
-    response = client.models.generate_content(
-        model=model_name, contents=contents, config=config,
-    )
-    return response.text
+        # Check for function calls in the response
+        has_function_call = False
+        if response.candidates and response.candidates[0].content:
+            model_parts = response.candidates[0].content.parts or []
+            fn_call_parts = [p for p in model_parts if p.function_call]
+
+            if fn_call_parts and tools_enabled and session_id:
+                has_function_call = True
+                # Append the model's response to contents
+                contents.append(response.candidates[0].content)
+
+                # Execute each function call
+                fn_response_parts = []
+                for part in fn_call_parts:
+                    fc = part.function_call
+                    code = fc.args.get("code", "") if fc.args else ""
+                    app.logger.info(f"Tool call: {fc.name}, code length: {len(code)}")
+
+                    output = _execute_python(session_id, code, grid, prev_grid)
+
+                    tool_calls_log.append({
+                        "name": fc.name,
+                        "arguments": {"code": code},
+                        "output": output,
+                    })
+
+                    fn_response_parts.append(
+                        genai.types.Part.from_function_response(
+                            name=fc.name,
+                            response={"result": output},
+                        )
+                    )
+
+                # Append function responses and continue the loop
+                contents.append(genai.types.Content(
+                    role="user",
+                    parts=fn_response_parts,
+                ))
+                continue  # next round
+
+        # No function call — extract final text and return
+        final_text = response.text if response.text else ""
+
+        # Extract usage if available
+        usage = {}
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            um = response.usage_metadata
+            usage = {
+                "prompt_tokens": getattr(um, 'prompt_token_count', 0) or 0,
+                "completion_tokens": getattr(um, 'candidates_token_count', 0) or 0,
+                "total_tokens": getattr(um, 'total_token_count', 0) or 0,
+            }
+
+        cache_active = cached_content_name is not None
+        if tools_enabled:
+            return {"text": final_text, "tool_calls": tool_calls_log, "usage": usage,
+                    "cache_active": cache_active}
+        return final_text
+
+    # Hit max rounds — return what we have
+    final_text = ""
+    try:
+        final_text = response.text or ""
+    except Exception:
+        pass
+    if tools_enabled:
+        return {"text": final_text, "tool_calls": tool_calls_log, "usage": {},
+                "cache_active": cached_content_name is not None}
+    return final_text
 
 
 def _call_anthropic(model_name: str, prompt: str, image_b64: str | None = None) -> str:
@@ -1236,8 +1565,14 @@ def _throttle_provider(provider: str):
         _provider_last_call[provider] = time.time()
 
 
-def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None) -> str:
-    """Route to the correct provider, passing image if available."""
+def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
+                      tools_enabled: bool = False, session_id: str | None = None,
+                      grid=None, prev_grid=None,
+                      cached_content_name: str | None = None) -> str | dict:
+    """Route to the correct provider, passing image if available.
+
+    Returns dict when Gemini tools are active, str otherwise.
+    """
     info = MODEL_REGISTRY.get(model_key)
 
     # If not in registry, try ollama
@@ -1254,7 +1589,11 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None)
     img = image_b64 if info.get("capabilities", {}).get("image") else None
 
     if provider == "gemini":
-        return _call_gemini(api_model, prompt, img)
+        return _call_gemini(api_model, prompt, img,
+                            tools_enabled=tools_enabled,
+                            session_id=session_id,
+                            grid=grid, prev_grid=prev_grid,
+                            cached_content_name=cached_content_name)
     if provider == "anthropic":
         return _call_anthropic(api_model, prompt, img)
     if provider == "cloudflare":
@@ -1344,6 +1683,7 @@ def start_game():
         session_grids[session_id] = state.get("grid", [])
         session_snapshots[session_id] = []  # reset undo stack
         session_step_counts[session_id] = 0
+    _cleanup_tool_session(session_id)
     state["session_id"] = session_id
     state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(initial)"}
 
@@ -1579,14 +1919,51 @@ def llm_ask():
     if input_settings.get("image"):
         image_b64 = payload.get("image_b64")
 
+    # Determine if we should enable real tool execution
+    session_id = payload.get("session_id")
+    grid = payload.get("grid", [])
+    prev_grid = None
+    if session_id:
+        with session_lock:
+            prev_grid = session_grids.get(session_id)
+
+    # Only enable real tools for Gemini models with tools capability
+    model_info = MODEL_REGISTRY.get(model_key, {})
+    is_gemini = model_info.get("provider") == "gemini"
+    model_has_tools = model_info.get("capabilities", {}).get("tools", False)
+    real_tools = tools_mode == "on" and is_gemini and model_has_tools
+
+    # Try Gemini context caching for static prompt parts
+    cached_content_name = None
+    if is_gemini:
+        static_content, _ = _build_prompt_parts(payload, input_settings, tools_mode, planning_mode)
+        cached_content_name = _get_or_create_gemini_cache(
+            model_info.get("api_model", ""), static_content)
+
     try:
-        content = _route_model_call(model_key, prompt, image_b64)
-        result = _parse_llm_response(content, model_key)
+        content = _route_model_call(
+            model_key, prompt, image_b64,
+            tools_enabled=real_tools,
+            session_id=session_id,
+            grid=grid, prev_grid=prev_grid,
+            cached_content_name=cached_content_name,
+        )
+
+        # Handle dict return (Gemini w/ tools) vs str return (others)
+        if isinstance(content, dict):
+            text = content.get("text", "")
+            result = _parse_llm_response(text, model_key)
+            result["tool_calls"] = content.get("tool_calls", [])
+            result["cache_active"] = content.get("cache_active", False)
+            if content.get("usage"):
+                result["usage"] = content["usage"]
+        else:
+            result = _parse_llm_response(content, model_key)
+
         result["tools_active"] = tools_mode == "on"
         result["prompt_length"] = len(prompt)
 
         # Stash LLM response for session DB persistence
-        session_id = payload.get("session_id")
         if session_id and feature_enabled("session_db"):
             with session_lock:
                 session_last_llm[session_id] = result
@@ -1898,21 +2275,33 @@ def memory_endpoint():
 # SESSION IMPORT + BRANCH ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.route("/api/sessions/import", methods=["POST"])
+@app.route("/api/sessions/import", methods=["POST", "OPTIONS"])
 @bot_protection
-@turnstile_required
 def import_session():
     """Import/upsert a session and its steps. Used by puter.kv auto-upload."""
+    # CORS for cross-origin uploads (local → Railway)
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+    if request.method == "OPTIONS":
+        return ("", 204, cors_headers)
+    def _cors_resp(data, status=200):
+        resp = make_response(jsonify(data), status)
+        resp.headers.update(cors_headers)
+        return resp
+
     if not feature_enabled("session_db"):
-        return jsonify({"error": "Session DB not enabled"}), 400
+        return _cors_resp({"error": "Session DB not enabled"}, 400)
     payload = request.get_json(force=True)
     sess = payload.get("session")
     steps = payload.get("steps", [])
     if not sess or not sess.get("id") or not sess.get("game_id"):
-        return jsonify({"error": "session.id and session.game_id required"}), 400
+        return _cors_resp({"error": "session.id and session.game_id required"}, 400)
     # Reject short sessions — under 50 steps is noise
     if len(steps) < 50:
-        return jsonify({"error": "Session too short (min 50 steps)", "skipped": True}), 200
+        return _cors_resp({"error": "Session too short (min 50 steps)", "skipped": True})
     try:
         conn = _get_db()
         conn.execute(
@@ -1946,10 +2335,10 @@ def import_session():
             )
         conn.commit()
         conn.close()
-        return jsonify({"status": "ok", "session_id": sess["id"], "steps_imported": len(steps)})
+        return _cors_resp({"status": "ok", "session_id": sess["id"], "steps_imported": len(steps)})
     except Exception as e:
         app.logger.warning(f"Session import failed: {e}")
-        return jsonify({"error": str(e)}), 500
+        return _cors_resp({"error": str(e)}, 500)
 
 
 @app.route("/api/sessions/branch", methods=["POST"])
@@ -2112,6 +2501,40 @@ def get_session_step(session_id, step_num):
         return jsonify(d)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SHARE — public replay page
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/share/<session_id>")
+def share_session(session_id):
+    """Public replay page for a session — no auth required."""
+    try:
+        conn = _get_db()
+        sess = conn.execute(
+            "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost "
+            "FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if not sess:
+            conn.close()
+            return "<h1>Session not found</h1><p>This session does not exist.</p>", 404
+        steps = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        step_list = [_format_step_row(dict(s)) for s in steps]
+        return render_template(
+            "share.html",
+            session=dict(sess),
+            steps=step_list,
+            color_map=COLOR_MAP,
+        )
+    except Exception as e:
+        app.logger.warning(f"Share page error: {e}")
+        return f"<h1>Error</h1><p>{e}</p>", 500
 
 
 # ═══════════════════════════════════════════════════════════════════════════

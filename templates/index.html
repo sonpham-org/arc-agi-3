@@ -532,7 +532,7 @@
                       On = ask every step &nbsp;|&nbsp; Adaptive = when stuck
                     </div>
                     <div class="opt-row">
-                      <span class="opt-label">Tool analysis</span>
+                      <span class="opt-label">Tool calls</span>
                     </div>
                     <div class="opt-row">
                       <div class="triswitch" id="toolsMode">
@@ -542,7 +542,7 @@
                       </div>
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      On = histogram + regions &nbsp;|&nbsp; Adaptive = after 10 stuck steps
+                      On = Python execution &nbsp;|&nbsp; Adaptive = after 10 stuck steps
                     </div>
                     <div class="opt-row">
                       <span class="opt-label">Compact history</span>
@@ -921,7 +921,7 @@ async function doAction(actionId, isClick) {
   const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : null;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: actionId, data: {}, session_cost: sessionTotalTokens.cost });
   if (data.error) { undoStack.pop(); alert(data.error); return; }
-  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed, grid: data.grid });
+  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
   recordStepForPersistence(actionId, {}, data.grid, data.change_map, null);
   logHumanAction(actionId, {}, data.change_map);
   updateUI(data);
@@ -946,7 +946,7 @@ canvas.addEventListener('click', async (e) => {
   const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : null;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: 6, data: { x, y }, session_cost: sessionTotalTokens.cost });
   if (data.error) { undoStack.pop(); alert(data.error); return; }
-  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed, grid: data.grid });
+  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
   recordStepForPersistence(6, { x, y }, data.grid, data.change_map, null);
   logHumanAction(6, { x, y }, data.change_map);
   updateUI(data);
@@ -1306,6 +1306,7 @@ async function askLLM() {
         ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary>
            <div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${resp.thinking}</div></details>` : '';
       const toolsBadge = resp.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
+      const cacheBadge = resp.cache_active ? '<span class="tools-badge" style="background:#e3b34133;color:var(--yellow);">CACHED</span>' : '';
       const compactBadge = compactBlock ? '<span class="tools-badge" style="background:#bc8cff33;color:var(--purple);">COMPACT</span>' : '';
       const planBadge = p.plan ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
       const analysisHtml = p.analysis
@@ -1334,7 +1335,7 @@ async function askLLM() {
         ? `Steps ${stepCount + 1}-${stepCount + steps.length}`
         : `Step ${stepCount + 1}`;
       entry.innerHTML = `
-        <div class="step-label">${stepLabel} — ${resp.model} [PLAN]${toolsBadge}${compactBadge}${planBadge}</div>
+        <div class="step-label">${stepLabel} — ${resp.model} [PLAN]${toolsBadge}${cacheBadge}${compactBadge}${planBadge}</div>
         ${tokensHtml}${ci}
         <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
         <div style="margin-top:4px;"><strong>Reasoning:</strong> ${p.reasoning || '—'}</div>
@@ -1416,7 +1417,7 @@ async function executePlan(plan, resp, entry) {
       break;
     }
 
-    moveHistory.push({ step: stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid });
+    moveHistory.push({ step: stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
     recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null);
     updateUI(data);
     updateUndoBtn();
@@ -1471,7 +1472,7 @@ async function executeOneAction(resp) {
   if (resp?._clientSide) body.llm_response = resp;
   const data = await fetchJSON('/api/step', body);
   if (data.error) { undoStack.pop(); stepCount--; alert(data.error); return null; }
-  moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed, grid: data.grid });
+  moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
   recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
   updateUI(data);
   updateUndoBtn();
@@ -1782,6 +1783,12 @@ function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, 
   if (history && history.length) {
     const lines = history.map(h => {
       let line = `  Step ${h.step || '?'}: ${ACTION_NAMES[h.action] || '?'} -> ${h.result_state || '?'}`;
+      if (h.change_map && h.change_map.change_count > 0) {
+        line += ` (${h.change_map.change_count} cells changed)`;
+        if (h.change_map.change_map_text) line += `\n    Changes: ${h.change_map.change_map_text}`;
+      } else if (h.change_map && h.change_map.change_count === 0) {
+        line += ` (no change)`;
+      }
       if (h.grid) {
         const rle = h.grid.map((r, i) => `    Row ${i}: ${compressRowJS(r)}`).join('\n');
         line += `\n${rle}`;
@@ -2299,7 +2306,6 @@ const MIN_STEPS_FOR_UPLOAD = 50;
 async function autoUploadSession() {
   const payload = buildSessionPayload();
   if (!payload) return;
-  // Don't upload short sessions — they're noise
   if ((payload.steps || []).length < MIN_STEPS_FOR_UPLOAD) return;
   try {
     await fetch('/api/sessions/import', {
@@ -2326,7 +2332,40 @@ function checkSessionEndAndUpload() {
         puter.kv.del(puterKvKey(sessionId)).catch(() => {});
       }
     });
+    // Upload to Railway for sharing (local mode only — online already uploads to itself)
+    if (MODE === 'local') {
+      const payload = buildSessionPayload();
+      if (payload && (payload.steps || []).length >= MIN_STEPS_FOR_UPLOAD) {
+        fetch('https://arc3.sonpham.net/api/sessions/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).then(r => r.json()).then(data => {
+          if (data.status === 'ok') showShareLink(sessionId);
+        }).catch(() => {});
+      }
+    } else {
+      // Online mode — session is already on this server
+      if (sessionStepsBuffer.length >= MIN_STEPS_FOR_UPLOAD) showShareLink(sessionId);
+    }
   }
+}
+
+function showShareLink(sid) {
+  const base = (MODE === 'local') ? 'https://arc3.sonpham.net' : '';
+  const url = `${base}/share/${sid}`;
+  // Remove existing share banner if any
+  const old = document.getElementById('shareBanner');
+  if (old) old.remove();
+  const banner = document.createElement('div');
+  banner.id = 'shareBanner';
+  banner.style.cssText = 'background:#1a3a1a;border:1px solid var(--green,#4FCC30);padding:8px 14px;margin:8px 0;border-radius:6px;font-size:13px;display:flex;align-items:center;gap:8px;';
+  banner.innerHTML = `<span style="color:var(--green,#4FCC30);">&#9734; Share replay:</span>
+    <a href="${url}" target="_blank" style="color:var(--blue,#1E93FF);word-break:break-all;">${url}</a>
+    <button onclick="navigator.clipboard.writeText('${url}');this.textContent='Copied!'" style="background:var(--green,#4FCC30);color:#000;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Copy</button>`;
+  // Insert after the canvas container
+  const container = document.getElementById('gameCanvas').parentElement;
+  container.parentElement.insertBefore(banner, container.nextSibling);
 }
 
 async function puterKvCheckResume() {

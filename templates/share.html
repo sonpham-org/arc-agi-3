@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARC-AGI-3 Replay — {{ session.game_id }}</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --dim: #8b949e; --green: #4FCC30;
+    --blue: #1E93FF; --yellow: #FFDC00; --red: #F93C31;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+  .header { text-align: center; margin-bottom: 16px; }
+  .header h1 { font-size: 20px; color: var(--green); margin-bottom: 6px; }
+  .header .meta { font-size: 13px; color: var(--dim); display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .header .meta .result-win { color: var(--green); font-weight: bold; }
+  .header .meta .result-over { color: var(--red); font-weight: bold; }
+  .canvas-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  canvas { display: block; image-rendering: pixelated; width: 512px; height: 512px; }
+  .controls { width: 540px; max-width: 100%; margin-bottom: 12px; }
+  .scrubber { width: 100%; cursor: pointer; accent-color: var(--green); }
+  .step-info { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; width: 540px; max-width: 100%; font-size: 13px; min-height: 60px; }
+  .step-label { color: var(--yellow); font-weight: bold; margin-bottom: 4px; }
+  .step-action { color: var(--blue); margin-bottom: 6px; }
+  .step-reasoning { color: var(--dim); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+  .footer { margin-top: 20px; text-align: center; font-size: 13px; }
+  .footer a { color: var(--blue); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+  @media (max-width: 560px) {
+    canvas { width: 100%; height: auto; aspect-ratio: 1; }
+    .controls, .step-info { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>ARC-AGI-3 Replay</h1>
+  <div class="meta">
+    <span>Game: <strong>{{ session.game_id }}</strong></span>
+    <span>Result: <strong class="{{ 'result-win' if session.result == 'WIN' else 'result-over' if session.result == 'GAME_OVER' else '' }}">{{ session.result }}</strong></span>
+    <span>Steps: {{ session.steps }}</span>
+    {% if session.model %}<span>Model: {{ session.model }}</span>{% endif %}
+    <span>{{ session.created_at | int | string }}</span>
+  </div>
+</div>
+
+<div class="canvas-wrap">
+  <canvas id="replayCanvas" width="512" height="512"></canvas>
+</div>
+
+<div class="controls">
+  <input type="range" class="scrubber" id="scrubber" min="0" max="0" value="0">
+</div>
+
+<div class="step-info" id="stepInfo">
+  <div class="step-label">Use the scrubber to step through the replay</div>
+</div>
+
+<div class="footer">
+  <a href="/">&#9654; Play ARC-AGI-3</a>
+</div>
+
+<script>
+const COLORS = {{ color_map | tojson }};
+const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACT5',6:'CLICK',7:'ACT7'};
+const SESSION = {{ session | tojson }};
+const STEPS = {{ steps | tojson }};
+
+const canvas = document.getElementById('replayCanvas');
+const ctx = canvas.getContext('2d');
+const scrubber = document.getElementById('scrubber');
+const stepInfo = document.getElementById('stepInfo');
+
+// Format the date in the header
+(function() {
+  const metaSpans = document.querySelectorAll('.header .meta span');
+  const dateSpan = metaSpans[metaSpans.length - 1];
+  const ts = SESSION.created_at;
+  if (ts) {
+    const d = new Date(ts * 1000);
+    dateSpan.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+})();
+
+function renderGrid(grid) {
+  if (!grid || !grid.length) return;
+  const h = grid.length, w = grid[0].length;
+  const scale = Math.floor(512 / Math.max(h, w));
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      ctx.fillStyle = COLORS[grid[y][x]] || '#000';
+      ctx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  }
+}
+
+function showStep(idx) {
+  if (idx < 0 || idx >= STEPS.length) return;
+  const step = STEPS[idx];
+  if (step.grid) renderGrid(step.grid);
+
+  const actionName = ACTION_NAMES[step.action] || `ACTION${step.action}`;
+  const coordStr = step.data?.x !== undefined ? ` at (${step.data.x}, ${step.data.y})` : '';
+
+  let reasoning = '';
+  if (step.llm_response) {
+    const lr = step.llm_response;
+    reasoning = lr.reasoning || lr.observation || lr.strategy || '';
+  }
+
+  stepInfo.innerHTML = `
+    <div class="step-label">Step ${step.step_num}</div>
+    <div class="step-action">${actionName}${coordStr}</div>
+    ${reasoning ? `<div class="step-reasoning">${reasoning.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>` : ''}
+  `;
+}
+
+// Initialize
+if (STEPS.length > 0) {
+  scrubber.max = STEPS.length - 1;
+  scrubber.value = 0;
+  showStep(0);
+}
+
+scrubber.addEventListener('input', () => {
+  showStep(parseInt(scrubber.value));
+});
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    scrubber.value = Math.min(parseInt(scrubber.value) + 1, STEPS.length - 1);
+    showStep(parseInt(scrubber.value));
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    scrubber.value = Math.max(parseInt(scrubber.value) - 1, 0);
+    showStep(parseInt(scrubber.value));
+  }
+});
+</script>
+
+</body>
+</html>
