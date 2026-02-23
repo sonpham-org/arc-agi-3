@@ -507,9 +507,9 @@
       <div class="canvas-panel">
         <div id="gameSourceBar" style="display:flex;align-items:center;justify-content:flex-end;width:100%;padding:4px 0;gap:6px;font-size:11px;color:var(--dim);">
           <span>Source:</span>
-          <div class="mode-toggle" id="apiModeToggle" style="margin:0;">
-            <label style="font-size:11px;padding:3px 10px;white-space:nowrap;"><input type="radio" name="apiMode" value="local" checked onchange="onApiModeChange('local')">Local</label>
-            <label style="font-size:11px;padding:3px 10px;white-space:nowrap;"><input type="radio" name="apiMode" value="official" onchange="onApiModeChange('official')">Official ARC Prize API</label>
+          <div class="mode-toggle" id="apiModeToggle" style="margin:0;width:auto;">
+            <label style="font-size:11px;padding:3px 10px;white-space:nowrap;flex:none;"><input type="radio" name="apiMode" value="local" checked onchange="onApiModeChange('local')">Local</label>
+            <label style="font-size:11px;padding:3px 10px;white-space:nowrap;flex:none;"><input type="radio" name="apiMode" value="official" onchange="onApiModeChange('official')">Official ARC Prize API</label>
           </div>
         </div>
         <div class="api-warning" id="apiWarning" style="display:none;width:100%;padding:4px 8px;font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;margin-bottom:4px;">
