@@ -934,8 +934,8 @@ class SessionState {
     this.callDurations = [];
     this.countdownInterval = null;
     this.countdownTarget = null;
-    // Lazy resume flag
-    this._needsResume = false;
+    // Tab name lock (set after autoplay generates model·game·rand name)
+    this._tabNameGenerated = false;
   }
   get avgCallDuration() {
     if (!this.callDurations.length) return 5000; // default 5s
@@ -974,7 +974,7 @@ function saveSessionToState() {
   const rc = document.getElementById('reasoningContent');
   if (rc) s.reasoningHTML = rc.innerHTML;
   // Update metadata
-  s.gameId = gameShortName(currentState.game_id) || s.gameId;
+  if (!s._tabNameGenerated) s.gameId = gameShortName(currentState.game_id) || s.gameId;
   s.model = getSelectedModel() || s.model;
   s.status = currentState.state || s.status;
 }
@@ -4556,7 +4556,7 @@ function browseResume(sid) {
   // Create a new session tab for this resume
   if (!sessions.has(sid)) {
     const s = new SessionState(sid);
-    s._needsResume = false; // we'll resume directly
+    // browseResume will call resumeSession directly
     sessions.set(sid, s);
     activeSessionId = sid;
     renderSessionTabs();
@@ -4668,21 +4668,6 @@ function switchSession(targetId) {
   const target = sessions.get(targetId);
   if (!target) return;
 
-  // Handle lazy resume for stale sessions
-  if (target._needsResume) {
-    target._needsResume = false;
-    // Save current session
-    if (activeSessionId && sessions.has(activeSessionId)) {
-      if (autoPlaying) { autoPlaying = false; updateAutoBtn(); }
-      saveSessionToState();
-    }
-    activeSessionId = targetId;
-    renderSessionTabs();
-    // Trigger resume from server
-    resumeSession(targetId);
-    return;
-  }
-
   // Stop autoplay on current session
   if (autoPlaying) { autoPlaying = false; updateAutoBtn(); }
   // Close replay if open
@@ -4695,6 +4680,11 @@ function switchSession(targetId) {
   activeSessionId = targetId;
   restoreSessionFromState(target);
   renderSessionTabs();
+
+  // If this is a restored stub (no grid data), resume from server
+  if (!target.currentGrid && target.sessionId && !target.sessionId.startsWith('pending_')) {
+    resumeSession(target.sessionId);
+  }
 }
 
 function closeSession(id) {
@@ -4835,10 +4825,9 @@ function restoreSessionsFromLocalStorage() {
     s.stepCount = meta.steps || 0;
     s.sessionTotalTokens = { input: 0, output: 0, cost: meta.cost || 0 };
     s.createdAt = meta.createdAt || 0;
-    s._needsResume = true; // needs server reload on click
+    s._tabNameGenerated = !!meta.gameId; // preserve tab name
     sessions.set(meta.id, s);
   }
-  // Set first session as active (but don't restore it yet — it's lazy)
   if (sessions.size > 0 && !activeSessionId) {
     activeSessionId = [...sessions.keys()][0];
   }
@@ -4863,7 +4852,6 @@ function initApp() {
     if (hm) _customHardMemory = hm;
   }
 
-  // Restore saved sessions from localStorage
   restoreSessionsFromLocalStorage();
   updateEmptyAppState();
 }
