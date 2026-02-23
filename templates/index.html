@@ -305,10 +305,11 @@
 
   /* ── Right panel tabs (removed Agent|History, kept for compat) ────── */
 
-  /* ── Subtab bar (within Agent tab) ─────────────────────────────────── */
-  .subtab-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
-  .subtab-bar button { flex: 1; padding: 7px 0; background: none; border: none; color: var(--text-dim);
-    font-family: inherit; font-size: 11px; font-weight: 500; letter-spacing: 0.3px; cursor: pointer;
+  /* ── Right panel tab bar (Settings | Memory | Reasoning) ─────────── */
+  .subtab-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .subtab-bar button { flex: 1; padding: 10px 0; background: none; border: none; color: var(--text-dim);
+    font-family: inherit; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; cursor: pointer;
     border-bottom: 2px solid transparent; transition: all 0.15s; }
   .subtab-bar button:hover { color: var(--text); }
   .subtab-bar button.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -322,12 +323,13 @@
   .settings-transport { display: none; /* moved to canvas panel */ }
 
   /* ── Memory subtab ────────────────────────────────────────────────── */
-  .memory-tab { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 10px 14px; gap: 10px; }
-  .memory-tab label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase;
-    letter-spacing: 0.3px; margin-bottom: 2px; }
+  .memory-tab { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 12px 14px; gap: 12px; }
+  .memory-tab .mem-section { display: flex; flex-direction: column; gap: 4px; }
+  .memory-tab .mem-section label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.3px; flex-shrink: 0; }
   .memory-tab textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
     border-radius: 4px; font-family: inherit; font-size: 11px; line-height: 1.5; padding: 8px; resize: vertical; }
-  .memory-tab .memory-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .memory-tab .memory-actions { display: flex; gap: 6px; flex-shrink: 0; padding-top: 4px; }
   .memory-tab .memory-actions .btn { font-size: 11px; padding: 5px 14px; }
 
   /* ── Multi-session: App container + top nav + tab bar ───────────────── */
@@ -798,23 +800,21 @@
           <!-- ── Memory subtab ── -->
           <div class="subtab-pane" id="subtabMemory">
             <div class="memory-tab">
-              <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-height:0;">
-                <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
-                  <label>System Prompt</label>
-                  <textarea id="memorySystemPrompt" style="flex:1;min-height:120px;" placeholder="ARC-AGI-3 description and action mappings..."></textarea>
-                </div>
-                <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
-                  <label>Agent Memory (hard priors)</label>
-                  <textarea id="memoryHardMemory" style="flex:1;min-height:120px;" placeholder="Agent strategy priors..."></textarea>
-                </div>
+              <div class="mem-section">
+                <label>System Prompt</label>
+                <textarea id="memorySystemPrompt" rows="8" placeholder="ARC-AGI-3 description and action mappings..."></textarea>
               </div>
-              <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
-                <label>Compact Prompt <span style="font-size:10px;color:var(--text-dim);">(sent to compact model)</span></label>
-                <textarea id="memoryCompactPrompt" style="flex:1;min-height:60px;opacity:0.8;" readonly placeholder="No compact prompt yet. The prompt sent to the compact model will appear here after compaction."></textarea>
+              <div class="mem-section">
+                <label>Agent Memory (hard priors)</label>
+                <textarea id="memoryHardMemory" rows="8" placeholder="Agent strategy priors..."></textarea>
               </div>
-              <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
-                <label>Compact Summary <span style="font-size:10px;color:var(--text-dim);">(auto-generated, editable)</span></label>
-                <textarea id="memoryCompactSummary" style="flex:1;min-height:80px;" placeholder="No compact summary yet. Play a game and compact context to see the LLM-generated summary of game rules and objectives here."></textarea>
+              <div class="mem-section">
+                <label>Compact Prompt <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(sent to compact model)</span></label>
+                <textarea id="memoryCompactPrompt" rows="4" style="opacity:0.8;" readonly placeholder="No compact prompt yet. The prompt sent to the compact model will appear here after compaction."></textarea>
+              </div>
+              <div class="mem-section">
+                <label>Compact Summary <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(auto-generated, editable)</span></label>
+                <textarea id="memoryCompactSummary" rows="5" placeholder="No compact summary yet. Play a game and compact context to see the LLM-generated summary here."></textarea>
               </div>
               <div class="memory-actions">
                 <button class="btn btn-primary" onclick="saveMemoryEdits()">Save</button>
