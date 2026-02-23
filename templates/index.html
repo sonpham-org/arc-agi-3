@@ -3162,7 +3162,7 @@ async function askLLMBYOK(prompt, model) {
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 2048 } }),
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 16384 } }),
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
@@ -3184,7 +3184,7 @@ async function askLLMBYOK(prompt, model) {
     body: JSON.stringify({
       model: info?.api_model || model,
       messages: [{ role: 'system', content: sysMsg }, { role: 'user', content: prompt }],
-      temperature: 0.3, max_tokens: 2048,
+      temperature: 0.3, max_tokens: 16384,
     }),
   });
   const data = await resp.json();
