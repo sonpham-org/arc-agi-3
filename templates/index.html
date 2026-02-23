@@ -610,6 +610,10 @@
                         <option value="same">Same as reasoning</option>
                       </select>
                       <div style="font-size:9px;color:var(--dim);margin-top:3px;">Used to summarize game history when context gets long.</div>
+                      <div id="compactByokPrompt" style="display:none;margin-top:6px;">
+                        <input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
+                        <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1394,10 +1398,70 @@ document.getElementById('modelSelect').addEventListener('change', function() {
   updateModelCaps();
   updateByokPrompt();
   updateModelEta();
+  updateCompactByokPrompt(); // reasoning provider may have changed
   // Lazy-load Puter.js when a Puter model is selected
   const model = this.value;
   const isPuter = modelsData.some(m => m.name === model && m.provider === 'puter');
   if (isPuter) loadPuterJS();
+});
+
+document.getElementById('compactModelSelectTop').addEventListener('change', function() {
+  updateCompactByokPrompt();
+});
+
+function updateCompactByokPrompt() {
+  const prompt = document.getElementById('compactByokPrompt');
+  const keyInput = document.getElementById('compactByokKeyInline');
+  const compactVal = document.getElementById('compactModelSelectTop').value;
+
+  // Auto/same modes don't need a separate key
+  if (!compactVal || compactVal === 'auto' || compactVal === 'auto-fastest' || compactVal === 'same') {
+    prompt.style.display = 'none';
+    return;
+  }
+
+  const info = getModelInfo(compactVal);
+  if (!info || info.provider === 'puter' || info.provider === 'copilot') {
+    prompt.style.display = 'none';
+    return;
+  }
+
+  // Check if compact model needs a key (unavailable = no server key)
+  if (!info.available && MODE === 'online') {
+    const reasoningInfo = getModelInfo(getSelectedModel());
+    const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
+    const reasoningKey = sameProvider ? (localStorage.getItem(`byok_key_${info.provider}`) || '') : '';
+
+    if (sameProvider && reasoningKey) {
+      // Same provider as reasoning — show disabled field with the key
+      const label = PROVIDER_LABELS[info.provider] || info.provider;
+      keyInput.placeholder = `Using ${label} key from reasoning model`;
+      keyInput.value = reasoningKey;
+      keyInput.disabled = true;
+      keyInput.style.opacity = '0.6';
+      keyInput.dataset.provider = '';
+      prompt.style.display = 'block';
+    } else {
+      // Different provider — show editable field
+      const label = PROVIDER_LABELS[info.provider] || info.provider;
+      keyInput.placeholder = `Paste API key for ${label} here...`;
+      const saved = localStorage.getItem(`byok_key_${info.provider}`) || '';
+      keyInput.value = saved;
+      keyInput.disabled = false;
+      keyInput.style.opacity = '1';
+      keyInput.dataset.provider = info.provider;
+      prompt.style.display = 'block';
+    }
+  } else {
+    prompt.style.display = 'none';
+  }
+}
+
+// Auto-save compact BYOK key on input
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'compactByokKeyInline') return;
+  const provider = e.target.dataset.provider;
+  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
 });
 
 function updateModelEta() {
