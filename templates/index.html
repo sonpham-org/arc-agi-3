@@ -658,6 +658,12 @@
                   </div>
                 </div>
 
+
+              </div>
+
+              <!-- RIGHT COLUMN: Reasoning / Tools + Copilot -->
+              <div class="settings-col">
+
                 <!-- REASONING / TOOLS -->
                 <div class="opt-section open" id="secReasoning">
                   <div class="opt-header" onclick="toggleSection('secReasoning')">
@@ -736,11 +742,6 @@
                     </div>
                   </div>
                 </div>
-
-              </div>
-
-              <!-- RIGHT COLUMN: Copilot -->
-              <div class="settings-col">
 
                 <!-- GITHUB COPILOT (local only) -->
                 {% if features.copilot %}
@@ -1707,6 +1708,10 @@ function gameShortName(gameId) {
 }
 
 async function startGame(gameId) {
+  // Block game change if current session already has moves
+  const cur = getActiveSession();
+  if (cur && cur.stepCount > 0) return;
+
   document.querySelectorAll('.game-card').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.game-card').forEach(c => {
     if (c.dataset.gameId === gameId) c.classList.add('active');
