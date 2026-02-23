@@ -649,56 +649,56 @@ MODEL_REGISTRY: dict[str, dict] = {
     "gemini-3.1-pro": {
         "provider": "gemini", "api_model": "gemini-3.1-pro-preview",
         "env_key": "GEMINI_API_KEY",
-        "price": "$2/$12 per 1M tok (no free tier)",
+        "price": "$2/$12 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
     "gemini-3-pro": {
         "provider": "gemini", "api_model": "gemini-3-pro-preview",
         "env_key": "GEMINI_API_KEY",
-        "price": "$2/$12 per 1M tok (no free tier)",
+        "price": "$2/$12 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
     "gemini-3-flash": {
         "provider": "gemini", "api_model": "gemini-3-flash-preview",
         "env_key": "GEMINI_API_KEY",
-        "price": "$0.50/$3 per 1M tok (free tier)",
+        "price": "$0.50/$3 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
     "gemini-2.5-pro": {
         "provider": "gemini", "api_model": "gemini-2.5-pro",
         "env_key": "GEMINI_API_KEY",
-        "price": "$1.25/$10 per 1M tok (free tier)",
+        "price": "$1.25/$10 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
     "gemini-2.5-flash": {
         "provider": "gemini", "api_model": "gemini-2.5-flash",
         "env_key": "GEMINI_API_KEY",
-        "price": "$0.30/$2.50 per 1M tok (free tier)",
+        "price": "$0.30/$2.50 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
     "gemini-2.5-flash-lite": {
         "provider": "gemini", "api_model": "gemini-2.5-flash-lite",
         "env_key": "GEMINI_API_KEY",
-        "price": "$0.10/$0.40 per 1M tok (free tier)",
+        "price": "$0.10/$0.40 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": False, "tools": False},
     },
     "gemini-2.0-flash": {
         "provider": "gemini", "api_model": "gemini-2.0-flash",
         "env_key": "GEMINI_API_KEY",
-        "price": "$0.10/$0.40 per 1M tok (free tier)",
+        "price": "$0.10/$0.40 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": False, "tools": True},
     },
     "gemini-2.0-flash-lite": {
         "provider": "gemini", "api_model": "gemini-2.0-flash-lite",
         "env_key": "GEMINI_API_KEY",
-        "price": "$0.075/$0.30 per 1M tok (free tier)",
+        "price": "$0.075/$0.30 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": False, "tools": False},
     },
@@ -724,7 +724,7 @@ MODEL_REGISTRY: dict[str, dict] = {
         "context_window": 200000,
         "capabilities": {"image": True, "reasoning": False, "tools": True},
     },
-    # ── Groq (free tier) ──────────────────────────────────────────────────
+    # ── Groq ──────────────────────────────────────────────────
     "groq/llama-3.3-70b-versatile": {
         "provider": "groq", "api_model": "llama-3.3-70b-versatile",
         "env_key": "GROQ_API_KEY",
@@ -749,7 +749,7 @@ MODEL_REGISTRY: dict[str, dict] = {
         "context_window": 32768,
         "capabilities": {"image": False, "reasoning": False, "tools": False},
     },
-    # ── Mistral (free tier) ───────────────────────────────────────────────
+    # ── Mistral ───────────────────────────────────────────────
     "mistral/mistral-small-latest": {
         "provider": "mistral", "api_model": "mistral-small-latest",
         "env_key": "MISTRAL_API_KEY",

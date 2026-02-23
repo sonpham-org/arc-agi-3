@@ -593,6 +593,7 @@
                   <div class="opt-body">
                     <select id="modelSelect"><option value="">Loading...</option></select>
                     <div class="model-caps" id="modelCaps"></div>
+                    <div id="modelEta" style="display:none; margin-top:4px; font-size:11px; color:var(--dim);"></div>
                     <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
                     <div id="byokPrompt" style="display:none;margin-top:6px;">
                       <input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
@@ -805,7 +806,7 @@
                 <textarea id="memorySystemPrompt" rows="8" placeholder="ARC-AGI-3 description and action mappings..."></textarea>
               </div>
               <div class="mem-section">
-                <label>Agent Memory (hard priors)</label>
+                <label>Agent Priors</label>
                 <textarea id="memoryHardMemory" rows="8" placeholder="Agent strategy priors..."></textarea>
               </div>
               <div class="mem-section">
@@ -1033,6 +1034,7 @@ function restoreSessionFromState(s) {
   updateAutoBtn();
   updatePanelBlur();
   updateGameListLock();
+  updateModelEta();
 
   if (action6Mode) canvas.style.cursor = 'crosshair';
   else canvas.style.cursor = 'default';
@@ -1385,11 +1387,27 @@ function updateModelCaps() {
 document.getElementById('modelSelect').addEventListener('change', function() {
   updateModelCaps();
   updateByokPrompt();
+  updateModelEta();
   // Lazy-load Puter.js when a Puter model is selected
   const model = this.value;
   const isPuter = modelsData.some(m => m.name === model && m.provider === 'puter');
   if (isPuter) loadPuterJS();
 });
+
+function updateModelEta() {
+  const el = document.getElementById('modelEta');
+  const model = document.getElementById('modelSelect').value;
+  if (!model) { el.style.display = 'none'; return; }
+  const s = getActiveSession();
+  if (s && s.callDurations.length > 0) {
+    const avg = s.avgCallDuration / 1000;
+    el.textContent = `~${avg.toFixed(1)}s per step (based on ${s.callDurations.length} call${s.callDurations.length > 1 ? 's' : ''})`;
+    el.style.display = '';
+  } else {
+    el.textContent = 'Step time estimate will appear after first call';
+    el.style.display = '';
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RENDERING
@@ -1957,23 +1975,24 @@ async function buildCompactContext() {
     `Step ${h.step}: ${ACTION_NAMES[h.action] || '?'} -> ${h.result_state || '?'}`
   ).join('\n');
 
-  const summaryPrompt = `Summarize the rules and objectives of this game that you have learned so far from the observations and history below. Be concise but thorough (max 300 words).
+  const summaryPrompt = `You are helping an AI agent play a game. Distill the crucial knowledge the agent has learned so far into a compact briefing. This will REPLACE the full history in the agent's context, so include everything it needs to keep playing well.
 
-Cover:
-1. RULES: What are the game mechanics? What does each action do? What constraints exist?
-2. OBJECTIVES: What is the goal? How do you win/complete a level?
-3. STRATEGIES: What patterns or strategies have proven effective?
-4. CURRENT STATE: Where are we now? What should we try next?
+Write a concise briefing (max 400 words) covering:
 
-OBSERVATIONS:
+1. GAME RULES & MECHANICS: What does each action actually do? What are the constraints? What happens when you pick wrong? What feedback does the game give? Include specific action numbers and their effects.
+2. DISCOVERED PATTERNS: What rules or patterns govern this game? What determines the correct answer? Any spatial, logical, or sequential patterns found?
+3. WHAT WORKS vs WHAT DOESN'T: Which strategies succeeded? Which failed and why? Any dead-end approaches to avoid?
+4. CURRENT SITUATION: Current level progress, what the agent should focus on next, and any unresolved hypotheses to test.
+
+OBSERVATIONS FROM GAMEPLAY:
 ${obsText}
 
-RECENT HISTORY:
+RECENT MOVE HISTORY:
 ${histText}
 
-Current levels completed: ${currentState.levels_completed || 0}/${currentState.win_levels || 0}
+Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels || 0}
 
-Respond with ONLY the summary text, no JSON.`;
+Write ONLY the briefing text. Be specific and actionable — vague summaries are useless. Include concrete details like action numbers, grid positions, and observed cause-and-effect relationships.`;
 
   // Store the prompt for display in Memory tab
   _lastCompactPrompt = summaryPrompt;
@@ -2606,7 +2625,7 @@ async function toggleAutoPlay() {
     const resp = await askLLM();
     if (s) {
       stopCountdown(s);
-      if (resp && resp.call_duration_ms) s.callDurations.push(resp.call_duration_ms);
+      if (resp && resp.call_duration_ms) { s.callDurations.push(resp.call_duration_ms); updateModelEta(); }
     }
 
     if (!autoPlaying) break;
@@ -4165,7 +4184,8 @@ Key facts:
 - States: NOT_FINISHED (playing), WIN (all levels done), GAME_OVER (failed).
 - Large uniform regions = background/walls. Small shapes = player/items.
 - Edge bars = health/energy/progress meters.`,
-  hard_memory: `- Bar/meter changes along edges tend to be health bars, not real progress.
+  hard_memory: `- Simplify the state of the game whenever possible for understanding (but not too simple).
+- Bar/meter changes along edges tend to be health bars, not real progress.
 - Large uniform regions = background/walls. Small shapes = player/items.
 - ACTION5 often cycles or toggles something context-dependent.
 - ACTION7 is a secondary interact (rotate, swap, etc.).
@@ -4299,7 +4319,8 @@ async function loadBrowseByGame() {
   const listEl = document.getElementById('browseGameList');
   // Populate game list
   try {
-    const games = await fetchJSON('/api/games');
+    let games = await fetchJSON('/api/games');
+    if (MODE === 'online') games = games.filter(g => g.game_id !== 'fd01-00000001');
     listEl.innerHTML = '';
     for (const g of games) {
       const div = document.createElement('div');
@@ -4343,7 +4364,8 @@ async function loadBrowseGlobal() {
   el.innerHTML = '<div class="browse-empty">Loading...</div>';
   try {
     const allSessions = await fetchAllSessions(true);
-    const filtered = allSessions.filter(s => (s.steps || 0) >= 20);
+    let filtered = allSessions.filter(s => (s.steps || 0) >= 20);
+    if (MODE === 'online') filtered = filtered.filter(s => s.game_id !== 'fd01-00000001');
     const header = document.getElementById('browseGlobalHeader');
     header.textContent = `All sessions from server (${filtered.length} with 20+ steps)`;
     if (!filtered.length) {
