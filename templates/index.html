@@ -274,9 +274,11 @@
   .turnstile-gate .error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
 
   /* ── Transport bar ──────────────────────────────────────────────────── */
-  .transport-bar { display: flex; gap: 4px; margin-top: 10px; width: 100%; }
-  .transport-bar .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
-    padding: 8px 6px; font-size: 12px; font-weight: 600; }
+  .transport-bar { display: flex; gap: 4px; margin-top: 8px; justify-content: center; }
+  .transport-bar .btn { display: flex; align-items: center; justify-content: center; gap: 4px;
+    padding: 6px 12px; font-size: 11px; font-weight: 600; }
+  .transport-bar .btn-step,
+  .transport-bar .btn-auto { flex: 1; }
   .btn-undo { border-color: var(--yellow); color: var(--yellow); }
   .btn-undo:hover { background: #d2992233; }
   .btn-undo:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
@@ -324,7 +326,7 @@
   .settings-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0; flex: 1; overflow-y: auto; }
   .settings-col { border-right: 1px solid var(--border); overflow-y: auto; }
   .settings-col:last-child { border-right: none; }
-  .settings-transport { border-top: 1px solid var(--border); padding: 10px 14px; flex-shrink: 0; }
+  .settings-transport { display: none; /* moved to canvas panel */ }
 
   /* ── Memory subtab ────────────────────────────────────────────────── */
   .memory-tab { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 10px 14px; gap: 10px; }
@@ -393,6 +395,15 @@
             <input type="checkbox" id="coordToggle" checked> Coords
           </label>
           <div id="noChangeMsg" style="display:none;"></div>
+        </div>
+        <!-- Agent transport controls -->
+        <div class="transport-bar" id="transportBar" style="display:none;">
+          <button class="btn btn-step" onclick="stepOnce()" id="stepBtn" title="Ask the LLM for its next move and execute it">&#9654; Step</button>
+          <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn" title="Continuously ask LLM and execute moves until paused">&#9193; Auto</button>
+          <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled title="Undo the last action and restore previous grid state">&#9198; Undo</button>
+          <button class="btn" onclick="manualCompact()" id="compactBtn" title="Summarize game history to reduce prompt size" style="background:#445;">&#128220;</button>
+          <button class="btn" onclick="testModel()" id="testBtn" title="Test the selected model's connectivity and response latency" style="background:#445;">&#128267;</button>
+          <button class="btn" onclick="resetSession()" id="resetBtn" title="Restart the current game from scratch — clears all progress" style="border-color:var(--red);color:var(--red);">&#8635;</button>
         </div>
         <!-- Replay scrubber (shown during session replay) -->
         <div class="replay-bar" id="replayBar" style="display:none;">
@@ -502,11 +513,10 @@
                       <div class="triswitch" id="toolsMode">
                         <label><input type="radio" name="toolsMode" value="off"><span>Off</span></label>
                         <label><input type="radio" name="toolsMode" value="on" checked><span>On</span></label>
-                        <label><input type="radio" name="toolsMode" value="adaptive"><span>Adaptive</span></label>
                       </div>
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      On = Python sandbox{% if mode == 'online' %} (Pyodide, ~10MB){% endif %} &nbsp;|&nbsp; Adaptive = after 10 stuck steps
+                      On = Python sandbox{% if mode == 'online' %} (Pyodide, ~10MB){% endif %}
                     </div>
                     <div class="opt-row">
                       <span class="opt-label">Compact history</span>
@@ -552,6 +562,7 @@
                         <label><input type="radio" name="planMode" value="5"><span>5</span></label>
                         <label><input type="radio" name="planMode" value="10" checked><span>10</span></label>
                         <label><input type="radio" name="planMode" value="20"><span>20</span></label>
+                        <label><input type="radio" name="planMode" value="unlimited"><span>&infin;</span></label>
                       </div>
                     </div>
                     <div style="font-size:10px;color:var(--text-dim);">
@@ -643,17 +654,7 @@
               </div>
             </div>
 
-            <!-- Transport bar (full-width, below the 2 columns) -->
-            <div class="settings-transport">
-              <div class="transport-bar">
-                <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled title="Undo last step">&#9198; Undo</button>
-                <button class="btn" onclick="resetSession()" id="resetBtn" title="Restart current game from scratch" style="border-color:var(--red);color:var(--red);">&#8635; Reset</button>
-                <button class="btn" onclick="manualCompact()" id="compactBtn" title="Manually compact context now" style="background:#445;">&#128220; Compact</button>
-                <button class="btn btn-step" onclick="stepOnce()" id="stepBtn" title="Ask LLM + execute one step">&#9654; Step</button>
-                <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn" title="Auto-play continuously">&#9193; Auto</button>
-                <button class="btn" onclick="testModel()" id="testBtn" title="Test model connectivity + latency" style="background:#445;">&#128267; Test</button>
-              </div>
-            </div>
+            <!-- Transport bar moved to canvas panel -->
           </div>
 
           <!-- ── Memory subtab ── -->
@@ -1360,6 +1361,7 @@ async function startGame(gameId) {
   document.getElementById('emptyState').style.display = 'none';
   canvas.style.display = 'block';
   document.getElementById('controls').style.display = 'flex';
+  document.getElementById('transportBar').style.display = 'flex';
   document.getElementById('reasoningContent').innerHTML =
     '<div class="empty-state" style="height:auto;font-size:12px;">Game started, click a move or press Step or Auto Play.</div>';
 
@@ -1669,6 +1671,8 @@ Respond with ONLY the summary text, no JSON.`;
       if (compactModel) body.model = compactModel;
       const data = await fetchJSON('/api/llm/summarize', body);
       summary = data.summary;
+    } else if (compactModel && getByokKey(getModelInfo(compactModel)?.provider)) {
+      summary = await askLLMBYOK(summaryPrompt, compactModel);
     } else if (FEATURES.puter_js) {
       summary = await askLLMPuter(summaryPrompt, 'gpt-4o-mini');
     }
@@ -2943,6 +2947,7 @@ async function loadReplay(sid) {
     const bar = document.getElementById('replayBar');
     bar.style.display = 'block';
     document.getElementById('controls').style.display = 'none';
+    document.getElementById('transportBar').style.display = 'none';
 
     const scrubber = document.getElementById('replayScrubber');
     const totalSteps = data.steps?.length || 0;
@@ -3038,6 +3043,7 @@ function closeReplay() {
   // Restore game controls if a session is active
   if (sessionId) {
     document.getElementById('controls').style.display = 'flex';
+    document.getElementById('transportBar').style.display = 'flex';
     if (currentGrid) renderGrid(currentGrid);
   }
 }
@@ -3290,6 +3296,7 @@ async function resumeFromPuterKv(kvKey) {
       document.getElementById('emptyState').style.display = 'none';
       canvas.style.display = 'block';
       document.getElementById('controls').style.display = 'flex';
+      document.getElementById('transportBar').style.display = 'flex';
       updateUI(currentState);
     }
   } catch (e) {
@@ -3539,6 +3546,7 @@ async function resumeSession(sid) {
     document.getElementById('emptyState').style.display = 'none';
     canvas.style.display = 'block';
     document.getElementById('controls').style.display = 'flex';
+    document.getElementById('transportBar').style.display = 'flex';
 
     if ((data.available_actions || []).includes(6)) {
       action6Mode = true;
@@ -3718,6 +3726,7 @@ async function branchHere() {
     document.getElementById('replayBar').style.display = 'none';
     document.getElementById('replayReasoningPanel').style.display = 'none';
     document.getElementById('controls').style.display = 'flex';
+    document.getElementById('transportBar').style.display = 'flex';
 
     updateUI(data);
     updateUndoBtn();
