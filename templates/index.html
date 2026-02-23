@@ -936,6 +936,8 @@ class SessionState {
     this.countdownTarget = null;
     // Tab label: once set by autoplay, never overwritten
     this.tabLabel = '';
+    // LLM call in flight
+    this.waitingForLLM = false;
   }
   get avgCallDuration() {
     if (!this.callDurations.length) return 5000; // default 5s
@@ -2261,6 +2263,8 @@ async function askLLM() {
 
   document.getElementById('llmSpinner').style.display = 'inline';
   document.getElementById('topSpinner').style.display = 'inline';
+  const _llmSession = getActiveSession();
+  if (_llmSession) { _llmSession.waitingForLLM = true; renderSessionTabs(); }
 
   try {
     let resp;
@@ -2441,6 +2445,7 @@ async function askLLM() {
   } finally {
     document.getElementById('llmSpinner').style.display = 'none';
     document.getElementById('topSpinner').style.display = 'none';
+    if (_llmSession) { _llmSession.waitingForLLM = false; renderSessionTabs(); }
   }
 }
 
@@ -4581,7 +4586,7 @@ function browseDeleteLocal(sid, btn) {
 function getTabDotClass(s) {
   if (s.status === 'WIN') return 'tab-dot-win';
   if (s.status === 'GAME_OVER') return 'tab-dot-gameover';
-  if (s.autoPlaying && s.status === 'NOT_FINISHED') return 'tab-dot-running';
+  if ((s.autoPlaying || s.waitingForLLM) && s.status === 'NOT_FINISHED') return 'tab-dot-running';
   return 'tab-dot-idle';
 }
 
