@@ -53,7 +53,8 @@
   .status-GAME_OVER { background: #f8514933; color: var(--red); }
   .status-NOT_PLAYED { background: #30363d; color: var(--text-dim); }
 
-  .game-area { flex: 1; display: flex; overflow: hidden; }
+  .game-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .game-area-inner { flex: 1; display: flex; overflow: hidden; }
 
   /* ── Canvas panel ────────────────────────────────────────────────────── */
   .canvas-panel { flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -273,23 +274,20 @@
   .turnstile-gate p { color: var(--text-dim); font-size: 13px; max-width: 400px; text-align: center; line-height: 1.6; }
   .turnstile-gate .error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
 
-  /* ── Transport bar ──────────────────────────────────────────────────── */
-  .transport-bar { display: flex; gap: 4px; margin-top: 20px; justify-content: center; flex-wrap: wrap;
-    border-top: 1px solid var(--border); padding-top: 12px; }
+  /* ── Transport bar (full-width bottom strip) ────────────────────────── */
+  .transport-strip { display: none; flex-shrink: 0; border-top: 1px solid var(--border);
+    background: var(--surface); padding: 8px 16px 6px; }
+  .transport-bar { display: flex; gap: 4px; }
   .transport-bar .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
-    padding: 7px 10px; font-size: 11px; font-weight: 600; min-width: 0; }
-  .btn-undo { border-color: var(--yellow); color: var(--yellow); }
-  .btn-undo:hover { background: #d2992233; }
-  .btn-undo:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
-  .btn-undo:disabled:hover { background: var(--surface); }
-  .btn-step { border-color: var(--accent); color: var(--accent); }
-  .btn-step:hover { background: #58a6ff22; }
-  .btn-auto { background: var(--green); border-color: var(--green); color: #000; }
-  .btn-auto:hover { background: #2ea043; }
+    padding: 7px 10px; font-size: 11px; font-weight: 600; min-width: 0;
+    border-color: var(--accent); color: var(--accent); background: var(--surface); }
+  .transport-bar .btn:hover { background: #58a6ff22; }
+  .transport-bar .btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
+  .transport-bar .btn:disabled:hover { background: var(--surface); }
+  .btn-pause { background: var(--yellow) !important; border-color: var(--yellow) !important; color: #000 !important; }
+  .btn-pause:hover { background: #b8860b !important; }
   .transport-desc { font-size: 10px; color: var(--dim); text-align: center; margin-top: 4px;
-    min-height: 14px; transition: color 0.15s; }
-  .btn-pause { background: var(--yellow); border-color: var(--yellow); color: #000; }
-  .btn-pause:hover { background: #b8860b; }
+    min-height: 14px; }
 
   /* ── API Mode toggle ────────────────────────────────────────────────── */
   .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; width: 100%; }
@@ -367,6 +365,7 @@
     </div>
 
     <div class="game-area">
+      <div class="game-area-inner">
       <!-- Canvas -->
       <div class="canvas-panel">
         <div id="emptyState" class="empty-state">
@@ -397,25 +396,6 @@
           </label>
           <div id="noChangeMsg" style="display:none;"></div>
         </div>
-        <!-- Session controls -->
-        <div class="transport-bar" id="transportBar" style="display:none;">
-          <button class="btn btn-step" onclick="stepOnce()" id="stepBtn"
-            onmouseenter="showTransportDesc('Call the agent once')"
-            onmouseleave="clearTransportDesc()">&#9654; Advance</button>
-          <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn"
-            onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
-            onmouseleave="clearTransportDesc()">&#187; Auto Advance</button>
-          <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled
-            onmouseenter="showTransportDesc('Undo last step')"
-            onmouseleave="clearTransportDesc()">&#9198; Undo</button>
-          <button class="btn" onclick="manualCompact()" id="compactBtn" style="background:#445;"
-            onmouseenter="showTransportDesc('Summarize history to reduce prompt size')"
-            onmouseleave="clearTransportDesc()">Compact History</button>
-          <button class="btn" onclick="resetSession()" id="resetBtn" style="border-color:var(--red);color:var(--red);"
-            onmouseenter="showTransportDesc('Restart the current game from scratch')"
-            onmouseleave="clearTransportDesc()">&#8635; Restart</button>
-        </div>
-        <div class="transport-desc" id="transportDesc"></div>
         <!-- Replay scrubber (shown during session replay) -->
         <div class="replay-bar" id="replayBar" style="display:none;">
           <div class="replay-info" id="replayInfo">Step 0 / 0</div>
@@ -736,6 +716,30 @@
         </div>
 
       </div>
+      </div><!-- /game-area-inner -->
+
+      <!-- Session controls (full-width bottom strip) -->
+      <div class="transport-strip" id="transportBar">
+        <div class="transport-bar">
+          <button class="btn" onclick="stepOnce()" id="stepBtn"
+            onmouseenter="showTransportDesc('Call the agent once')"
+            onmouseleave="clearTransportDesc()">&#9654; Advance</button>
+          <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
+            onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
+            onmouseleave="clearTransportDesc()">&#187; Auto Advance</button>
+          <button class="btn" onclick="undoStep()" id="undoBtn" disabled
+            onmouseenter="showTransportDesc('Undo last step')"
+            onmouseleave="clearTransportDesc()">&#9198; Undo</button>
+          <button class="btn" onclick="manualCompact()" id="compactBtn"
+            onmouseenter="showTransportDesc('Summarize history to reduce prompt size')"
+            onmouseleave="clearTransportDesc()">Compact History</button>
+          <button class="btn" onclick="resetSession()" id="resetBtn"
+            onmouseenter="showTransportDesc('Restart the current game from scratch')"
+            onmouseleave="clearTransportDesc()">&#8635; Restart</button>
+        </div>
+        <div class="transport-desc" id="transportDesc"></div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -1379,7 +1383,7 @@ async function startGame(gameId) {
   document.getElementById('emptyState').style.display = 'none';
   canvas.style.display = 'block';
   document.getElementById('controls').style.display = 'flex';
-  document.getElementById('transportBar').style.display = 'flex';
+  document.getElementById('transportBar').style.display = 'block';
   document.getElementById('reasoningContent').innerHTML =
     '<div class="empty-state" style="height:auto;font-size:12px;">Game started, click a move or press Step or Auto Play.</div>';
 
@@ -2069,10 +2073,10 @@ function updateAutoBtn() {
   const btn = document.getElementById('autoPlayBtn');
   if (autoPlaying) {
     btn.innerHTML = '&#9208; Pause';
-    btn.className = 'btn btn-pause';
+    btn.classList.add('btn-pause');
   } else {
     btn.innerHTML = '&#187; Auto Advance';
-    btn.className = 'btn btn-auto';
+    btn.classList.remove('btn-pause');
   }
 }
 
@@ -3059,7 +3063,7 @@ function closeReplay() {
   // Restore game controls if a session is active
   if (sessionId) {
     document.getElementById('controls').style.display = 'flex';
-    document.getElementById('transportBar').style.display = 'flex';
+    document.getElementById('transportBar').style.display = 'block';
     if (currentGrid) renderGrid(currentGrid);
   }
 }
@@ -3312,7 +3316,7 @@ async function resumeFromPuterKv(kvKey) {
       document.getElementById('emptyState').style.display = 'none';
       canvas.style.display = 'block';
       document.getElementById('controls').style.display = 'flex';
-      document.getElementById('transportBar').style.display = 'flex';
+      document.getElementById('transportBar').style.display = 'block';
       updateUI(currentState);
     }
   } catch (e) {
@@ -3562,7 +3566,7 @@ async function resumeSession(sid) {
     document.getElementById('emptyState').style.display = 'none';
     canvas.style.display = 'block';
     document.getElementById('controls').style.display = 'flex';
-    document.getElementById('transportBar').style.display = 'flex';
+    document.getElementById('transportBar').style.display = 'block';
 
     if ((data.available_actions || []).includes(6)) {
       action6Mode = true;
@@ -3742,7 +3746,7 @@ async function branchHere() {
     document.getElementById('replayBar').style.display = 'none';
     document.getElementById('replayReasoningPanel').style.display = 'none';
     document.getElementById('controls').style.display = 'flex';
-    document.getElementById('transportBar').style.display = 'flex';
+    document.getElementById('transportBar').style.display = 'block';
 
     updateUI(data);
     updateUndoBtn();
