@@ -274,11 +274,10 @@
   .turnstile-gate .error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
 
   /* ── Transport bar ──────────────────────────────────────────────────── */
-  .transport-bar { display: flex; gap: 4px; margin-top: 8px; justify-content: center; }
-  .transport-bar .btn { display: flex; align-items: center; justify-content: center; gap: 4px;
-    padding: 6px 12px; font-size: 11px; font-weight: 600; }
-  .transport-bar .btn-step,
-  .transport-bar .btn-auto { flex: 1; }
+  .transport-bar { display: flex; gap: 4px; margin-top: 20px; justify-content: center; flex-wrap: wrap;
+    border-top: 1px solid var(--border); padding-top: 12px; }
+  .transport-bar .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+    padding: 7px 10px; font-size: 11px; font-weight: 600; min-width: 0; }
   .btn-undo { border-color: var(--yellow); color: var(--yellow); }
   .btn-undo:hover { background: #d2992233; }
   .btn-undo:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
@@ -287,6 +286,8 @@
   .btn-step:hover { background: #58a6ff22; }
   .btn-auto { background: var(--green); border-color: var(--green); color: #000; }
   .btn-auto:hover { background: #2ea043; }
+  .transport-desc { font-size: 10px; color: var(--dim); text-align: center; margin-top: 4px;
+    min-height: 14px; transition: color 0.15s; }
   .btn-pause { background: var(--yellow); border-color: var(--yellow); color: #000; }
   .btn-pause:hover { background: #b8860b; }
 
@@ -396,15 +397,25 @@
           </label>
           <div id="noChangeMsg" style="display:none;"></div>
         </div>
-        <!-- Agent transport controls -->
+        <!-- Session controls -->
         <div class="transport-bar" id="transportBar" style="display:none;">
-          <button class="btn btn-step" onclick="stepOnce()" id="stepBtn" title="Ask the LLM for its next move and execute it">&#9654; Step</button>
-          <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn" title="Continuously ask LLM and execute moves until paused">&#9193; Auto</button>
-          <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled title="Undo the last action and restore previous grid state">&#9198; Undo</button>
-          <button class="btn" onclick="manualCompact()" id="compactBtn" title="Summarize game history to reduce prompt size" style="background:#445;">&#128220;</button>
-          <button class="btn" onclick="testModel()" id="testBtn" title="Test the selected model's connectivity and response latency" style="background:#445;">&#128267;</button>
-          <button class="btn" onclick="resetSession()" id="resetBtn" title="Restart the current game from scratch — clears all progress" style="border-color:var(--red);color:var(--red);">&#8635;</button>
+          <button class="btn btn-step" onclick="stepOnce()" id="stepBtn"
+            onmouseenter="showTransportDesc('Call the agent once')"
+            onmouseleave="clearTransportDesc()">&#9654; Advance</button>
+          <button class="btn btn-auto" onclick="toggleAutoPlay()" id="autoPlayBtn"
+            onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
+            onmouseleave="clearTransportDesc()">&#187; Auto Advance</button>
+          <button class="btn btn-undo" onclick="undoStep()" id="undoBtn" disabled
+            onmouseenter="showTransportDesc('Undo last step')"
+            onmouseleave="clearTransportDesc()">&#9198; Undo</button>
+          <button class="btn" onclick="manualCompact()" id="compactBtn" style="background:#445;"
+            onmouseenter="showTransportDesc('Summarize history to reduce prompt size')"
+            onmouseleave="clearTransportDesc()">Compact History</button>
+          <button class="btn" onclick="resetSession()" id="resetBtn" style="border-color:var(--red);color:var(--red);"
+            onmouseenter="showTransportDesc('Restart the current game from scratch')"
+            onmouseleave="clearTransportDesc()">&#8635; Restart</button>
         </div>
+        <div class="transport-desc" id="transportDesc"></div>
         <!-- Replay scrubber (shown during session replay) -->
         <div class="replay-bar" id="replayBar" style="display:none;">
           <div class="replay-info" id="replayInfo">Step 0 / 0</div>
@@ -1013,6 +1024,13 @@ document.getElementById('changeOpacity').addEventListener('input', (e) => {
 });
 document.getElementById('showChanges').addEventListener('change', redrawGrid);
 document.getElementById('changeColor').addEventListener('input', redrawGrid);
+
+function showTransportDesc(text) {
+  document.getElementById('transportDesc').textContent = text;
+}
+function clearTransportDesc() {
+  document.getElementById('transportDesc').textContent = '';
+}
 
 function redrawGrid() {
   if (!currentGrid) return;
@@ -2052,11 +2070,9 @@ function updateAutoBtn() {
   if (autoPlaying) {
     btn.innerHTML = '&#9208; Pause';
     btn.className = 'btn btn-pause';
-    btn.title = 'Pause auto-play';
   } else {
-    btn.innerHTML = '&#9193; Auto';
+    btn.innerHTML = '&#187; Auto Advance';
     btn.className = 'btn btn-auto';
-    btn.title = 'Auto-play continuously';
   }
 }
 
