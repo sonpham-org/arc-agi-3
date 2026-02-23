@@ -2036,6 +2036,7 @@ def llm_models():
             available = bool(not env_key or os.environ.get(env_key))
         models.append({
             "name": key,
+            "api_model": info.get("api_model", key),
             "provider": provider,
             "price": info.get("price", "?"),
             "context_window": info.get("context_window", 128000),
