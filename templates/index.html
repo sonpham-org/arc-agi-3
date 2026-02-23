@@ -53,8 +53,7 @@
   .status-GAME_OVER { background: #f8514933; color: var(--red); }
   .status-NOT_PLAYED { background: #30363d; color: var(--text-dim); }
 
-  .game-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .game-area-inner { flex: 1; display: flex; overflow: hidden; }
+  .game-area { flex: 1; display: flex; overflow: hidden; }
 
   /* ── Canvas panel ────────────────────────────────────────────────────── */
   .canvas-panel { flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -274,9 +273,9 @@
   .turnstile-gate p { color: var(--text-dim); font-size: 13px; max-width: 400px; text-align: center; line-height: 1.6; }
   .turnstile-gate .error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
 
-  /* ── Transport bar (full-width bottom strip) ────────────────────────── */
+  /* ── Transport bar (inside canvas panel) ─────────────────────────── */
   .transport-strip { display: none; flex-shrink: 0; border-top: 1px solid var(--border);
-    background: var(--surface); padding: 8px 16px 6px; }
+    background: var(--surface); padding: 8px 16px 6px; width: 100%; margin-top: auto; }
   .transport-bar { display: flex; gap: 4px; }
   .transport-bar .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
     padding: 7px 10px; font-size: 11px; font-weight: 600; min-width: 0;
@@ -365,7 +364,6 @@
     </div>
 
     <div class="game-area">
-      <div class="game-area-inner">
       <!-- Canvas -->
       <div class="canvas-panel">
         <div id="emptyState" class="empty-state">
@@ -406,6 +404,27 @@
             <button class="btn" onclick="branchHere()" style="padding:4px 12px;border-color:var(--purple);color:var(--purple);">&#8627; Branch</button>
             <button class="btn btn-danger" onclick="closeReplay()" style="padding:4px 12px;">Close</button>
           </div>
+        </div>
+        <!-- Transport controls -->
+        <div class="transport-strip" id="transportBar">
+          <div class="transport-bar">
+            <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
+              onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
+              onmouseleave="clearTransportDesc()">&#187; Agent Autoplay</button>
+            <button class="btn" onclick="stepOnce()" id="stepBtn"
+              onmouseenter="showTransportDesc('Call the agent once')"
+              onmouseleave="clearTransportDesc()">&#9654; Agent Once</button>
+            <button class="btn" onclick="undoStep()" id="undoBtn" disabled
+              onmouseenter="showTransportDesc('Undo last step')"
+              onmouseleave="clearTransportDesc()">&#9198; Undo</button>
+            <button class="btn" onclick="manualCompact()" id="compactBtn"
+              onmouseenter="showTransportDesc('Summarize history to reduce prompt size')"
+              onmouseleave="clearTransportDesc()">Compact History</button>
+            <button class="btn" onclick="resetSession()" id="resetBtn"
+              onmouseenter="showTransportDesc('Restart the current game from scratch')"
+              onmouseleave="clearTransportDesc()">&#8635; Restart</button>
+          </div>
+          <div class="transport-desc" id="transportDesc"></div>
         </div>
       </div>
 
@@ -715,29 +734,6 @@
           </div>
         </div>
 
-      </div>
-      </div><!-- /game-area-inner -->
-
-      <!-- Session controls (full-width bottom strip) -->
-      <div class="transport-strip" id="transportBar">
-        <div class="transport-bar">
-          <button class="btn" onclick="stepOnce()" id="stepBtn"
-            onmouseenter="showTransportDesc('Call the agent once')"
-            onmouseleave="clearTransportDesc()">&#9654; Advance</button>
-          <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
-            onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
-            onmouseleave="clearTransportDesc()">&#187; Auto Advance</button>
-          <button class="btn" onclick="undoStep()" id="undoBtn" disabled
-            onmouseenter="showTransportDesc('Undo last step')"
-            onmouseleave="clearTransportDesc()">&#9198; Undo</button>
-          <button class="btn" onclick="manualCompact()" id="compactBtn"
-            onmouseenter="showTransportDesc('Summarize history to reduce prompt size')"
-            onmouseleave="clearTransportDesc()">Compact History</button>
-          <button class="btn" onclick="resetSession()" id="resetBtn"
-            onmouseenter="showTransportDesc('Restart the current game from scratch')"
-            onmouseleave="clearTransportDesc()">&#8635; Restart</button>
-        </div>
-        <div class="transport-desc" id="transportDesc"></div>
       </div>
 
     </div>
@@ -2075,7 +2071,7 @@ function updateAutoBtn() {
     btn.innerHTML = '&#9208; Pause';
     btn.classList.add('btn-pause');
   } else {
-    btn.innerHTML = '&#187; Auto Advance';
+    btn.innerHTML = '&#187; Agent Autoplay';
     btn.classList.remove('btn-pause');
   }
 }
