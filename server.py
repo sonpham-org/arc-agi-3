@@ -1428,13 +1428,43 @@ def _parse_llm_response(content: str, model_name: str) -> dict:
 
 
 def _extract_json(text: str) -> dict | None:
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
-    except json.JSONDecodeError:
-        pass
+    """Extract first valid JSON object with 'action' or 'plan' using balanced-brace matching."""
+    import re
+    cleaned = re.sub(r"^\s*//.*$", "", text, flags=re.MULTILINE)
+    i = 0
+    while i < len(cleaned):
+        if cleaned[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for j in range(i, len(cleaned)):
+            ch = cleaned[j]
+            if esc:
+                esc = False
+                continue
+            if ch == "\\" and in_str:
+                esc = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(cleaned[i : j + 1])
+                        if "action" in obj or "plan" in obj:
+                            return obj
+                    except json.JSONDecodeError:
+                        pass
+                    break
+        i += 1
     return None
 
 
@@ -1798,6 +1828,15 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
 # ROUTES
 # ═══════════════════════════════════════════════════════════════════════════
 
+@app.after_request
+def add_cache_headers(response):
+    if response.content_type and "text/html" in response.content_type:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 @app.route("/")
 @bot_protection
 def index():
@@ -1983,16 +2022,15 @@ def llm_models():
 
     for key, info in MODEL_REGISTRY.items():
         provider = info["provider"]
-        # In online mode, skip server-only providers
-        if mode == "online" and provider not in ("copilot",):
-            # Online mode only shows puter/byok models (handled client-side)
-            continue
-        # In local mode, include everything
         # Copilot models need OAuth, not env key
         if provider == "copilot":
             if not feature_enabled("copilot"):
                 continue
             available = copilot_oauth_token is not None
+        elif mode == "online":
+            # In online mode, all server providers shown but marked unavailable
+            # (user provides their own key via BYOK)
+            available = False
         else:
             env_key = info.get("env_key", "")
             available = bool(not env_key or os.environ.get(env_key))

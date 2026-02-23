@@ -443,7 +443,10 @@
                     <select id="modelSelect"><option value="">Loading...</option></select>
                     <div class="model-caps" id="modelCaps"></div>
                     <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
-                    <input type="text" class="text-input" id="modelCustom" placeholder="Or type model name..." style="margin-top:6px;">
+                    <div id="byokPrompt" style="display:none;margin-top:6px;">
+                      <input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
+                      <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
+                    </div>
                   </div>
                 </div>
 
@@ -613,31 +616,7 @@
                 </div>
                 {% endif %}
 
-                <!-- BYOK — Bring Your Own Key (online only) -->
-                {% if features.byok %}
-                <div class="opt-section" id="secBYOK">
-                  <div class="opt-header" onclick="toggleSection('secBYOK')">
-                    <span>API Key (BYOK)</span><span class="chevron">&#9654;</span>
-                  </div>
-                  <div class="opt-body">
-                    <div class="opt-row">
-                      <span class="opt-label">Provider</span>
-                      <select id="byokProvider" style="width:140px;">
-                        <option value="openai">OpenAI</option>
-                        <option value="gemini">Google Gemini</option>
-                      </select>
-                    </div>
-                    <div class="opt-row">
-                      <input type="password" class="text-input" id="byokKey" placeholder="Paste API key here...">
-                    </div>
-                    <button class="btn btn-primary" onclick="saveBYOK()" style="width:100%;font-size:11px;">Save locally</button>
-                    <div class="byok-notice">
-                      Your key is stored in localStorage only — never sent to our server.<br>
-                      Anthropic keys won't work (CORS blocked). Use Puter.js for Claude models.
-                    </div>
-                  </div>
-                </div>
-                {% endif %}
+                <!-- BYOK section removed — API key prompt now inline under model selector -->
 
                 <!-- GRAPHICS -->
                 <div class="opt-section open" id="secGraphics">
@@ -723,7 +702,7 @@
                 <a href="https://buymeacoffee.com/sonphamnet" target="_blank" rel="noopener" class="bmc-link">
                   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="bmc-img">
                 </a>
-                <div class="bmc-text">Enjoying ARC-AGI-3? A coffee helps keep development going.</div>
+                <div class="bmc-text">Enjoy the project? A coffee helps keep the development going.</div>
               </div>
             </div>
             <div class="ad-show-btn" id="adShowBtn">
@@ -1048,9 +1027,42 @@ function redrawGrid() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function getSelectedModel() {
-  const custom = document.getElementById('modelCustom').value.trim();
-  return custom || document.getElementById('modelSelect').value;
+  return document.getElementById('modelSelect').value;
 }
+
+// Provider name mapping for BYOK prompt
+const PROVIDER_LABELS = {
+  gemini: 'Google Gemini', anthropic: 'Anthropic', openai: 'OpenAI',
+  cloudflare: 'Cloudflare', groq: 'Groq', mistral: 'Mistral', huggingface: 'Huggingface',
+};
+
+function updateByokPrompt() {
+  const prompt = document.getElementById('byokPrompt');
+  const keyInput = document.getElementById('byokKeyInline');
+  const model = getSelectedModel();
+  const info = getModelInfo(model);
+  if (!info) { prompt.style.display = 'none'; return; }
+  // Show BYOK prompt for non-puter, non-copilot, unavailable models (online mode)
+  const needsKey = !info.available && info.provider !== 'puter' && info.provider !== 'copilot';
+  if (needsKey && MODE === 'online') {
+    const label = PROVIDER_LABELS[info.provider] || info.provider;
+    keyInput.placeholder = `Paste API key for ${label} here...`;
+    // Restore saved key for this provider
+    const saved = localStorage.getItem(`byok_key_${info.provider}`) || '';
+    keyInput.value = saved;
+    keyInput.dataset.provider = info.provider;
+    prompt.style.display = 'block';
+  } else {
+    prompt.style.display = 'none';
+  }
+}
+
+// Auto-save BYOK key on input
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'byokKeyInline') return;
+  const provider = e.target.dataset.provider;
+  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
+});
 
 function getModelInfo(key) {
   return modelsData.find(m => m.name === key);
@@ -1084,12 +1096,12 @@ function updateModelCaps() {
 
 document.getElementById('modelSelect').addEventListener('change', function() {
   updateModelCaps();
+  updateByokPrompt();
   // Lazy-load Puter.js when a Puter model is selected
   const model = this.value;
   const isPuter = modelsData.some(m => m.name === model && m.provider === 'puter');
   if (isPuter) loadPuterJS();
 });
-document.getElementById('modelCustom').addEventListener('input', updateModelCaps);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RENDERING
@@ -1873,8 +1885,10 @@ async function askLLM() {
       : moveHistory;
 
     // Determine if this model uses client-side LLM (Puter.js/BYOK)
-    const isPuterModel = modelsData.some(m => m.name === model && m.provider === 'puter');
-    const useServerLLM = FEATURES.server_llm && !isPuterModel;
+    const modelInfo = getModelInfo(model);
+    const isPuterModel = modelInfo?.provider === 'puter';
+    const isByokModel = modelInfo && !modelInfo.available && MODE === 'online' && getByokKey(modelInfo.provider);
+    const useServerLLM = FEATURES.server_llm && !isPuterModel && !isByokModel;
 
     const _callStart = performance.now();
     if (useServerLLM) {
@@ -1910,12 +1924,12 @@ async function askLLM() {
       const prompt = buildClientPrompt(currentState, historyForLLM, currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
       let rawContent;
       try {
-        if (FEATURES.puter_js && !byokActive()) {
-          rawContent = await askLLMPuter(prompt, model);
-        } else if (FEATURES.byok && byokActive()) {
+        if (isByokModel) {
           rawContent = await askLLMBYOK(prompt, model);
+        } else if (isPuterModel && FEATURES.puter_js) {
+          rawContent = await askLLMPuter(prompt, model);
         } else {
-          throw new Error('No LLM provider configured. Enable Puter.js or add a BYOK key.');
+          throw new Error('No LLM provider configured. Select a Puter.js model or add an API key.');
         }
       } catch (e) {
         resp = { error: e.message, model: model };
@@ -2390,9 +2404,7 @@ async function loadModels() {
     (groups[key] ??= []).push(m);
   }
 
-  const providerOrder = MODE === 'online'
-    ? ['Copilot']
-    : ['Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
+  const providerOrder = ['Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
 
   for (const prov of providerOrder) {
     const models = groups[prov];
@@ -2425,31 +2437,16 @@ async function loadModels() {
     }
     sel.appendChild(grp);
   }
-  // BYOK models (online mode only)
-  if (MODE === 'online' && FEATURES.byok && byokActive()) {
-    const provider = localStorage.getItem('byok_provider') || 'openai';
-    const grp = document.createElement('optgroup');
-    grp.label = `BYOK (${provider})`;
-    const byokModels = provider === 'openai'
-      ? ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-mini']
-      : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
-    for (const m of byokModels) {
-      const opt = document.createElement('option');
-      opt.value = m; opt.textContent = `${m} — BYOK`;
-      grp.appendChild(opt);
-      modelsData.push({ name: m, provider: 'byok', price: 'BYOK', context_window: 128000, capabilities: { image: false, reasoning: false, tools: false }, available: true });
-    }
-    sel.appendChild(grp);
-  }
-
-  // Unavailable models (greyed out)
+  // Unavailable models — in online mode these are usable via BYOK key
   const unavail = modelsData.filter(m => !m.available);
   if (unavail.length) {
     const grp = document.createElement('optgroup');
-    grp.label = 'Missing API key';
+    grp.label = MODE === 'online' ? 'Bring Your Own Key' : 'Missing API key';
     for (const m of unavail) {
       const opt = document.createElement('option');
-      opt.value = m.name; opt.textContent = `${m.name} (no key)`; opt.disabled = true;
+      opt.value = m.name;
+      opt.textContent = MODE === 'online' ? `${m.name} — ${m.price} (BYOK)` : `${m.name} (no key)`;
+      if (MODE !== 'online') opt.disabled = true;
       grp.appendChild(opt);
     }
     sel.appendChild(grp);
@@ -2604,36 +2601,36 @@ function parseClientLLMResponse(content, modelName) {
     thinking = thinkMatch[1].trim();
     content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   }
-  try {
-    const start = content.indexOf('{');
-    const end = content.lastIndexOf('}') + 1;
-    if (start >= 0 && end > start) {
-      const parsed = JSON.parse(content.substring(start, end));
-      return { raw: content, thinking: thinking ? thinking.substring(0, 500) : null, parsed, model: modelName };
+  // Extract JSON using balanced-brace matching
+  // Strip comments first, then find each top-level { } block via brace counting
+  const cleaned = content.replace(/^\s*\/\/.*$/gm, '');
+  for (let i = 0; i < cleaned.length; i++) {
+    if (cleaned[i] !== '{') continue;
+    let depth = 0, inStr = false, esc = false;
+    for (let j = i; j < cleaned.length; j++) {
+      const ch = cleaned[j];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) {
+        try {
+          const parsed = JSON.parse(cleaned.substring(i, j + 1));
+          if (parsed.action !== undefined || parsed.plan) {
+            return { raw: content, thinking: thinking ? thinking.substring(0, 500) : null, parsed, model: modelName };
+          }
+        } catch {}
+        break;
+      }}
     }
-  } catch {}
+  }
   return { raw: content, parsed: null, model: modelName };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT-SIDE LLM PROVIDERS (Puter.js + BYOK)
 // ═══════════════════════════════════════════════════════════════════════════
-
-function byokActive() {
-  if (!FEATURES.byok) return false;
-  const provider = localStorage.getItem('byok_provider');
-  const key = localStorage.getItem('byok_key');
-  return !!(provider && key);
-}
-
-function saveBYOK() {
-  const provider = document.getElementById('byokProvider').value;
-  const key = document.getElementById('byokKey').value.trim();
-  if (!key) { alert('Enter an API key'); return; }
-  localStorage.setItem('byok_provider', provider);
-  localStorage.setItem('byok_key', key);
-  alert('Key saved locally.');
-}
 
 // Lazy-load Puter.js SDK on demand
 let _puterJsLoading = null;
@@ -2665,41 +2662,65 @@ async function askLLMPuter(prompt, model) {
 }
 askLLMPuter._lastUsage = null;
 
-async function askLLMBYOK(prompt, model) {
-  const provider = localStorage.getItem('byok_provider') || 'openai';
-  const key = localStorage.getItem('byok_key');
-  if (!key) throw new Error('No BYOK API key configured');
+function getByokKey(provider) {
+  // New per-provider keys
+  const key = localStorage.getItem(`byok_key_${provider}`);
+  if (key) return key;
+  // Legacy fallback
+  const oldProvider = localStorage.getItem('byok_provider');
+  if (oldProvider === provider) return localStorage.getItem('byok_key') || '';
+  return '';
+}
 
-  let url, body;
-  if (provider === 'openai') {
-    url = 'https://api.openai.com/v1/chat/completions';
-    body = {
-      model: model || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: 'You are an expert puzzle-solving AI agent. Analyse game grids and output ONLY valid JSON.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.3, max_tokens: 2048,
-    };
-  } else if (provider === 'gemini') {
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.0-flash'}:generateContent?key=${key}`;
+function byokActive() {
+  // Check if any provider has a saved key
+  for (const p of ['openai', 'gemini', 'anthropic', 'groq', 'mistral']) {
+    if (localStorage.getItem(`byok_key_${p}`)) return true;
+  }
+  // Legacy check
+  return !!(localStorage.getItem('byok_key'));
+}
+
+async function askLLMBYOK(prompt, model) {
+  const info = getModelInfo(model);
+  const provider = info?.provider || 'openai';
+  const key = getByokKey(provider);
+  if (!key) throw new Error(`No API key for ${PROVIDER_LABELS[provider] || provider}. Select the model and paste your key.`);
+
+  const sysMsg = 'You are an expert puzzle-solving AI agent. Analyse game grids and output ONLY valid JSON.';
+
+  if (provider === 'gemini') {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 2048 } }),
     });
     const data = await resp.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     return data.candidates?.[0]?.content?.parts?.[0]?.text || JSON.stringify(data);
-  } else {
-    throw new Error(`Unknown BYOK provider: ${provider}`);
   }
+
+  // OpenAI-compatible API (OpenAI, Groq, Mistral)
+  const urlMap = {
+    openai: 'https://api.openai.com/v1/chat/completions',
+    groq: 'https://api.groq.com/openai/v1/chat/completions',
+    mistral: 'https://api.mistral.ai/v1/chat/completions',
+  };
+  const url = urlMap[provider];
+  if (!url) throw new Error(`BYOK not supported for ${provider} from browser (CORS). Use Puter.js instead.`);
 
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      model: model,
+      messages: [{ role: 'system', content: sysMsg }, { role: 'user', content: prompt }],
+      temperature: 0.3, max_tokens: 2048,
+    }),
   });
   const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data.choices?.[0]?.message?.content || JSON.stringify(data);
 }
 
