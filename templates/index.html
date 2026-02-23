@@ -605,7 +605,9 @@
                     <div>
                       <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Compact model</div>
                       <select id="compactModelSelectTop" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:12px;">
-                        <option value="auto">Auto (cheapest available)</option>
+                        <option value="auto">Auto (cheapest of same provider)</option>
+                        <option value="auto-fastest">Auto (fastest of same provider)</option>
+                        <option value="same">Same as reasoning</option>
                       </select>
                       <div style="font-size:9px;color:var(--dim);margin-top:3px;">Used to summarize game history when context gets long.</div>
                     </div>
@@ -2017,13 +2019,17 @@ Write ONLY the briefing text. Be specific and actionable — vague summaries are
   // Determine compact model
   const compactModelSel = document.getElementById('compactModelSelectTop').value;
   const agentModel = getSelectedModel();
-  const compactModel = compactModelSel === 'same' ? agentModel : (compactModelSel !== 'auto' ? compactModelSel : null);
+  // 'auto' = cheapest same provider (server decides), 'auto-fastest' = fastest same provider, 'same' = agent model, else specific model
+  const compactModel = compactModelSel === 'same' ? agentModel
+    : (compactModelSel === 'auto' || compactModelSel === 'auto-fastest') ? null
+    : compactModelSel;
 
   try {
     let summary;
     if (FEATURES.server_llm) {
       const body = { prompt: summaryPrompt, session_id: sessionId, agent_model: agentModel };
       if (compactModel) body.model = compactModel;
+      if (compactModelSel === 'auto-fastest') body.strategy = 'fastest';
       const data = await fetchJSON('/api/llm/summarize', body);
       summary = data.summary;
     } else if (compactModel && getByokKey(getModelInfo(compactModel)?.provider)) {
@@ -2854,15 +2860,12 @@ async function loadModels() {
 
   if (!sel.options.length) sel.innerHTML = '<option value="">No models</option>';
 
-  // Populate compact model selector with same available models
+  // Populate compact model selector — keep default options, add all models
   const csel = document.getElementById('compactModelSelectTop');
-  const autoOpt = csel.querySelector('option[value="auto"]');
-  csel.innerHTML = '';
-  csel.appendChild(autoOpt);
-  // Add "Same as agent" option
-  const sameOpt = document.createElement('option');
-  sameOpt.value = 'same'; sameOpt.textContent = 'Same as agent';
-  csel.appendChild(sameOpt);
+  const savedVal = csel.value;
+  // Remove all optgroups (keep the static <option>s)
+  csel.querySelectorAll('optgroup').forEach(g => g.remove());
+  // Add available models grouped by provider
   for (const prov of providerOrder) {
     const models = groups[prov];
     if (!models?.length) continue;
@@ -2876,6 +2879,21 @@ async function loadModels() {
     }
     csel.appendChild(grp);
   }
+  // Add unavailable (BYOK) models
+  if (unavail.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = MODE === 'online' ? 'Bring Your Own Key' : 'Missing API key';
+    for (const m of unavail) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = MODE === 'online' ? `${m.name} — ${m.price} (BYOK)` : `${m.name} (no key)`;
+      if (MODE !== 'online') opt.disabled = true;
+      grp.appendChild(opt);
+    }
+    csel.appendChild(grp);
+  }
+  // Restore previous selection if still valid
+  if (savedVal && [...csel.options].some(o => o.value === savedVal)) csel.value = savedVal;
 
   updateModelCaps();
 }

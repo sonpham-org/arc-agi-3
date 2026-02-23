@@ -2090,11 +2090,12 @@ def llm_summarize():
             except Exception as e:
                 app.logger.warning("Summarize with requested %s failed: %s", requested_model, e)
 
-    # Fallback: use the cheapest available model from the same provider as the agent
+    # Fallback: auto-select model from the same provider as the agent
     agent_model = payload.get("agent_model", "")
     agent_provider = MODEL_REGISTRY.get(agent_model, {}).get("provider", "gemini")
+    strategy = payload.get("strategy", "cheapest")  # "cheapest" or "fastest"
 
-    # Build priority list: cheapest models per provider (smallest/fastest first)
+    # Priority lists per provider: cheapest first
     CHEAPEST_BY_PROVIDER = {
         "gemini":     ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
         "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
@@ -2104,11 +2105,22 @@ def llm_summarize():
         "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
         "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
     }
+    # Priority lists per provider: fastest (lowest latency) first
+    FASTEST_BY_PROVIDER = {
+        "gemini":     ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
+        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
+        "groq":       ["gemma2-9b", "llama-3.3-70b", "mixtral-8x7b"],
+        "mistral":    ["open-mistral-nemo", "mistral-small"],
+        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
+        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
+        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
+    }
+    lookup = FASTEST_BY_PROVIDER if strategy == "fastest" else CHEAPEST_BY_PROVIDER
 
     # Try same provider first, then fall back to any provider
-    providers_to_try = [agent_provider] + [p for p in CHEAPEST_BY_PROVIDER if p != agent_provider]
+    providers_to_try = [agent_provider] + [p for p in lookup if p != agent_provider]
     for provider in providers_to_try:
-        candidates = CHEAPEST_BY_PROVIDER.get(provider, [])
+        candidates = lookup.get(provider, [])
         for candidate in candidates:
             # Find matching model in registry (partial match)
             matched = None
