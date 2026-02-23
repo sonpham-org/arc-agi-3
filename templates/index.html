@@ -817,7 +817,7 @@
               </div>
               <div class="mem-section">
                 <label>Compact Prompt <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(sent to compact model)</span></label>
-                <textarea id="memoryCompactPrompt" rows="4" style="opacity:0.8;" readonly placeholder="No compact prompt yet. The prompt sent to the compact model will appear here after compaction."></textarea>
+                <textarea id="memoryCompactPrompt" rows="6" placeholder="Compact prompt template..."></textarea>
               </div>
               <div class="mem-section">
                 <label>Compact Summary <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(auto-generated, editable)</span></label>
@@ -1936,8 +1936,7 @@ function _syncCompactToMemoryTab() {
   if (el) el.value = _cachedCompactSummary;
 }
 function _syncCompactPromptToMemoryTab() {
-  const el = document.getElementById('memoryCompactPrompt');
-  if (el) el.value = _lastCompactPrompt;
+  // No-op: compact prompt textarea is now user-editable template
 }
 
 function applyCompactEdit() {
@@ -1993,14 +1992,10 @@ async function buildCompactContext() {
     `Step ${h.step}: ${ACTION_NAMES[h.action] || '?'} -> ${h.result_state || '?'}`
   ).join('\n');
 
-  const summaryPrompt = `You are helping an AI agent play a game. Distill the crucial knowledge the agent has learned so far into a compact briefing. This will REPLACE the full history in the agent's context, so include everything it needs to keep playing well.
+  // Use the editable compact prompt template from Memory tab
+  const promptTemplate = document.getElementById('memoryCompactPrompt')?.value || MEMORY_DEFAULTS.compact_prompt;
 
-Write a concise briefing (max 400 words) covering:
-
-1. GAME RULES & MECHANICS: What does each action actually do? What are the constraints? What happens when you pick wrong? What feedback does the game give? Include specific action numbers and their effects.
-2. DISCOVERED PATTERNS: What rules or patterns govern this game? What determines the correct answer? Any spatial, logical, or sequential patterns found?
-3. WHAT WORKS vs WHAT DOESN'T: Which strategies succeeded? Which failed and why? Any dead-end approaches to avoid?
-4. CURRENT SITUATION: Current level progress, what the agent should focus on next, and any unresolved hypotheses to test.
+  const summaryPrompt = `${promptTemplate}
 
 OBSERVATIONS FROM GAMEPLAY:
 ${obsText}
@@ -2008,9 +2003,7 @@ ${obsText}
 RECENT MOVE HISTORY:
 ${histText}
 
-Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels || 0}
-
-Write ONLY the briefing text. Be specific and actionable — vague summaries are useless. Include concrete details like action numbers, grid positions, and observed cause-and-effect relationships.`;
+Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels || 0}`;
 
   // Store the prompt for display in Memory tab
   _lastCompactPrompt = summaryPrompt;
@@ -4225,6 +4218,16 @@ Key facts:
 - ACTION7 is a secondary interact (rotate, swap, etc.).
 - ACTION0 = RESET. Only use as a last resort.
 - Try all directional actions first to understand movement.`,
+  compact_prompt: `You are helping an AI agent play a game. Distill the crucial knowledge the agent has learned so far into a compact briefing. This will REPLACE the full history in the agent's context, so include everything it needs to keep playing well.
+
+Write a concise briefing (max 400 words) covering:
+
+1. GAME RULES & MECHANICS: What does each action actually do? What are the constraints? What happens when you pick wrong? What feedback does the game give? Include specific action numbers and their effects.
+2. DISCOVERED PATTERNS: What rules or patterns govern this game? What determines the correct answer? Any spatial, logical, or sequential patterns found?
+3. WHAT WORKS vs WHAT DOESN'T: Which strategies succeeded? Which failed and why? Any dead-end approaches to avoid?
+4. CURRENT SITUATION: Current level progress, what the agent should focus on next, and any unresolved hypotheses to test.
+
+Write ONLY the briefing text. Be specific and actionable — vague summaries are useless. Include concrete details like action numbers, grid positions, and observed cause-and-effect relationships.`,
 };
 
 let memoryLoaded = false;
@@ -4249,12 +4252,16 @@ async function loadMemoryContent() {
     spEl.value = localStorage.getItem('arc_system_prompt') || MEMORY_DEFAULTS.system_prompt;
     hmEl.value = localStorage.getItem('arc_hard_memory') || MEMORY_DEFAULTS.hard_memory;
   }
+  // Load compact prompt
+  const cpEl = document.getElementById('memoryCompactPrompt');
+  cpEl.value = localStorage.getItem('arc_compact_prompt') || MEMORY_DEFAULTS.compact_prompt;
   memoryLoaded = true;
 }
 
 async function saveMemoryEdits() {
   const sp = document.getElementById('memorySystemPrompt').value;
   const hm = document.getElementById('memoryHardMemory').value;
+  const cp = document.getElementById('memoryCompactPrompt').value;
 
   if (FEATURES.server_llm) {
     // Local mode: POST to server
@@ -4269,6 +4276,8 @@ async function saveMemoryEdits() {
     localStorage.setItem('arc_system_prompt', sp);
     localStorage.setItem('arc_hard_memory', hm);
   }
+  // Always save compact prompt to localStorage
+  localStorage.setItem('arc_compact_prompt', cp);
 
   // Update client-side prompt description for buildClientPrompt
   _customArcDescription = sp;
@@ -4282,6 +4291,7 @@ async function saveMemoryEdits() {
 function resetMemoryDefaults() {
   document.getElementById('memorySystemPrompt').value = MEMORY_DEFAULTS.system_prompt;
   document.getElementById('memoryHardMemory').value = MEMORY_DEFAULTS.hard_memory;
+  document.getElementById('memoryCompactPrompt').value = MEMORY_DEFAULTS.compact_prompt;
   _customArcDescription = null;
   _customHardMemory = null;
 }
