@@ -1265,7 +1265,7 @@ def env_state_dict(env, frame_data=None) -> dict:
 # PROMPT BUILDING  (config-driven: input sources, tools mode)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _build_prompt(payload: dict, input_settings: dict, tools_mode: str, planning_mode: str = "off") -> str:
+def _build_prompt(payload: dict, input_settings: dict, tools_mode: str, planning_mode: str = "off", interrupt_plan: bool = False) -> str:
     """Build an LLM prompt controlled by the input settings from the UI."""
     grid = payload.get("grid", [])
     state = payload.get("state", "")
@@ -1368,18 +1368,20 @@ COLOR PALETTE: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
 
     if is_planning:
         plan_n = int(planning_mode)
+        expected_field = ', "expected": "<what you expect to see after this plan>"' if interrupt_plan else ''
+        expected_rule = '\n- "expected": briefly describe what you expect after the plan completes (e.g. "character at the door", "score increased").' if interrupt_plan else ''
         parts.append(f"""## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
 2. Determine what must happen next to progress.
 3. Plan a sequence of actions (up to {plan_n} steps).
 
 Respond with EXACTLY this JSON (nothing else):
-{{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{{"action": <n>, "data": {{}}}}, ...]{analysis_field}}}
+{{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{{"action": <n>, "data": {{}}}}, ...]{analysis_field}{expected_field}}}
 
 Rules:
 - Return a "plan" array of up to {plan_n} steps. Each step has "action" (0-7) and "data" ({{}} or {{"x": <0-63>, "y": <0-63>}}).
 - ACTION6: set "data" to {{"x": <0-63>, "y": <0-63>}}.
-- Other actions: set "data" to {{}}.{tool_extra}""")
+- Other actions: set "data" to {{}}.{expected_rule}{tool_extra}""")
     else:
         parts.append(f"""## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
@@ -2144,6 +2146,80 @@ def llm_summarize():
     return jsonify({"error": "No summarization model available"}), 500
 
 
+@app.route("/api/llm/interrupt-check", methods=["POST"])
+@bot_protection
+@turnstile_required
+def llm_interrupt_check():
+    """Use a cheap/fast model to check if a plan step went as expected."""
+    if not feature_enabled("server_llm"):
+        return jsonify({"error": "Server LLM not available"}), 403
+    payload = request.get_json(force=True)
+    prompt = payload.get("prompt", "")
+    if not prompt:
+        return jsonify({"error": "No prompt"}), 400
+
+    # If a specific model is requested, use it directly
+    requested_model = payload.get("model")
+    if requested_model and requested_model in MODEL_REGISTRY:
+        info = MODEL_REGISTRY[requested_model]
+        env_key = info.get("env_key", "")
+        if not env_key or os.environ.get(env_key):
+            try:
+                result = _route_model_call(requested_model, prompt, None)
+                text = result.get("text", result) if isinstance(result, dict) else result
+                return jsonify({"result": text, "model_used": requested_model})
+            except Exception as e:
+                app.logger.warning("Interrupt check with requested %s failed: %s", requested_model, e)
+
+    # Fallback: auto-select model from the same provider as the agent
+    agent_model = payload.get("agent_model", "")
+    agent_provider = MODEL_REGISTRY.get(agent_model, {}).get("provider", "gemini")
+    strategy = payload.get("strategy", "cheapest")
+
+    CHEAPEST_BY_PROVIDER = {
+        "gemini":     ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
+        "groq":       ["gemma2-9b", "mixtral-8x7b", "llama-3.3-70b"],
+        "mistral":    ["open-mistral-nemo", "mistral-small"],
+        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
+        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
+        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
+    }
+    FASTEST_BY_PROVIDER = {
+        "gemini":     ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
+        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
+        "groq":       ["gemma2-9b", "llama-3.3-70b", "mixtral-8x7b"],
+        "mistral":    ["open-mistral-nemo", "mistral-small"],
+        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
+        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
+        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
+    }
+    lookup = FASTEST_BY_PROVIDER if strategy == "fastest" else CHEAPEST_BY_PROVIDER
+
+    providers_to_try = [agent_provider] + [p for p in lookup if p != agent_provider]
+    for provider in providers_to_try:
+        candidates = lookup.get(provider, [])
+        for candidate in candidates:
+            matched = None
+            for reg_name, reg_info in MODEL_REGISTRY.items():
+                if reg_info.get("provider") == provider and candidate in reg_name:
+                    env_key = reg_info.get("env_key", "")
+                    if env_key and not os.environ.get(env_key):
+                        continue
+                    matched = reg_name
+                    break
+            if not matched:
+                continue
+            try:
+                result = _route_model_call(matched, prompt, None)
+                text = result.get("text", result) if isinstance(result, dict) else result
+                return jsonify({"result": text, "model_used": matched})
+            except Exception as e:
+                app.logger.warning("Interrupt check with %s failed: %s", matched, e)
+                continue
+    return jsonify({"error": "No interrupt check model available"}), 500
+
+
 @app.route("/api/llm/ask", methods=["POST"])
 @bot_protection
 @turnstile_required
@@ -2187,7 +2263,8 @@ def llm_ask():
 
     planning_mode = settings.get("planning_mode", "off")
     thinking_level = settings.get("thinking_level", "low")
-    prompt = _build_prompt(payload, input_settings, tools_mode, planning_mode)
+    interrupt_plan = settings.get("interrupt_plan", False)
+    prompt = _build_prompt(payload, input_settings, tools_mode, planning_mode, interrupt_plan)
 
     # Get image if the input setting is on and data was provided
     image_b64 = None
@@ -2630,9 +2707,9 @@ def import_session():
     steps = payload.get("steps", [])
     if not sess or not sess.get("id") or not sess.get("game_id"):
         return _cors_resp({"error": "session.id and session.game_id required"}, 400)
-    # Reject short sessions — under 50 steps is noise
-    if len(steps) < 50:
-        return _cors_resp({"error": "Session too short (min 50 steps)", "skipped": True})
+    # Reject short sessions — under 20 steps is noise
+    if len(steps) < 20:
+        return _cors_resp({"error": "Session too short (min 20 steps)", "skipped": True})
     try:
         conn = _get_db()
         conn.execute(

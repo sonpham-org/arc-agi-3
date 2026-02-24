@@ -88,19 +88,23 @@
     color: var(--text-dim); font-size: 14px; text-align: center; padding: 40px; line-height: 1.8; }
 
   /* ── Right panel ─────────────────────────────────────────────────────── */
-  .right-panel { width: 760px; background: var(--surface); border-left: 1px solid var(--border);
+  .right-panel { width: 530px; background: var(--surface); border-left: 1px solid var(--border);
     display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
 
   /* ── Option sections ─────────────────────────────────────────────────── */
-  .opt-section { border-bottom: 1px solid var(--border); }
-  .opt-header { display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; cursor: pointer; user-select: none; font-size: 12px;
-    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
-  .opt-header:hover { color: var(--text); }
-  .opt-header .chevron { transition: transform 0.2s; font-size: 10px; }
+  .opt-section { border-bottom: 1px solid var(--border); display: flex; flex-direction: row; }
+  .opt-header { writing-mode: vertical-lr; transform: rotate(180deg); display: flex;
+    align-items: center; justify-content: center; padding: 12px 6px; cursor: pointer;
+    user-select: none; font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-dim); border-right: 1px solid var(--border);
+    min-width: 28px; flex-shrink: 0; }
+  .opt-header { background: color-mix(in srgb, var(--border) 40%, transparent); transition: background 0.15s, color 0.15s; }
+  .opt-section:hover .opt-header { color: var(--text); background: var(--border); }
+  .opt-header .chevron { display: none; }
   .opt-section.open .chevron { transform: rotate(90deg); }
-  .opt-body { display: none; padding: 8px 14px 14px; }
-  .opt-section.open .opt-body { display: block; }
+  .opt-body { display: block; padding: 8px 14px 14px; flex: 1; min-width: 0; }
+  .opt-section:not(.open) .opt-body { display: none; }
+  .opt-section:not(.open) .opt-header { border-right: none; }
 
   .opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
   .opt-row:last-child { margin-bottom: 0; }
@@ -123,14 +127,14 @@
   .toggle input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
 
   /* 3-way switch */
-  .triswitch { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .triswitch { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
   .triswitch label { padding: 3px 10px; font-size: 11px; cursor: pointer; background: var(--bg);
     color: var(--text-dim); transition: all 0.15s; text-align: center; border-right: 1px solid var(--border); }
   .triswitch label:last-child { border-right: none; }
   .triswitch input { display: none; }
   .triswitch input:checked + span { background: var(--accent); color: #000; font-weight: 600; }
   .triswitch label:has(input:checked) { background: var(--accent); color: #000; font-weight: 600; }
-  .quadswitch { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .quadswitch { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
   .quadswitch label { padding: 3px 8px; font-size: 11px; cursor: pointer; background: var(--bg);
     color: var(--text-dim); transition: all 0.15s; text-align: center; border-right: 1px solid var(--border); flex: 1; }
   .quadswitch label:last-child { border-right: none; }
@@ -185,6 +189,8 @@
   .plan-step.done { color: var(--green); }
   .plan-step.skipped { color: var(--text-dim); text-decoration: line-through; }
   .plan-step.failed { color: var(--red); }
+  .plan-step.interrupted { color: var(--yellow); opacity: 0.7; }
+  .plan-step.interrupted .action-btn { background: var(--yellow); color: #000; border-color: var(--yellow); opacity: 0.7; }
   .plan-step .action-btn { display: inline-block; background: var(--surface2); border: 1px solid var(--border);
     border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; margin: 0 2px; }
   .plan-step.executing .action-btn { background: var(--accent); color: #000; border-color: var(--accent); }
@@ -323,13 +329,19 @@
   .subtab-pane { display: none; flex-direction: column; flex: 1; overflow: hidden; }
   .subtab-pane.active { display: flex; }
 
-  /* ── Settings 2-column layout ──────────────────────────────────────── */
-  .settings-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0; flex: 1; overflow-y: auto; }
-  .settings-col { border-right: 1px solid var(--border); overflow-y: auto; }
-  .settings-col:last-child { border-right: none; }
+  /* ── Settings single-column layout ────────────────────────────────── */
+  .settings-columns { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
   .settings-transport { display: none; /* moved to canvas panel */ }
+  .sub-header { font-size: 12px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.5px; margin: 14px 0 8px; padding-bottom: 5px;
+    border-bottom: 1px solid var(--border); font-weight: 600; grid-column: 1 / -1; }
+  .sub-header:first-child { margin-top: 0; }
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px;
+    background-image: linear-gradient(var(--border), var(--border));
+    background-size: 1px 100%; background-position: center top; background-repeat: no-repeat; }
+  .settings-grid .span-full { grid-column: 1 / -1; }
 
-  /* ── Memory subtab ────────────────────────────────────────────────── */
+  /* ── Prompt subtab (formerly Memory) ─────────────────────────────── */
   .memory-tab { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 12px 14px; gap: 12px; }
   .memory-tab .mem-section { display: flex; flex-direction: column; gap: 4px; }
   .memory-tab .mem-section label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase;
@@ -464,7 +476,7 @@
   <div id="browseView">
     <div class="browse-tabs">
       <button class="active" onclick="switchBrowseTab('byGame')">By Game</button>
-      <button onclick="switchBrowseTab('global')">Global Sessions</button>
+      <button onclick="switchBrowseTab('global')">Public Sessions</button>
       <button onclick="switchBrowseTab('local')">Local Sessions</button>
     </div>
     <!-- By Game -->
@@ -476,7 +488,7 @@
         </div>
       </div>
     </div>
-    <!-- Global Sessions -->
+    <!-- Public Sessions -->
     <div class="browse-pane" id="browseGlobal">
       <div class="browse-header" id="browseGlobalHeader">All sessions from server</div>
       <div class="browse-content" id="browseGlobalList">
@@ -600,7 +612,7 @@
           <div class="subtab-bar">
             <button class="active" onclick="switchSubTab('settings')">Agent Setting</button>
             <button onclick="switchSubTab('graphics')">Graphics</button>
-            <button onclick="switchSubTab('memory')">Memory</button>
+            <button onclick="switchSubTab('memory')">Prompt</button>
             <button onclick="switchSubTab('reasoning')">
               Reasoning <span id="llmSpinner" style="display:none;margin-left:4px;"><span class="spinner"></span></span>
             </button>
@@ -609,52 +621,13 @@
           <!-- ── Settings subtab ── -->
           <div class="subtab-pane active" id="subtabSettings" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
             <div class="settings-columns">
-              <!-- LEFT COLUMN: Model, Input, Reasoning/Tools -->
-              <div class="settings-col">
-
-                <!-- MODEL -->
-                <div class="opt-section open" id="secModel">
-                  <div class="opt-header" onclick="toggleSection('secModel')">
-                    <span>Model</span><span class="chevron">&#9654;</span>
-                  </div>
-                  <div class="opt-body">
-                    <div style="margin-bottom:8px;">
-                      <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model</div>
-                      <select id="modelSelect"><option value="">Loading...</option></select>
-                      <div class="model-caps" id="modelCaps"></div>
-                      <!-- modelEta removed -->
-                      <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
-                      <div id="byokPrompt" style="display:none;margin-top:6px;">
-                        <input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
-                        <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
-                      </div>
-                    </div>
-                    <div>
-                      <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Compact model</div>
-                      <select id="compactModelSelectTop" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:12px;">
-                        <option value="auto">Auto (cheapest of same provider)</option>
-                        <option value="auto-fastest">Auto (fastest of same provider)</option>
-                        <option value="same">Same as reasoning</option>
-                      </select>
-                      <div style="font-size:9px;color:var(--dim);margin-top:3px;">Used to summarize game history when context gets long.</div>
-                      <div id="compactByokPrompt" style="display:none;margin-top:6px;">
-                        <input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
-                        <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
 
                 <!-- INPUT -->
                 <div class="opt-section open" id="secInput">
                   <div class="opt-header" onclick="toggleSection('secInput')">
                     <span>Input</span><span class="chevron">&#9654;</span>
                   </div>
-                  <div class="opt-body">
-                    <div class="opt-row">
-                      <span class="opt-label">Diff (change map)</span>
-                      <label class="toggle"><input type="checkbox" id="inputDiff" checked><span class="slider"></span></label>
-                    </div>
+                  <div class="opt-body settings-grid">
                     <div class="opt-row">
                       <span class="opt-label">Full grid (RLE)</span>
                       <label class="toggle"><input type="checkbox" id="inputGrid" checked><span class="slider"></span></label>
@@ -664,83 +637,54 @@
                       <label class="toggle"><input type="checkbox" id="inputImage"><span class="slider"></span></label>
                     </div>
                     <div class="opt-row">
+                      <span class="opt-label">Diff (change map)</span>
+                      <label class="toggle"><input type="checkbox" id="inputDiff" checked><span class="slider"></span></label>
+                    </div>
+                    <div class="opt-row">
                       <span class="opt-label">Color histogram</span>
                       <label class="toggle"><input type="checkbox" id="inputHistogram"><span class="slider"></span></label>
                     </div>
                   </div>
                 </div>
 
-
-              </div>
-
-              <!-- RIGHT COLUMN: Reasoning / Tools + Copilot -->
-              <div class="settings-col">
-
-                <!-- REASONING / TOOLS -->
+                <!-- REASONING -->
                 <div class="opt-section open" id="secReasoning">
                   <div class="opt-header" onclick="toggleSection('secReasoning')">
-                    <span>Reasoning / Tools</span><span class="chevron">&#9654;</span>
+                    <span>Reasoning</span><span class="chevron">&#9654;</span>
                   </div>
                   <div class="opt-body">
-                    <div class="opt-row">
-                      <span class="opt-label">Thinking</span>
+                    <div class="sub-header">Reasoning Model</div>
+                    <div style="margin-bottom:8px;">
+                      <select id="modelSelect"><option value="">Loading...</option></select>
+                      <div class="model-caps" id="modelCaps"></div>
+                      <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
                     </div>
-                    <div class="opt-row">
-                      <div class="quadswitch" id="thinkingLevel">
-                        <label><input type="radio" name="thinkingLevel" value="off"><span>Off</span></label>
-                        <label><input type="radio" name="thinkingLevel" value="low" checked><span>Low</span></label>
-                        <label><input type="radio" name="thinkingLevel" value="med"><span>Med</span></label>
-                        <label><input type="radio" name="thinkingLevel" value="high"><span>High</span></label>
+                    <div class="settings-grid" style="margin-bottom:8px;">
+                      <div>
+                        <div class="opt-label" style="margin-bottom:4px;">Thinking</div>
+                        <div class="quadswitch" id="thinkingLevel">
+                          <label><input type="radio" name="thinkingLevel" value="off"><span>Off</span></label>
+                          <label><input type="radio" name="thinkingLevel" value="low" checked><span>Low</span></label>
+                          <label><input type="radio" name="thinkingLevel" value="med"><span>Med</span></label>
+                          <label><input type="radio" name="thinkingLevel" value="high"><span>High</span></label>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:4px;">
+                          Thinking token budget
+                        </div>
+                      </div>
+                      <div>
+                        <div class="opt-label" style="margin-bottom:4px;">Tool calls</div>
+                        <div class="triswitch" id="toolsMode">
+                          <label><input type="radio" name="toolsMode" value="off"><span>Off</span></label>
+                          <label><input type="radio" name="toolsMode" value="on" checked><span>On</span></label>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:4px;">
+                          On = Python sandbox{% if mode == 'online' %} (Pyodide){% endif %}
+                        </div>
                       </div>
                     </div>
-                    <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      Thinking token budget (models that support it)
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Tool calls</span>
-                    </div>
-                    <div class="opt-row">
-                      <div class="triswitch" id="toolsMode">
-                        <label><input type="radio" name="toolsMode" value="off"><span>Off</span></label>
-                        <label><input type="radio" name="toolsMode" value="on" checked><span>On</span></label>
-                      </div>
-                    </div>
-                    <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      On = Python sandbox{% if mode == 'online' %} (Pyodide, ~10MB){% endif %}
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Compact history</span>
-                      <label class="toggle"><input type="checkbox" id="compactContext" checked><span class="slider"></span></label>
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">After call # (optional)</span>
-                      <input type="number" id="compactAfter" placeholder="—" min="1" max="200" style="width:55px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;">
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Context limit</span>
-                      <span class="spin-wrap">
-                        <input type="number" id="compactContextPct" value="64000" min="1" step="1" style="width:68px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">
-                        <span class="spin-btns">
-                          <button class="spin-btn" onclick="spinContextLimit(1)">&#9650;</button>
-                          <button class="spin-btn" onclick="spinContextLimit(-1)">&#9660;</button>
-                        </span>
-                      </span>
-                      <select id="contextLimitUnit" style="width:62px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:11px;margin-left:4px;" onchange="onContextLimitUnitChange()">
-                        <option value="pct">%</option>
-                        <option value="tokens" selected>tok</option>
-                      </select>
-                    </div>
-                    <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;">
-                      Compacts history when prompt exceeds limit (% of context window, or token count). Optional: also after N calls.
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Compact on new level</span>
-                      <label class="toggle"><input type="checkbox" id="compactOnLevel" checked><span class="slider"></span></label>
-                    </div>
-                    <div class="opt-row">
-                      <span class="opt-label">Planning horizon</span>
-                    </div>
-                    <div class="opt-row">
+                    <div>
+                      <div class="opt-label" style="margin-bottom:4px;">Planning horizon</div>
                       <div class="triswitch" id="planningMode">
                         <label><input type="radio" name="planMode" value="off"><span>Off</span></label>
                         <label><input type="radio" name="planMode" value="5"><span>5</span></label>
@@ -748,21 +692,86 @@
                         <label><input type="radio" name="planMode" value="20"><span>20</span></label>
                         <label><input type="radio" name="planMode" value="unlimited"><span>&infin;</span></label>
                       </div>
+                      <div style="font-size:10px;color:var(--text-dim);margin-top:4px;">
+                        LLM returns a multi-step plan instead of one action. Saves tokens.
+                      </div>
                     </div>
-                    <div style="font-size:10px;color:var(--text-dim);">
-                      LLM returns a multi-step plan instead of one action. Saves tokens.
+
+                    <div class="sub-header" style="display:flex;align-items:center;justify-content:space-between;">
+                      <span>Compacting Model</span>
+                      <label class="toggle" style="margin:0;"><input type="checkbox" id="compactContext" checked onchange="toggleCompactSettings()"><span class="slider"></span></label>
+                    </div>
+                    <div id="compactSettingsBody">
+                      <div style="margin-bottom:8px;">
+                        <select id="compactModelSelectTop" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:12px;">
+                          <option value="auto">Auto (cheapest of same provider)</option>
+                          <option value="auto-fastest">Auto (fastest of same provider)</option>
+                          <option value="same">Same as reasoning</option>
+                        </select>
+                        <div style="font-size:9px;color:var(--dim);margin-top:3px;">Used to summarize game history when context gets long.</div>
+                      </div>
+                      <div class="settings-grid">
+                        <div class="opt-row">
+                          <span class="opt-label">After call #</span>
+                          <input type="number" id="compactAfter" placeholder="—" min="1" max="200" style="width:55px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;">
+                        </div>
+                        <div class="opt-row">
+                          <span class="opt-label">Context limit</span>
+                          <span class="spin-wrap">
+                            <input type="number" id="compactContextPct" value="64000" min="1" step="1" style="width:68px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">
+                            <span class="spin-btns">
+                              <button class="spin-btn" onclick="spinContextLimit(1)">&#9650;</button>
+                              <button class="spin-btn" onclick="spinContextLimit(-1)">&#9660;</button>
+                            </span>
+                          </span>
+                          <select id="contextLimitUnit" style="width:62px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:11px;margin-left:4px;" onchange="onContextLimitUnitChange()">
+                            <option value="pct">%</option>
+                            <option value="tokens" selected>tok</option>
+                          </select>
+                        </div>
+                        <div class="opt-row">
+                          <span class="opt-label">Compact on new level</span>
+                          <label class="toggle"><input type="checkbox" id="compactOnLevel" checked><span class="slider"></span></label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="sub-header" style="display:flex;align-items:center;justify-content:space-between;">
+                      <span>Interrupt Model</span>
+                      <label class="toggle" style="margin:0;"><input type="checkbox" id="interruptPlan" onchange="toggleInterruptSettings()"><span class="slider"></span></label>
+                    </div>
+                    <div id="interruptSettingsBody" style="opacity:0.4;pointer-events:none;">
+                      <div style="margin-bottom:8px;">
+                        <select id="interruptModelSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:12px;">
+                          <option value="auto">Auto (cheapest of same provider)</option>
+                          <option value="auto-fastest">Auto (fastest of same provider)</option>
+                          <option value="same">Same as reasoning</option>
+                        </select>
+                        <div style="font-size:9px;color:var(--dim);margin-top:3px;">After each plan step, a cheap model checks if things went as expected. Interrupts if not.</div>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <!-- GITHUB COPILOT (local only) -->
-                {% if features.copilot %}
-                <div class="opt-section" id="secCopilot">
-                  <div class="opt-header" onclick="toggleSection('secCopilot')">
-                    <span>GitHub Copilot</span><span class="chevron">&#9654;</span>
+                <!-- MODEL KEYS -->
+                <div class="opt-section" id="secKeys">
+                  <div class="opt-header" onclick="toggleSection('secKeys')">
+                    <span>Model Keys</span><span class="chevron">&#9654;</span>
                   </div>
                   <div class="opt-body">
+                    <div id="byokPrompt" style="display:none;margin-bottom:8px;">
+                      <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model key</div>
+                      <input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
+                      <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
+                    </div>
+                    <div id="compactByokPrompt" style="display:none;margin-bottom:8px;">
+                      <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Compact model key</div>
+                      <input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
+                      <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
+                    </div>
+                    {% if features.copilot %}
                     <div id="copilotNotAuth">
+                      <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">GitHub Copilot</div>
                       <button class="btn btn-primary" onclick="copilotStartAuth()" style="width:100%;font-size:11px;">Connect GitHub Copilot</button>
                       <div id="copilotDeviceCode" style="display:none;">
                         <div class="copilot-code" id="copilotUserCode">————</div>
@@ -782,11 +791,10 @@
                         claude-sonnet-4, gemini-2.5-pro<span class="tier-badge tier-premium">PREMIUM</span>
                       </div>
                     </div>
+                    {% endif %}
                   </div>
                 </div>
-                {% endif %}
 
-              </div>
             </div>
 
             <!-- Transport bar moved to canvas panel -->
@@ -796,7 +804,7 @@
           <div class="subtab-pane" id="subtabGraphics" style="padding:14px;">
             <div class="opt-row">
               <span class="opt-label">Diff overlay</span>
-              <label class="toggle"><input type="checkbox" id="showChanges" checked><span class="slider"></span></label>
+              <label class="toggle"><input type="checkbox" id="showChanges"><span class="slider"></span></label>
             </div>
             <div class="opt-row">
               <span class="opt-label">Opacity</span>
@@ -809,7 +817,7 @@
             </div>
           </div>
 
-          <!-- ── Memory subtab ── -->
+          <!-- ── Prompt subtab (formerly Memory) ── -->
           <div class="subtab-pane" id="subtabMemory">
             <div class="memory-tab">
               <div class="mem-section">
@@ -828,12 +836,21 @@
                 <label>Compact Summary <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(auto-generated, editable)</span></label>
                 <textarea id="memoryCompactSummary" rows="5" placeholder="No compact summary yet. Play a game and compact context to see the LLM-generated summary here."></textarea>
               </div>
+              <div class="mem-section">
+                <label>Interrupt Prompt <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(sent to interrupt model)</span></label>
+                <textarea id="memoryInterruptPrompt" rows="5" placeholder="Interrupt prompt template..."></textarea>
+              </div>
+              <div class="mem-section">
+                <label>Interrupt Result <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(last response, read-only)</span></label>
+                <textarea id="memoryInterruptResult" rows="2" readonly placeholder="—" style="opacity:0.8;"></textarea>
+              </div>
               <div class="memory-actions">
                 <button class="btn btn-primary" onclick="saveMemoryEdits()">Save</button>
                 <button class="btn" onclick="resetMemoryDefaults()">Reset defaults</button>
                 <button class="btn" onclick="applyCompactEdit()" style="background:#445;">Apply compact</button>
                 <span id="memorySaveStatus" style="font-size:10px;color:var(--green);display:none;">Saved!</span>
               </div>
+              <div style="font-size:9px;color:var(--dim);margin-top:4px;font-style:italic;">Prompts are saved locally in your browser and persist across sessions.</div>
             </div>
           </div>
 
@@ -1053,6 +1070,12 @@ function restoreSessionFromState(s) {
   updatePanelBlur();
   updateGameListLock();
 
+  // Highlight the matching game card in the sidebar
+  const restoredGameId = currentState.game_id || '';
+  document.querySelectorAll('.game-card').forEach(c => {
+    c.classList.toggle('active', restoredGameId && c.dataset.gameId === restoredGameId);
+  });
+
   if (action6Mode) canvas.style.cursor = 'crosshair';
   else canvas.style.cursor = 'default';
 }
@@ -1271,6 +1294,18 @@ async function executeToolBlocks(text, grid, prev_grid) {
 
 function toggleSection(id) {
   document.getElementById(id).classList.toggle('open');
+}
+
+function toggleCompactSettings() {
+  const on = document.getElementById('compactContext')?.checked;
+  const body = document.getElementById('compactSettingsBody');
+  if (body) { body.style.opacity = on ? '1' : '0.4'; body.style.pointerEvents = on ? 'auto' : 'none'; }
+}
+
+function toggleInterruptSettings() {
+  const on = document.getElementById('interruptPlan')?.checked;
+  const body = document.getElementById('interruptSettingsBody');
+  if (body) { body.style.opacity = on ? '1' : '0.4'; body.style.pointerEvents = on ? 'auto' : 'none'; }
 }
 
 function switchTopTab(tab) {
@@ -2085,6 +2120,70 @@ function buildCompactContextFallback() {
   return parts.join('\n');
 }
 
+async function checkInterrupt(expected, grid, changeMap) {
+  // Ask a cheap model whether the plan went as expected after a step.
+  // Returns true if plan should be interrupted, false otherwise.
+  const gridCompact = grid ? grid.map(r => r.join(',')).join('\n') : '';
+  const changesText = changeMap ? 'Recent changes: ' + JSON.stringify(changeMap) : '';
+  const template = document.getElementById('memoryInterruptPrompt')?.value || MEMORY_DEFAULTS.interrupt_prompt;
+  const prompt = template
+    .replace('{expected}', expected)
+    .replace('{grid}', gridCompact)
+    .replace('{changes}', changesText);
+
+  const interruptModelSel = document.getElementById('interruptModelSelect')?.value || 'auto';
+  const agentModel = getSelectedModel();
+
+  function parseInterruptResult(text) {
+    if (!text) return false;
+    // Strip markdown fences, JSON wrappers, whitespace
+    const clean = text.replace(/```[\s\S]*?```/g, m => m.replace(/```\w*/g, '').trim())
+      .replace(/[{}"]/g, '').trim().toUpperCase();
+    // Check for NO anywhere (but not in "NOT_FINISHED" etc.)
+    if (clean.startsWith('NO')) return true;
+    if (/\bNO\b/.test(clean) && !/\bYES\b/.test(clean)) return true;
+    if (/FALSE/.test(clean) && !/TRUE/.test(clean)) return true;
+    return false;
+  }
+
+  try {
+    let rawResult = '';
+    if (FEATURES.server_llm) {
+      const body = { prompt, session_id: sessionId, agent_model: agentModel };
+      if (interruptModelSel === 'auto-fastest') body.strategy = 'fastest';
+      else if (interruptModelSel === 'same') body.model = agentModel;
+      else if (interruptModelSel !== 'auto') body.model = interruptModelSel;
+      const data = await fetchJSON('/api/llm/interrupt-check', body);
+      rawResult = `${data.result} (${data.model_used || '?'})`;
+      _syncInterruptResult(rawResult);
+      return parseInterruptResult(data.result);
+    } else if (interruptModelSel === 'same' || interruptModelSel === 'auto') {
+      const model = interruptModelSel === 'same' ? agentModel : agentModel;
+      const info = getModelInfo(model);
+      if (info && getByokKey(info.provider)) {
+        const result = await askLLMBYOK(prompt, model);
+        rawResult = `${result} (${model})`;
+        _syncInterruptResult(rawResult);
+        return parseInterruptResult(result);
+      } else if (FEATURES.puter_js) {
+        const result = await askLLMPuter(prompt, 'gpt-4o-mini');
+        rawResult = `${result} (puter/gpt-4o-mini)`;
+        _syncInterruptResult(rawResult);
+        return parseInterruptResult(result);
+      }
+    }
+  } catch (e) {
+    console.warn('Interrupt check failed:', e);
+    _syncInterruptResult('ERROR: ' + e.message);
+  }
+  return false; // default: don't interrupt
+}
+
+function _syncInterruptResult(text) {
+  const el = document.getElementById('memoryInterruptResult');
+  if (el) el.value = text;
+}
+
 async function buildCompactContext() {
   // Use LLM to summarize the game history into key takeaways.
   // Falls back to heuristic if LLM call fails.
@@ -2381,6 +2480,7 @@ async function askLLM() {
           thinking_level: getThinkingLevel(),
           tools_mode: getToolsMode(),
           planning_mode: getPlanningMode(),
+          interrupt_plan: document.getElementById('interruptPlan')?.checked || false,
         },
       };
       if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
@@ -2526,7 +2626,7 @@ function updateAutoBtn() {
   }
 }
 
-async function executePlan(plan, resp, entry) {
+async function executePlan(plan, resp, entry, expected) {
   // Execute a multi-step plan, updating UI live
   const planSteps = entry ? entry.querySelectorAll('.plan-step') : [];
   let consecutiveNoChange = 0;
@@ -2601,6 +2701,23 @@ async function executePlan(plan, resp, entry) {
       }
     } else {
       consecutiveNoChange = 0;
+    }
+
+    // Interrupt model check: ask cheap model if plan is going as expected
+    const interruptEnabled = document.getElementById('interruptPlan')?.checked;
+    if (interruptEnabled && expected && i < plan.length - 1) {
+      const shouldInterrupt = await checkInterrupt(expected, data.grid, data.change_map);
+      if (shouldInterrupt) {
+        for (let j = i + 1; j < planSteps.length; j++)
+          planSteps[j].className = 'plan-step interrupted';
+        // Add visual indicator in reasoning
+        const content = document.getElementById('reasoningContent');
+        const intEntry = document.createElement('div');
+        intEntry.className = 'reasoning-entry';
+        intEntry.innerHTML = `<div class="step-label" style="color:var(--yellow);">⚡ Plan interrupted at step ${i + 1}/${plan.length}: expected "${expected}" not met</div>`;
+        content.insertBefore(intEntry, content.firstChild);
+        break;
+      }
     }
 
     // Brief pause for visual feedback
@@ -2718,7 +2835,8 @@ async function stepOnce() {
   if (!plan) return;
 
   const entry = document.querySelector('#reasoningContent .reasoning-entry');
-  return await executePlan(plan, resp, entry);
+  const expected = resp.parsed.expected || null;
+  return await executePlan(plan, resp, entry, expected);
 }
 
 async function toggleAutoPlay() {
@@ -2786,7 +2904,8 @@ async function toggleAutoPlay() {
     if (!plan) { autoPlaying = false; break; }
 
     const entry = document.querySelector('#reasoningContent .reasoning-entry');
-    const result = await executePlan(plan, resp, entry);
+    const expected = resp.parsed.expected || null;
+    const result = await executePlan(plan, resp, entry, expected);
     if (!result || result.interrupted) {
       await new Promise(r => setTimeout(r, 200));
     }
@@ -3129,6 +3248,10 @@ function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, 
   const toolInstr = tm ? `\n- You can write Python code blocks to analyse the grid. Wrap code in \\\`\\\`\\\`python fences. The variable \`grid\` is a numpy 2D int array. numpy, collections, itertools, math are available. Use print() for output. Code will be executed and results appended before your final answer.\n- Include "analysis" in your JSON with a summary of what you found.` : '';
   const analysisField = tm ? ', "analysis": "<detailed spatial analysis>"' : '';
 
+  const interruptOn = document.getElementById('interruptPlan')?.checked;
+  const expectedField = (pm && interruptOn) ? ', "expected": "<what you expect to see after this plan>"' : '';
+  const expectedRule = (pm && interruptOn) ? '\n- "expected": briefly describe what you expect after the plan completes (e.g. "character at the door", "score increased").' : '';
+
   if (pm) {
     parts.push(`## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
@@ -3136,12 +3259,12 @@ function buildClientPrompt(state, history, changeMap, inputSettings, toolsMode, 
 3. Plan a sequence of actions (up to ${planN} steps).
 
 Respond with EXACTLY this JSON (nothing else):
-{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{"action": <n>, "data": {}}, ...]${analysisField}}
+{"observation": "<what you see>", "reasoning": "<your plan>", "plan": [{"action": <n>, "data": {}}, ...]${analysisField}${expectedField}}
 
 Rules:
 - Return a "plan" array of up to ${planN} steps. Each step has "action" (0-7) and "data" ({} or {"x": <0-63>, "y": <0-63>}).
 - ACTION6: set "data" to {"x": <0-63>, "y": <0-63>}.
-- Other actions: set "data" to {}.${toolInstr}`);
+- Other actions: set "data" to {}.${expectedRule}${toolInstr}`);
   } else {
     parts.push(`## YOUR TASK
 1. Identify key objects (character, walls, targets, items).
@@ -3725,7 +3848,7 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
   }
 }
 
-const MIN_STEPS_FOR_UPLOAD = 50;
+const MIN_STEPS_FOR_UPLOAD = 20;
 
 async function autoUploadSession() {
   const payload = buildSessionPayload();
@@ -3738,6 +3861,42 @@ async function autoUploadSession() {
       body: JSON.stringify(payload),
     });
   } catch {} // fire-and-forget
+}
+
+function uploadClosedSession(s) {
+  // Build payload from SessionState object (not globals)
+  if (!s.sessionId || s.sessionId.startsWith('pending_')) return;
+  const steps = s.sessionStepsBuffer || [];
+  if (steps.length < MIN_STEPS_FOR_UPLOAD) return;
+  const gameId = s.currentState?.game_id || s.gameId || '';
+  if (!gameId) return;
+  const payload = {
+    session: {
+      id: s.sessionId,
+      game_id: gameId,
+      model: s.model || '',
+      mode: MODE,
+      created_at: s.sessionStartTime || s.createdAt || (Date.now() / 1000),
+      result: s.currentState?.state || s.status || 'NOT_FINISHED',
+      steps: s.stepCount || steps.length,
+      levels: s.currentState?.levels_completed || 0,
+    },
+    steps: steps,
+  };
+  // Upload to local server
+  fetch('/api/sessions/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+  // Also upload to Railway if running locally
+  if (MODE === 'local') {
+    fetch('https://arc3.sonpham.net/api/sessions/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
 }
 
 function checkSessionEndAndUpload() {
@@ -4037,6 +4196,9 @@ function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function resumeSession(sid) {
+  // Guard: don't overwrite an active session that already has a loaded grid
+  if (sessionId === sid && currentGrid && stepCount > 0) return;
+
   try {
     const data = await fetchJSON('/api/sessions/resume', { session_id: sid });
     if (data.error) { alert(data.error); return; }
@@ -4128,6 +4290,13 @@ async function resumeSession(sid) {
     canvas.style.display = 'block';
     document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
+
+    // Highlight the matching game card in the sidebar
+    if (data.game_id) {
+      document.querySelectorAll('.game-card').forEach(c => {
+        c.classList.toggle('active', c.dataset.gameId === data.game_id);
+      });
+    }
 
     if ((data.available_actions || []).includes(6)) {
       action6Mode = true;
@@ -4411,6 +4580,13 @@ Key facts:
 - ACTION7 is a secondary interact (rotate, swap, etc.).
 - ACTION0 = RESET. Only use as a last resort.
 - Try all directional actions first to understand movement.`,
+  interrupt_prompt: `A game agent planned actions and expected: "{expected}"
+
+Current grid state:
+{grid}
+{changes}
+
+Did the plan go as expected? Reply with ONLY "YES" or "NO". One word only, nothing else.`,
   compact_prompt: `You are helping an AI agent play a game. Distill the crucial knowledge the agent has learned so far into a compact briefing. This will REPLACE the full history in the agent's context, so include everything it needs to keep playing well.
 
 Write a concise briefing (max 400 words) covering:
@@ -4448,6 +4624,9 @@ async function loadMemoryContent() {
   // Load compact prompt
   const cpEl = document.getElementById('memoryCompactPrompt');
   cpEl.value = localStorage.getItem('arc_compact_prompt') || MEMORY_DEFAULTS.compact_prompt;
+  // Load interrupt prompt
+  const ipEl = document.getElementById('memoryInterruptPrompt');
+  if (ipEl) ipEl.value = localStorage.getItem('arc_interrupt_prompt') || MEMORY_DEFAULTS.interrupt_prompt;
   memoryLoaded = true;
 }
 
@@ -4469,8 +4648,10 @@ async function saveMemoryEdits() {
     localStorage.setItem('arc_system_prompt', sp);
     localStorage.setItem('arc_hard_memory', hm);
   }
-  // Always save compact prompt to localStorage
+  // Always save compact prompt and interrupt prompt to localStorage
   localStorage.setItem('arc_compact_prompt', cp);
+  const ip = document.getElementById('memoryInterruptPrompt')?.value || '';
+  localStorage.setItem('arc_interrupt_prompt', ip);
 
   // Update client-side prompt description for buildClientPrompt
   _customArcDescription = sp;
@@ -4485,6 +4666,8 @@ function resetMemoryDefaults() {
   document.getElementById('memorySystemPrompt').value = MEMORY_DEFAULTS.system_prompt;
   document.getElementById('memoryHardMemory').value = MEMORY_DEFAULTS.hard_memory;
   document.getElementById('memoryCompactPrompt').value = MEMORY_DEFAULTS.compact_prompt;
+  const ipEl = document.getElementById('memoryInterruptPrompt');
+  if (ipEl) ipEl.value = MEMORY_DEFAULTS.interrupt_prompt;
   _customArcDescription = null;
   _customHardMemory = null;
 }
@@ -4545,7 +4728,7 @@ function loadBrowseView() {
   // Load whichever tab is active
   const activeBtn = document.querySelector('.browse-tabs button.active');
   const tab = activeBtn?.textContent?.trim();
-  if (tab === 'Global Sessions') loadBrowseGlobal();
+  if (tab === 'Public Sessions') loadBrowseGlobal();
   else if (tab === 'Local Sessions') loadBrowseLocal();
   else loadBrowseByGame();
 }
@@ -4595,7 +4778,7 @@ async function loadGameSessions(gameId) {
   }
 }
 
-// ── Global Sessions tab ──────────────────────────────────────────────────
+// ── Public Sessions tab ──────────────────────────────────────────────────
 
 async function loadBrowseGlobal() {
   const el = document.getElementById('browseGlobalList');
@@ -4835,6 +5018,11 @@ function closeSession(id) {
   // Stop autoplay if running
   if (s.autoPlaying) { s.autoPlaying = false; }
   if (id === activeSessionId && autoPlaying) { autoPlaying = false; updateAutoBtn(); }
+
+  // Upload session to main DB before deleting (if enough steps)
+  if (id === activeSessionId) saveSessionToState();
+  uploadClosedSession(s);
+
   sessions.delete(id);
   // Switch to another session or show empty
   if (id === activeSessionId) {
@@ -4938,6 +5126,13 @@ function restoreSessionsFromLocalStorage() {
     activeSessionId = [...sessions.keys()][0];
   }
   renderSessionTabs();
+
+  // Auto-resume the active session so the game grid + progress loads
+  if (activeSessionId && !activeSessionId.startsWith('pending_')) {
+    resumeSession(activeSessionId);
+  } else {
+    updateGameListLock();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

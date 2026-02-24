@@ -23,3 +23,6 @@ data/
 # Claude
 .claude/
 data/.copilot_token
+
+# Screenshots
+screenshots/
