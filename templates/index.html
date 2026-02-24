@@ -1885,6 +1885,16 @@ function lockHumanControls() {
   if (btn) { btn.classList.remove('active'); btn.innerHTML = '&#128274; Intervene as Human'; }
 }
 
+function lockSettings() {
+  const body = document.getElementById('subtabSettings');
+  if (body) { body.style.opacity = '0.5'; body.style.pointerEvents = 'none'; }
+}
+
+function unlockSettings() {
+  const body = document.getElementById('subtabSettings');
+  if (body) { body.style.opacity = ''; body.style.pointerEvents = ''; }
+}
+
 function logHumanAction(actionId, actionData, changeMap, turnId) {
   const content = document.getElementById('reasoningContent');
   if (content.querySelector('.empty-state')) content.innerHTML = '';
@@ -2862,6 +2872,7 @@ async function toggleAutoPlay() {
   if (autoPlaying) {
     autoPlaying = false;
     updateAutoBtn();
+    unlockSettings();
     const s = getActiveSession();
     if (s) { s.autoPlaying = false; s.waitingForLLM = false; }
     // Clear spinners immediately so UI doesn't look like it's still working
@@ -2879,6 +2890,7 @@ async function toggleAutoPlay() {
   const mySessionId = sessionId; // capture for guard
   autoPlaying = true;
   lockHumanControls();
+  lockSettings();
   updateAutoBtn();
   const s = getActiveSession();
   if (s) {
@@ -2941,6 +2953,7 @@ async function toggleAutoPlay() {
   }
   autoPlaying = false;
   if (s) { s.autoPlaying = false; }
+  unlockSettings();
   updateAutoBtn();
   renderSessionTabs();
 }
