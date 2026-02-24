@@ -1324,12 +1324,10 @@ let _pyodideGameActive = false;  // true when current session uses Pyodide
 let _pyodideGameCallId = 0;
 const _pyodideGamePending = new Map();
 let _pyodideGameProgress = { stage: '', percent: 0 };
-let _pyodideGameInitStart = 0;
 
 function _initPyodideGameWorker() {
   if (_pyodideGameWorker) return Promise.resolve();
   _pyodideGameLoading = true;
-  _pyodideGameInitStart = Date.now();
   const workerSrc = `
     importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.4/full/pyodide.js');
     let pyodide = null;
@@ -1346,13 +1344,29 @@ function _initPyodideGameWorker() {
 
       if (msg.type === 'init') {
         try {
-          postProgress('Stage 1/4: Loading Pyodide runtime...', 5);
+          postProgress('Loading Pyodide runtime...', 5);
           pyodide = await loadPyodide();
-          postProgress('Stage 2/4: Loading NumPy...', 40);
+          postProgress('Loading NumPy...', 30);
           await pyodide.loadPackage('numpy');
-          postProgress('Stage 3/3: Installing arcengine...', 60);
-          await pyodide.loadPackage('micropip');
-          await pyodide.runPythonAsync('import micropip; await micropip.install("arcengine", deps=False)');
+          postProgress('Installing arcengine...', 60);
+          // Bypass micropip entirely — it can't handle pydantic-core (C ext).
+          // Fetch wheel from PyPI, extract to site-packages manually.
+          await pyodide.runPythonAsync(\`
+import json, zipfile, io, importlib, site
+from pyodide.http import pyfetch
+
+resp = await pyfetch("https://pypi.org/pypi/arcengine/json")
+meta = json.loads(await resp.string())
+whl_url = next(u["url"] for u in meta["urls"] if u["filename"].endswith("py3-none-any.whl"))
+
+whl_resp = await pyfetch(whl_url)
+whl_bytes = bytes(await whl_resp.bytes())
+
+sp = site.getsitepackages()[0]
+with zipfile.ZipFile(io.BytesIO(whl_bytes)) as zf:
+    zf.extractall(sp)
+importlib.invalidate_caches()
+          \`);
           postProgress('Ready', 100);
           self.postMessage({type: 'ready', id: msg.id});
         } catch (err) {
@@ -1575,8 +1589,6 @@ function _updatePyodideGameLoadingUI() {
   if (!_pyodideGameLoading) return;
   const pct = _pyodideGameProgress.percent || 0;
   const stage = _pyodideGameProgress.stage || 'Initializing...';
-  const elapsed = (Date.now() - _pyodideGameInitStart) / 1000;
-  const eta = pct > 5 ? Math.max(0, (elapsed / pct * 100) - elapsed).toFixed(0) : '...';
   const barWidth = Math.min(100, Math.max(0, pct));
   overlay.innerHTML = `
     <div style="text-align:center;padding:20px;">
@@ -1585,7 +1597,6 @@ function _updatePyodideGameLoadingUI() {
         <div style="background:var(--green,#4FCC30);height:100%;width:${barWidth}%;transition:width 0.3s;"></div>
       </div>
       <div style="font-size:12px;color:var(--text-dim);">${stage} &nbsp; ${Math.round(pct)}%</div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">ETA: ~${eta}s</div>
     </div>
   `;
   overlay.style.display = '';
