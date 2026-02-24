@@ -1384,9 +1384,10 @@ function updateByokPrompt() {
   const model = getSelectedModel();
   const info = getModelInfo(model);
   if (!info) { prompt.style.display = 'none'; return; }
-  // Show BYOK prompt for non-puter, non-copilot, unavailable models (online mode)
-  const needsKey = !info.available && info.provider !== 'puter' && info.provider !== 'copilot';
-  if (needsKey && MODE === 'online') {
+  // In online mode, all providers except puter/copilot/ollama need BYOK keys
+  const freeProviders = ['puter', 'copilot', 'ollama'];
+  const needsKey = MODE === 'online' ? !freeProviders.includes(info.provider) : !info.available;
+  if (needsKey) {
     const label = PROVIDER_LABELS[info.provider] || info.provider;
     keyInput.placeholder = `Paste API key for ${label} here...`;
     // Restore saved key for this provider
@@ -1467,8 +1468,10 @@ function updateCompactByokPrompt() {
     return;
   }
 
-  // Check if compact model needs a key (unavailable = no server key)
-  if (!info.available && MODE === 'online') {
+  // Check if compact model needs a key
+  const freeProviders2 = ['puter', 'copilot', 'ollama'];
+  const compactNeedsKey = MODE === 'online' ? !freeProviders2.includes(info.provider) : !info.available;
+  if (compactNeedsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
     const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
     const reasoningKey = sameProvider ? (localStorage.getItem(`byok_key_${info.provider}`) || '') : '';
