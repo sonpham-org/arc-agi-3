@@ -1346,8 +1346,8 @@ function _initPyodideGameWorker() {
         try {
           postProgress('Loading Pyodide runtime...', 5);
           pyodide = await loadPyodide();
-          postProgress('Loading NumPy...', 30);
-          await pyodide.loadPackage('numpy');
+          postProgress('Loading packages...', 30);
+          await pyodide.loadPackage(['numpy', 'pydantic']);
           postProgress('Installing arcengine...', 60);
           // Bypass micropip entirely — it can't handle pydantic-core (C ext).
           // Fetch wheel from PyPI, extract to site-packages manually.
