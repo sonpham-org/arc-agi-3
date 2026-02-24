@@ -49,6 +49,7 @@ FEATURES = {
     "byok":          {"local": True,  "online": True},
     "session_db":    {"local": True,  "online": True},
     "memory_md":     {"local": True,  "online": False},
+    "pyodide_game":  {"local": True,  "online": True},
 }
 
 # Will be set by CLI args; default to local
@@ -1905,6 +1906,30 @@ def list_games():
         {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps}
         for e in envs
     ])
+
+
+@app.route("/api/games/<game_id>/source")
+@bot_protection
+@turnstile_required
+def game_source(game_id):
+    """Return the Python source code for a game (for Pyodide client-side execution)."""
+    bare_id = game_id.split("-")[0]
+    arc = get_arcade()
+    envs = arc.get_environments()
+    env_info = next((e for e in envs if e.game_id == game_id or e.game_id.split("-")[0] == bare_id), None)
+    if env_info is None:
+        return jsonify({"error": f"Game {game_id} not found"}), 404
+    local_dir = Path(env_info.local_dir)
+    py_file = local_dir / f"{bare_id}.py"
+    if not py_file.exists():
+        return jsonify({"error": f"Source file not found for {game_id}"}), 404
+    source = py_file.read_text()
+    return jsonify({
+        "source": source,
+        "class_name": env_info.class_name,
+        "game_id": env_info.game_id,
+        "default_fps": env_info.default_fps,
+    })
 
 
 @app.route("/api/start", methods=["POST"])
