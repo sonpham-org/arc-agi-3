@@ -93,18 +93,25 @@
 
   /* ── Option sections ─────────────────────────────────────────────────── */
   .opt-section { border-bottom: 1px solid var(--border); display: flex; flex-direction: row; }
-  .opt-header { writing-mode: vertical-lr; transform: rotate(180deg); display: flex;
+  .opt-section.open .opt-header { writing-mode: vertical-lr; transform: rotate(180deg); display: flex;
     align-items: center; justify-content: center; padding: 12px 6px; cursor: pointer;
     user-select: none; font-size: 11px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.5px; color: var(--text-dim); border-right: 1px solid var(--border);
     min-width: 28px; flex-shrink: 0; }
-  .opt-header { background: color-mix(in srgb, var(--border) 40%, transparent); transition: background 0.15s, color 0.15s; }
-  .opt-section:hover .opt-header { color: var(--text); background: var(--border); }
+  .opt-section.open .opt-header { background: color-mix(in srgb, var(--border) 40%, transparent); transition: background 0.15s, color 0.15s; }
+  .opt-section.open:hover .opt-header { color: var(--text); background: var(--border); }
   .opt-header .chevron { display: none; }
   .opt-section.open .chevron { transform: rotate(90deg); }
   .opt-body { display: block; padding: 8px 14px 14px; flex: 1; min-width: 0; }
   .opt-section:not(.open) .opt-body { display: none; }
-  .opt-section:not(.open) .opt-header { border-right: none; }
+  .opt-section:not(.open) { flex-direction: column; }
+  .opt-section:not(.open) .opt-header { writing-mode: horizontal-tb; transform: none; display: flex;
+    align-items: center; justify-content: center; padding: 14px 12px; cursor: pointer;
+    user-select: none; font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-dim); border-right: none;
+    width: 100%; min-width: unset; background: color-mix(in srgb, var(--border) 20%, transparent);
+    transition: background 0.15s, color 0.15s; }
+  .opt-section:not(.open):hover .opt-header { color: var(--text); background: color-mix(in srgb, var(--border) 50%, transparent); }
 
   .opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
   .opt-row:last-child { margin-bottom: 0; }
