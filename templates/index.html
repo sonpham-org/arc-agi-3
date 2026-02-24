@@ -2724,7 +2724,10 @@ async function toggleAutoPlay() {
     autoPlaying = false;
     updateAutoBtn();
     const s = getActiveSession();
-    if (s) { s.autoPlaying = false; }
+    if (s) { s.autoPlaying = false; s.waitingForLLM = false; }
+    // Clear spinners immediately so UI doesn't look like it's still working
+    document.getElementById('llmSpinner').style.display = 'none';
+    document.getElementById('topSpinner').style.display = 'none';
     renderSessionTabs();
     return;
   }
@@ -2762,7 +2765,12 @@ async function toggleAutoPlay() {
       s.callDurations.push(resp.call_duration_ms);
     }
 
-    if (!autoPlaying) break;
+    if (!autoPlaying) {
+      // Paused — discard the reasoning entry and undo the call count
+      const discarded = document.querySelector('#reasoningContent .reasoning-entry');
+      if (discarded && resp && !resp.error) { discarded.remove(); llmCallCount--; }
+      break;
+    }
     if (activeSessionId !== mySessionId) { autoPlaying = false; break; }
     if (!resp || resp.error || !resp.parsed) { autoPlaying = false; break; }
     const p = resp.parsed;

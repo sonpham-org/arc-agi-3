@@ -3,6 +3,9 @@
 ## Terminology
 
 - **"Replay"** = the share page (`share.html` / `/share/<id>` endpoint), NOT the in-app replay in `index.html`
+- **"Step"** = a single game step (one action executed in the environment)
+- **"Turn"** = one complete agent invocation (an LLM call + all steps in its plan), or one human action. Each turn gets a unique `turnId`. Undo reverts an entire turn, not individual steps.
+- **"Call"** = one LLM agent invocation (may produce a multi-step plan). Compact context triggers after N Calls, not Steps.
 
 ## Reasoning View Consistency
 
