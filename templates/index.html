@@ -477,7 +477,7 @@
     <div class="browse-tabs">
       <button class="active" onclick="switchBrowseTab('byGame')">By Game</button>
       <button onclick="switchBrowseTab('global')">Public Sessions</button>
-      <button onclick="switchBrowseTab('local')">Local Sessions</button>
+      <button onclick="switchBrowseTab('local')">My Sessions</button>
     </div>
     <!-- By Game -->
     <div class="browse-pane active" id="browseByGame">
@@ -517,6 +517,7 @@
       <span id="gameStatus" class="status status-NOT_PLAYED">—</span>
       <span id="levelInfo" class="level-info"></span>
       <span id="stepCounter" class="step-counter"></span>
+      <button id="shareBtn" class="btn" style="display:none;font-size:11px;padding:2px 8px;" onclick="shareCurrentSession()">Share</button>
       <span style="flex:1;"></span>
       <span id="topSpinner" style="display:none;"><span class="spinner"></span></span>
     </div>
@@ -4577,9 +4578,10 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
   };
   sessionStepsBuffer.push(stepEntry);
   syncStepCounter++;
+  updateShareBtnVisibility();
 
-  // Save to localStorage periodically (online mode — per-user local history)
-  if (MODE === 'online' && (syncStepCounter % 5 === 0 || stepCount <= 1)) {
+  // Save to localStorage periodically (online mode or Pyodide — per-user local history)
+  if ((MODE === 'online' || _pyodideGameActive) && (syncStepCounter % 5 === 0 || stepCount <= 1)) {
     const payload = buildSessionPayload();
     if (payload) saveLocalSession(payload.session, payload.steps);
   }
@@ -4659,8 +4661,8 @@ function checkSessionEndAndUpload() {
   saveSessionIndex();
   renderSessionTabs();
   if (st === 'WIN' || st === 'GAME_OVER') {
-    // Final save to localStorage (online mode)
-    if (MODE === 'online') {
+    // Final save to localStorage (online mode or Pyodide)
+    if (MODE === 'online' || _pyodideGameActive) {
       const payload = buildSessionPayload();
       if (payload) saveLocalSession(payload.session, payload.steps);
     }
@@ -4705,6 +4707,46 @@ function showShareLink(sid) {
   // Insert after the canvas container
   const container = document.getElementById('gameCanvas').parentElement;
   container.parentElement.insertBefore(banner, container.nextSibling);
+}
+
+function updateShareBtnVisibility() {
+  const btn = document.getElementById('shareBtn');
+  if (!btn) return;
+  btn.style.display = (sessionId && stepCount >= MIN_STEPS_FOR_UPLOAD) ? '' : 'none';
+}
+
+async function shareCurrentSession() {
+  const btn = document.getElementById('shareBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sharing...'; }
+  try {
+    const payload = buildSessionPayload();
+    if (!payload || (payload.steps || []).length < MIN_STEPS_FOR_UPLOAD) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Share'; }
+      return;
+    }
+    // Upload to local server
+    await fetch('/api/sessions/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    // Also upload to Railway if running locally
+    if (MODE === 'local') {
+      const resp = await fetch('https://arc3.sonpham.net/api/sessions/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (data.status === 'ok') showShareLink(sessionId);
+    } else {
+      showShareLink(sessionId);
+    }
+  } catch (e) {
+    console.error('Share failed:', e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Share'; }
+  }
 }
 
 async function puterKvCheckResume() {
@@ -5474,7 +5516,7 @@ function loadBrowseView() {
   const activeBtn = document.querySelector('.browse-tabs button.active');
   const tab = activeBtn?.textContent?.trim();
   if (tab === 'Public Sessions') loadBrowseGlobal();
-  else if (tab === 'Local Sessions') loadBrowseLocal();
+  else if (tab === 'My Sessions') loadBrowseLocal();
   else loadBrowseByGame();
 }
 
@@ -5551,7 +5593,7 @@ function loadBrowseLocal() {
   const el = document.getElementById('browseLocalList');
   const localSessions = getLocalSessions();
   const header = document.getElementById('browseLocalHeader');
-  header.textContent = `Sessions stored in this browser (${localSessions.length})`;
+  header.textContent = `My sessions (${localSessions.length})`;
   if (!localSessions.length) {
     el.innerHTML = '<div class="browse-empty">No local sessions saved yet. Play a game to see sessions here.</div>';
     return;
