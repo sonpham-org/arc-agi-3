@@ -2558,7 +2558,7 @@ async function askLLM() {
     // Determine if this model uses client-side LLM (Puter.js/BYOK)
     const modelInfo = getModelInfo(model);
     const isPuterModel = modelInfo?.provider === 'puter';
-    const isByokModel = modelInfo && !modelInfo.available && MODE === 'online' && getByokKey(modelInfo.provider);
+    const isByokModel = modelInfo && !modelInfo.available && getByokKey(modelInfo.provider);
     const useServerLLM = FEATURES.server_llm && !isPuterModel && !isByokModel;
 
     const _callStart = performance.now();
@@ -2594,7 +2594,7 @@ async function askLLM() {
         if (toolCalls.length) resp.tool_calls = toolCalls;
       }
     } else {
-      // ── Client-side LLM (online mode: Puter.js or BYOK) ─────────────
+      // ── Client-side LLM (Puter.js or BYOK) ────────────────────────────
       const prompt = buildClientPrompt(currentState, historyForLLM, currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
       let rawContent;
       try {
@@ -3233,16 +3233,15 @@ async function loadModels() {
     }
     sel.appendChild(grp);
   }
-  // Unavailable models — in online mode these are usable via BYOK key
+  // Unavailable models — usable via BYOK key in any mode
   const unavail = modelsData.filter(m => !m.available);
   if (unavail.length) {
     const grp = document.createElement('optgroup');
-    grp.label = MODE === 'online' ? 'Bring Your Own Key' : 'Missing API key';
+    grp.label = 'Bring Your Own Key';
     for (const m of unavail) {
       const opt = document.createElement('option');
       opt.value = m.name;
-      opt.textContent = MODE === 'online' ? `${m.name} — ${m.price} (BYOK)` : `${m.name} (no key)`;
-      if (MODE !== 'online') opt.disabled = true;
+      opt.textContent = `${m.name} — ${m.price} (BYOK)`;
       grp.appendChild(opt);
     }
     sel.appendChild(grp);
@@ -3283,12 +3282,11 @@ async function loadModels() {
   // Add unavailable (BYOK) models
   if (unavail.length) {
     const grp = document.createElement('optgroup');
-    grp.label = MODE === 'online' ? 'Bring Your Own Key' : 'Missing API key';
+    grp.label = 'Bring Your Own Key';
     for (const m of unavail) {
       const opt = document.createElement('option');
       opt.value = m.name;
-      opt.textContent = MODE === 'online' ? `${m.name} — ${m.price} (BYOK)` : `${m.name} (no key)`;
-      if (MODE !== 'online') opt.disabled = true;
+      opt.textContent = `${m.name} — ${m.price} (BYOK)`;
       grp.appendChild(opt);
     }
     csel.appendChild(grp);
@@ -3325,12 +3323,11 @@ async function loadModels() {
   }
   if (unavail.length) {
     const grp = document.createElement('optgroup');
-    grp.label = MODE === 'online' ? 'Bring Your Own Key' : 'Missing API key';
+    grp.label = 'Bring Your Own Key';
     for (const m of unavail) {
       const opt = document.createElement('option');
       opt.value = m.name;
-      opt.textContent = MODE === 'online' ? `${m.name} — ${m.price} (BYOK)` : `${m.name} (no key)`;
-      if (MODE !== 'online') opt.disabled = true;
+      opt.textContent = `${m.name} — ${m.price} (BYOK)`;
       grp.appendChild(opt);
     }
     isel.appendChild(grp);

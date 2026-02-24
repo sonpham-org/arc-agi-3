@@ -46,7 +46,7 @@ FEATURES = {
     "copilot":       {"local": True,  "online": False},
     "server_llm":    {"local": True,  "online": False},
     "puter_js":      {"local": True,  "online": True},
-    "byok":          {"local": False, "online": True},
+    "byok":          {"local": True,  "online": True},
     "session_db":    {"local": True,  "online": True},
     "memory_md":     {"local": True,  "online": False},
 }
