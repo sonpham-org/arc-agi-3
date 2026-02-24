@@ -1507,7 +1507,7 @@ def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
     use_thinking = is_thinking_model and budget > 0
     config = genai.types.GenerateContentConfig(
         temperature=0.3,
-        max_output_tokens=16384 if use_thinking else 2048,
+        max_output_tokens=16384,
     )
     if is_thinking_model:
         config.thinking_config = genai.types.ThinkingConfig(
@@ -1622,7 +1622,7 @@ def _call_anthropic(model_name: str, prompt: str, image_b64: str | None = None) 
         json={
             "model": model_name, "system": SYSTEM_MSG,
             "messages": [{"role": "user", "content": content_blocks}],
-            "temperature": 0.3, "max_tokens": 2048,
+            "temperature": 0.3, "max_tokens": 16384,
         },
         timeout=90.0,
     )
@@ -1649,7 +1649,7 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
-    body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048}
+    body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 16384}
 
     # Retry with backoff on 429 (rate limit) — up to 3 attempts
     last_exc = None
@@ -1693,7 +1693,7 @@ def _call_cloudflare(model_name: str, prompt: str, image_b64: str | None = None)
     resp = httpx.post(
         url,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"messages": messages, "temperature": 0.3, "max_tokens": 2048},
+        json={"messages": messages, "temperature": 0.3, "max_tokens": 16384},
         timeout=90.0,
     )
     resp.raise_for_status()
