@@ -778,6 +778,7 @@
                     <span>Model Keys</span><span class="chevron">&#9654;</span>
                   </div>
                   <div class="opt-body">
+                    <div id="keysEmptyHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>
                     <div id="byokPrompt" style="display:none;margin-bottom:8px;">
                       <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model key</div>
                       <input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
@@ -1816,6 +1817,15 @@ const PROVIDER_LABELS = {
   cloudflare: 'Cloudflare', groq: 'Groq', mistral: 'Mistral', huggingface: 'Huggingface',
 };
 
+function updateKeysEmptyHint() {
+  const hint = document.getElementById('keysEmptyHint');
+  if (!hint) return;
+  const anyVisible = ['byokPrompt', 'compactByokPrompt', 'interruptByokPrompt'].some(
+    id => document.getElementById(id)?.style.display !== 'none'
+  );
+  hint.style.display = anyVisible ? 'none' : '';
+}
+
 function updateByokPrompt() {
   const prompt = document.getElementById('byokPrompt');
   const keyInput = document.getElementById('byokKeyInline');
@@ -1839,6 +1849,7 @@ function updateByokPrompt() {
   } else {
     prompt.style.display = 'none';
   }
+  updateKeysEmptyHint();
 }
 
 // Auto-save BYOK key on input
@@ -1941,6 +1952,7 @@ function updateCompactByokPrompt() {
   } else {
     prompt.style.display = 'none';
   }
+  updateKeysEmptyHint();
 }
 
 // Auto-save compact BYOK key on input
@@ -2000,6 +2012,7 @@ function updateInterruptByokPrompt() {
   } else {
     prompt.style.display = 'none';
   }
+  updateKeysEmptyHint();
 }
 
 // Auto-save interrupt BYOK key on input
