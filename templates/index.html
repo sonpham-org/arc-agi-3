@@ -769,6 +769,11 @@
                       <input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
                       <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
                     </div>
+                    <div id="interruptByokPrompt" style="display:none;margin-bottom:8px;">
+                      <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Interrupt model key</div>
+                      <input type="password" class="text-input" id="interruptByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
+                      <div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>
+                    </div>
                     {% if features.copilot %}
                     <div id="copilotNotAuth">
                       <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">GitHub Copilot</div>
@@ -1444,6 +1449,7 @@ document.getElementById('modelSelect').addEventListener('change', function() {
   updateModelCaps();
   updateByokPrompt();
   updateCompactByokPrompt(); // reasoning provider may have changed
+  updateInterruptByokPrompt();
   // Lazy-load Puter.js when a Puter model is selected
   const model = this.value;
   const isPuter = modelsData.some(m => m.name === model && m.provider === 'puter');
@@ -1507,6 +1513,65 @@ function updateCompactByokPrompt() {
 // Auto-save compact BYOK key on input
 document.addEventListener('input', (e) => {
   if (e.target.id !== 'compactByokKeyInline') return;
+  const provider = e.target.dataset.provider;
+  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
+});
+
+document.getElementById('interruptModelSelect').addEventListener('change', function() {
+  updateInterruptByokPrompt();
+});
+
+function updateInterruptByokPrompt() {
+  const prompt = document.getElementById('interruptByokPrompt');
+  const keyInput = document.getElementById('interruptByokKeyInline');
+  const val = document.getElementById('interruptModelSelect').value;
+
+  if (!val || val === 'auto' || val === 'auto-fastest' || val === 'same') {
+    prompt.style.display = 'none';
+    return;
+  }
+
+  const info = getModelInfo(val);
+  if (!info || info.provider === 'puter' || info.provider === 'copilot') {
+    prompt.style.display = 'none';
+    return;
+  }
+
+  const freeProviders = ['puter', 'copilot', 'ollama'];
+  const needsKey = MODE === 'online' ? !freeProviders.includes(info.provider) : !info.available;
+  if (needsKey) {
+    const reasoningInfo = getModelInfo(getSelectedModel());
+    const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
+    const reasoningKey = sameProvider ? (localStorage.getItem(`byok_key_${info.provider}`) || '') : '';
+
+    if (sameProvider && reasoningKey) {
+      const label = PROVIDER_LABELS[info.provider] || info.provider;
+      keyInput.placeholder = `Using ${label} key from reasoning model`;
+      keyInput.value = reasoningKey;
+      keyInput.disabled = true;
+      keyInput.style.opacity = '0.6';
+      keyInput.dataset.provider = '';
+      prompt.style.display = 'block';
+    } else {
+      const label = PROVIDER_LABELS[info.provider] || info.provider;
+      keyInput.placeholder = `Paste API key for ${label} here...`;
+      const saved = localStorage.getItem(`byok_key_${info.provider}`) || '';
+      keyInput.value = saved;
+      keyInput.disabled = false;
+      keyInput.style.opacity = '1';
+      keyInput.dataset.provider = info.provider;
+      prompt.style.display = 'block';
+    }
+    const sec = document.getElementById('secKeys');
+    if (sec && !sec.classList.contains('open')) sec.classList.add('open');
+  } else {
+    prompt.style.display = 'none';
+  }
+}
+
+// Auto-save interrupt BYOK key on input
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'interruptByokKeyInline') return;
   const provider = e.target.dataset.provider;
   if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
 });
