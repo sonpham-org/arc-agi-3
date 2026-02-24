@@ -2511,10 +2511,13 @@ async function askLLM() {
   const model = getSelectedModel();
   if (!model) { alert('Select or type a model name'); return; }
 
+  // Capture session at call time — used to discard stale responses
+  const _callSessionId = sessionId;
+  const _callSession = getActiveSession();
+
   document.getElementById('llmSpinner').style.display = 'inline';
   document.getElementById('topSpinner').style.display = 'inline';
-  const _llmSession = getActiveSession();
-  if (_llmSession) { _llmSession.waitingForLLM = true; renderSessionTabs(); }
+  if (_callSession) { _callSession.waitingForLLM = true; renderSessionTabs(); }
 
   try {
     let resp;
@@ -2531,6 +2534,10 @@ async function askLLM() {
     const needsCompact = callTrigger || tokenTrigger;
     const prevCompactCall = _compactSummaryAtCall;
     const compactBlock = needsCompact ? await buildCompactContext() : '';
+
+    // Guard: session changed during compact — discard
+    if (sessionId !== _callSessionId) { console.log('[askLLM] session changed during compact, discarding'); return null; }
+
     // Only show reasoning entry when a NEW compact was generated (not cached)
     if (compactBlock && _compactSummaryAtCall !== prevCompactCall) {
       logSessionEvent('compact', stepCount, { trigger: callTrigger ? 'calls' : 'tokens', call_count: llmCallCount });
@@ -2579,6 +2586,8 @@ async function askLLM() {
       };
       if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
       resp = await fetchJSON('/api/llm/ask', payload);
+      // Guard: session changed during LLM call — discard response
+      if (sessionId !== _callSessionId) { console.log('[askLLM] session changed during server LLM call, discarding'); return null; }
       // For non-Gemini server models: extract code blocks and run via server sandbox
       if (resp && !resp.error && resp.tools_active && !resp.tool_calls?.length && resp.raw) {
         const toolCalls = await executeToolBlocks(resp.raw, currentState.grid, previousGrid);
@@ -2600,6 +2609,8 @@ async function askLLM() {
         resp = { error: e.message, model: model };
         rawContent = null;
       }
+      // Guard: session changed during client LLM call — discard response
+      if (sessionId !== _callSessionId) { console.log('[askLLM] session changed during client LLM call, discarding'); return null; }
       if (rawContent) {
         resp = parseClientLLMResponse(rawContent, model);
         resp.tools_active = getToolsMode() === 'on';
@@ -2696,7 +2707,7 @@ async function askLLM() {
   } finally {
     document.getElementById('llmSpinner').style.display = 'none';
     document.getElementById('topSpinner').style.display = 'none';
-    if (_llmSession) { _llmSession.waitingForLLM = false; renderSessionTabs(); }
+    if (_callSession) { _callSession.waitingForLLM = false; renderSessionTabs(); }
   }
 }
 
@@ -2722,6 +2733,7 @@ function updateAutoBtn() {
 
 async function executePlan(plan, resp, entry, expected) {
   // Execute a multi-step plan, updating UI live
+  const _planSessionId = sessionId;  // guard against session switch mid-plan
   const planSteps = entry ? entry.querySelectorAll('.plan-step') : [];
   let consecutiveNoChange = 0;
   const levelsBefore = currentState.levels_completed || 0;
@@ -2752,9 +2764,15 @@ async function executePlan(plan, resp, entry, expected) {
     });
 
     stepCount++;
-    const body = { session_id: sessionId, action: step.action, data: step.data || {}, session_cost: sessionTotalTokens.cost };
+    const body = { session_id: _planSessionId, action: step.action, data: step.data || {}, session_cost: sessionTotalTokens.cost };
     if (resp?._clientSide) body.llm_response = (i === 0) ? resp : null;
     const data = await fetchJSON('/api/step', body);
+
+    // Guard: session changed mid-plan — stop executing further steps
+    if (sessionId !== _planSessionId) {
+      console.log('[executePlan] session changed mid-plan, aborting remaining steps');
+      break;
+    }
 
     if (data.error) {
       undoStack.pop();
@@ -2818,6 +2836,11 @@ async function executePlan(plan, resp, entry, expected) {
     await new Promise(r => setTimeout(r, 100));
   }
 
+  // Guard: if session changed mid-plan, don't touch UI or globals
+  if (sessionId !== _planSessionId) {
+    return { completed, total: plan.length, interrupted: true };
+  }
+
   // Detect level change and show indicator + auto-compact
   const levelsAfter = currentState.levels_completed || 0;
   if (levelsAfter > levelsBefore) {
@@ -2858,6 +2881,7 @@ async function executePlan(plan, resp, entry, expected) {
 
 async function executeOneAction(resp) {
   // Execute a single action from LLM response
+  const _actionSessionId = sessionId;
   const p = resp.parsed;
   const levelsBefore = currentState.levels_completed || 0;
   turnCounter++;
@@ -2871,9 +2895,11 @@ async function executeOneAction(resp) {
   });
 
   stepCount++;
-  const body = { session_id: sessionId, action: p.action, data: p.data || {}, session_cost: sessionTotalTokens.cost };
+  const body = { session_id: _actionSessionId, action: p.action, data: p.data || {}, session_cost: sessionTotalTokens.cost };
   if (resp?._clientSide) body.llm_response = resp;
   const data = await fetchJSON('/api/step', body);
+  // Guard: session changed during step execution
+  if (sessionId !== _actionSessionId) { console.log('[executeOneAction] session changed, discarding'); return null; }
   if (data.error) { undoStack.pop(); stepCount--; alert(data.error); return null; }
   moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
   recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
