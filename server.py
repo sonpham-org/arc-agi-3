@@ -2379,8 +2379,17 @@ def undo_step():
     if not snapshots:
         return jsonify({"error": "Nothing to undo"}), 400
 
+    count = min(int(payload.get("count", 1)), 50)
+
     with session_lock:
-        snapshot = snapshots.pop()
+        snapshot = None
+        for _ in range(count):
+            if not snapshots:
+                break
+            snapshot = snapshots.pop()
+
+    if snapshot is None:
+        return jsonify({"error": "Nothing to undo"}), 400
 
     restored_grid = snapshot["grid"]
     # We restore the grid and return the previous state to the UI.

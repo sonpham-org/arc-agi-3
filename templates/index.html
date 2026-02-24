@@ -57,10 +57,17 @@
 
   /* ── Canvas panel ────────────────────────────────────────────────────── */
   .canvas-panel { flex: 1; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; padding: 16px; position: relative; }
+    padding: 16px; position: relative; }
+  .canvas-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   #gameCanvas { image-rendering: pixelated; border: 2px solid var(--border); cursor: crosshair;
     max-width: 100%; max-height: 65vh; }
-  .controls { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .controls { margin-top: 24px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .controls-lockable.locked .controls-inner { filter: blur(2px) saturate(0.3); opacity: 0.4; pointer-events: none; }
+  .controls-inner { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .intervene-toggle { background: transparent; border: 1px solid var(--yellow); color: var(--yellow); padding: 4px 12px;
+    border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 11px; transition: all 0.15s; }
+  .intervene-toggle:hover { background: #d2992233; }
+  .intervene-toggle.active { background: var(--yellow); color: #000; font-weight: 600; }
   .dpad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 3px; }
   .dpad .btn { padding: 4px 10px; min-width: 0; font-size: 11px; }
   .dpad-empty { visibility: hidden; }
@@ -362,7 +369,7 @@
   .tab-dot-gameover { background: var(--red); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   .session-tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
-  .session-tab .tab-countdown { font-size: 10px; color: var(--yellow); font-weight: 600; }
+  .session-tab .tab-countdown { display: none; }
   .session-tab .tab-close { background: none; border: none; color: var(--text-dim);
     cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; flex-shrink: 0; }
   .session-tab .tab-close:hover { color: var(--red); }
@@ -383,8 +390,7 @@
   #emptyAppState .new-session-hero .hero-icon { font-size: 32px; margin-bottom: 8px; }
 
   /* ── Countdown display in reasoning ─────────────────────────────────── */
-  #countdownDisplay { text-align: center; padding: 6px; font-size: 12px; color: var(--yellow);
-    font-weight: 600; display: none; }
+  /* countdownDisplay removed */
 
   /* ── Browse Sessions view ──────────────────────────────────────────── */
   #browseView { display: none; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
@@ -519,6 +525,7 @@
           <input type="password" class="text-input" id="arcApiKey" placeholder="ARC-AGI-3 API Key" style="margin-bottom:4px;font-size:11px;">
           <button class="btn btn-primary" onclick="saveArcApiKey()" style="width:100%;font-size:10px;">Save API Key</button>
         </div>
+        <div class="canvas-center">
         <div id="emptyState" class="empty-state">
           Select a game from the sidebar to start.<br>
           Use keyboard arrows or click the grid.<br>
@@ -526,7 +533,9 @@
         </div>
         <canvas id="gameCanvas" width="512" height="512" style="display:none;"></canvas>
         <div id="coordTooltip" style="display:none;position:fixed;pointer-events:none;background:rgba(0,0,0,0.85);color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;font-family:monospace;z-index:1000;border:1px solid var(--border);"></div>
-        <div class="controls" id="controls" style="display:none;">
+        <div class="controls controls-lockable locked" id="controls" style="display:none;">
+          <button class="intervene-toggle" id="interveneBtn" onclick="toggleHumanLock()">&#128274; Intervene as Human</button>
+          <div class="controls-inner">
           <button class="btn btn-danger" onclick="doAction(0)">Reset <span class="kbd">R</span></button>
           <div class="dpad">
             <span class="dpad-empty"></span>
@@ -546,6 +555,7 @@
             <input type="checkbox" id="coordToggle" checked> Coords
           </label>
           <div id="noChangeMsg" style="display:none;"></div>
+          </div>
         </div>
         <!-- Replay scrubber (shown during session replay) -->
         <div class="replay-bar" id="replayBar" style="display:none;">
@@ -558,6 +568,7 @@
             <button class="btn btn-danger" onclick="closeReplay()" style="padding:4px 12px;">Close</button>
           </div>
         </div>
+        </div>
         <!-- Transport controls -->
         <div class="transport-strip" id="transportBar">
           <div class="transport-bar">
@@ -568,7 +579,7 @@
               onmouseenter="showTransportDesc('Call the agent once')"
               onmouseleave="clearTransportDesc()">&#9654; Agent Once</button>
             <button class="btn" onclick="undoStep()" id="undoBtn" disabled
-              onmouseenter="showTransportDesc('Undo last step')"
+              onmouseenter="showTransportDesc('Undo last turn')"
               onmouseleave="clearTransportDesc()">&#9198; Undo</button>
             <button class="btn" onclick="manualCompact()" id="compactBtn"
               onmouseenter="showTransportDesc('Summarize history to reduce prompt size')"
@@ -610,7 +621,7 @@
                       <div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model</div>
                       <select id="modelSelect"><option value="">Loading...</option></select>
                       <div class="model-caps" id="modelCaps"></div>
-                      <div id="modelEta" style="display:none; margin-top:4px; font-size:11px; color:var(--dim);"></div>
+                      <!-- modelEta removed -->
                       <div id="testResult" style="display:none; margin-top:4px; padding:4px 8px; border-radius:4px; font-size:11px;"></div>
                       <div id="byokPrompt" style="display:none;margin-top:6px;">
                         <input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">
@@ -827,7 +838,7 @@
 
           <!-- ── Reasoning subtab ── -->
           <div class="subtab-pane" id="subtabReasoning">
-            <div id="countdownDisplay"></div>
+            <!-- countdownDisplay removed -->
             <div class="reasoning-scroll" id="reasoningContent">
               <div class="empty-state" style="height:auto;font-size:12px;">
                 Start a game and enable LLM reasoning to see analysis here.
@@ -887,6 +898,8 @@ let autoPlaying = false;
 let action6Mode = false;
 let modelsData = [];  // {name, provider, capabilities, available}
 let undoStack = [];   // local undo snapshots (grid + state for each step)
+let humanLocked = true;  // human controls locked by default
+let turnCounter = 0;     // monotonic turn counter for undo grouping
 let apiMode = 'local';
 const clientId = 'client_' + Math.random().toString(36).slice(2, 10);
 
@@ -908,6 +921,7 @@ class SessionState {
     // Counters
     this.stepCount = 0;
     this.llmCallCount = 0;
+    this.turnCounter = 0;
     // History
     this.moveHistory = [];
     this.undoStack = [];
@@ -961,6 +975,7 @@ function saveSessionToState() {
   s.currentState = currentState;
   s.stepCount = stepCount;
   s.llmCallCount = llmCallCount;
+  s.turnCounter = turnCounter;
   s.moveHistory = moveHistory;
   s.undoStack = undoStack;
   s.llmObservations = llmObservations;
@@ -992,6 +1007,7 @@ function restoreSessionFromState(s) {
   currentState = s.currentState;
   stepCount = s.stepCount;
   llmCallCount = s.llmCallCount;
+  turnCounter = s.turnCounter;
   moveHistory = s.moveHistory;
   undoStack = s.undoStack;
   llmObservations = s.llmObservations;
@@ -1035,7 +1051,6 @@ function restoreSessionFromState(s) {
   updateAutoBtn();
   updatePanelBlur();
   updateGameListLock();
-  updateModelEta();
 
   if (action6Mode) canvas.style.cursor = 'crosshair';
   else canvas.style.cursor = 'default';
@@ -1388,7 +1403,6 @@ function updateModelCaps() {
 document.getElementById('modelSelect').addEventListener('change', function() {
   updateModelCaps();
   updateByokPrompt();
-  updateModelEta();
   updateCompactByokPrompt(); // reasoning provider may have changed
   // Lazy-load Puter.js when a Puter model is selected
   const model = this.value;
@@ -1455,20 +1469,7 @@ document.addEventListener('input', (e) => {
   if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
 });
 
-function updateModelEta() {
-  const el = document.getElementById('modelEta');
-  const model = document.getElementById('modelSelect').value;
-  if (!model) { el.style.display = 'none'; return; }
-  const s = getActiveSession();
-  if (s && s.callDurations.length > 0) {
-    const avg = s.avgCallDuration / 1000;
-    el.textContent = `~${avg.toFixed(1)}s per step (based on ${s.callDurations.length} call${s.callDurations.length > 1 ? 's' : ''})`;
-    el.style.display = '';
-  } else {
-    el.textContent = 'Step time estimate will appear after first call';
-    el.style.display = '';
-  }
-}
+function updateModelEta() { /* removed — countdown/ETA disabled */ }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RENDERING
@@ -1722,6 +1723,7 @@ async function startGame(gameId) {
   sessionId = data.session_id;
   stepCount = 0;
   llmCallCount = 0;
+  turnCounter = 0;
   _cachedCompactSummary = '';
   _compactSummaryAtCall = 0;
   moveHistory = [];
@@ -1817,11 +1819,35 @@ function showNoChangeIfSame(prevGrid, newGrid) {
   }
 }
 
-function logHumanAction(actionId, actionData, changeMap) {
+function toggleHumanLock() {
+  humanLocked = !humanLocked;
+  const ctrl = document.getElementById('controls');
+  const btn = document.getElementById('interveneBtn');
+  if (humanLocked) {
+    ctrl.classList.add('locked');
+    btn.classList.remove('active');
+    btn.innerHTML = '&#128274; Intervene as Human';
+  } else {
+    ctrl.classList.remove('locked');
+    btn.classList.add('active');
+    btn.innerHTML = '&#128275; Controls Unlocked';
+  }
+}
+
+function lockHumanControls() {
+  humanLocked = true;
+  const ctrl = document.getElementById('controls');
+  const btn = document.getElementById('interveneBtn');
+  if (ctrl) ctrl.classList.add('locked');
+  if (btn) { btn.classList.remove('active'); btn.innerHTML = '&#128274; Intervene as Human'; }
+}
+
+function logHumanAction(actionId, actionData, changeMap, turnId) {
   const content = document.getElementById('reasoningContent');
   if (content.querySelector('.empty-state')) content.innerHTML = '';
   const entry = document.createElement('div');
   entry.className = 'reasoning-entry';
+  if (turnId) entry.setAttribute('data-turn-id', turnId);
   const ci = changeMap?.change_count > 0 ? ` | ${changeMap.change_count} cells changed` : '';
   const coordStr = actionData?.x !== undefined ? ` at (${actionData.x}, ${actionData.y})` : '';
   entry.innerHTML = `
@@ -1833,25 +1859,29 @@ function logHumanAction(actionId, actionData, changeMap) {
 }
 
 async function doAction(actionId, isClick) {
+  if (humanLocked) return;
   if (!sessionId) return;
   if (isClick || actionId === 6) {
     action6Mode = true; canvas.style.cursor = 'crosshair'; canvas.title = 'Click grid for ACTION6';
     return;
   }
   // Save undo snapshot
+  turnCounter++;
+  const currentTurnId = turnCounter;
   undoStack.push({
     grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
     state: currentState.state,
     levels_completed: currentState.levels_completed,
     stepCount: stepCount,
+    turnId: currentTurnId,
   });
   stepCount++;
   const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : null;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: actionId, data: {}, session_cost: sessionTotalTokens.cost });
   if (data.error) { undoStack.pop(); alert(data.error); return; }
-  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
+  moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
   recordStepForPersistence(actionId, {}, data.grid, data.change_map, null);
-  logHumanAction(actionId, {}, data.change_map);
+  logHumanAction(actionId, {}, data.change_map, currentTurnId);
   updateUI(data);
   showNoChangeIfSame(prevGrid, data.grid);
   updateUndoBtn();
@@ -1859,24 +1889,28 @@ async function doAction(actionId, isClick) {
 }
 
 canvas.addEventListener('click', async (e) => {
+  if (humanLocked) return;
   if (!action6Mode || !sessionId) return;
   const rect = canvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - rect.left) * 64 / canvas.clientWidth);
   const y = Math.floor((e.clientY - rect.top) * 64 / canvas.clientHeight);
   // Save undo snapshot
+  turnCounter++;
+  const currentTurnId = turnCounter;
   undoStack.push({
     grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
     state: currentState.state,
     levels_completed: currentState.levels_completed,
     stepCount: stepCount,
+    turnId: currentTurnId,
   });
   stepCount++;
   const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : null;
   const data = await fetchJSON('/api/step', { session_id: sessionId, action: 6, data: { x, y }, session_cost: sessionTotalTokens.cost });
   if (data.error) { undoStack.pop(); alert(data.error); return; }
-  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
+  moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
   recordStepForPersistence(6, { x, y }, data.grid, data.change_map, null);
-  logHumanAction(6, { x, y }, data.change_map);
+  logHumanAction(6, { x, y }, data.change_map, currentTurnId);
   updateUI(data);
   showNoChangeIfSame(prevGrid, data.grid);
   updateUndoBtn();
@@ -1887,11 +1921,27 @@ canvas.addEventListener('click', async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (!sessionId) return;
+  if (humanLocked) return;
   // Don't capture keyboard when user is interacting with inputs/settings
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   const map = {'ArrowUp':1,'ArrowDown':2,'ArrowLeft':3,'ArrowRight':4,'w':1,'s':2,'a':3,'d':4,'z':5,'x':7,'r':0};
   if (map[e.key] !== undefined) { e.preventDefault(); doAction(map[e.key]); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WARN BEFORE LEAVING (active session protection)
+// ═══════════════════════════════════════════════════════════════════════════
+
+window.addEventListener('beforeunload', (e) => {
+  // Warn if any session has steps in progress
+  const hasActiveSession = sessionId && stepCount > 0 && currentState.state === 'NOT_FINISHED';
+  const hasAutoplay = autoPlaying;
+  if (hasActiveSession || hasAutoplay) {
+    e.preventDefault();
+    // Modern browsers ignore custom text but require returnValue to be set
+    e.returnValue = '';
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2481,6 +2531,11 @@ async function executePlan(plan, resp, entry) {
   const levelsBefore = currentState.levels_completed || 0;
   let completed = 0;
 
+  // Assign a turn ID for the entire plan
+  turnCounter++;
+  const currentTurnId = turnCounter;
+  if (entry) entry.setAttribute('data-turn-id', currentTurnId);
+
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
     if (!autoPlaying && completed > 0) break; // allow stop during auto-play plans
@@ -2497,6 +2552,7 @@ async function executePlan(plan, resp, entry) {
       state: currentState.state,
       levels_completed: currentState.levels_completed,
       stepCount: stepCount,
+      turnId: currentTurnId,
     });
 
     stepCount++;
@@ -2513,7 +2569,7 @@ async function executePlan(plan, resp, entry) {
       break;
     }
 
-    moveHistory.push({ step: stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
+    moveHistory.push({ step: stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
     recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null);
     updateUI(data);
     updateUndoBtn();
@@ -2591,11 +2647,14 @@ async function executeOneAction(resp) {
   // Execute a single action from LLM response
   const p = resp.parsed;
   const levelsBefore = currentState.levels_completed || 0;
+  turnCounter++;
+  const currentTurnId = turnCounter;
   undoStack.push({
     grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
     state: currentState.state,
     levels_completed: currentState.levels_completed,
     stepCount: stepCount,
+    turnId: currentTurnId,
   });
 
   stepCount++;
@@ -2603,7 +2662,7 @@ async function executeOneAction(resp) {
   if (resp?._clientSide) body.llm_response = resp;
   const data = await fetchJSON('/api/step', body);
   if (data.error) { undoStack.pop(); stepCount--; alert(data.error); return null; }
-  moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map });
+  moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
   recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
   updateUI(data);
   updateUndoBtn();
@@ -2639,6 +2698,7 @@ async function executeOneAction(resp) {
 async function stepOnce() {
   if (!sessionId) { alert('Start a game first'); return; }
   if (currentState.state !== 'NOT_FINISHED') return;
+  lockHumanControls();
   // Stop blink guide
   const _ab = document.getElementById('autoPlayBtn');
   if (_ab) _ab.classList.remove('btn-blink');
@@ -2664,7 +2724,7 @@ async function toggleAutoPlay() {
     autoPlaying = false;
     updateAutoBtn();
     const s = getActiveSession();
-    if (s) { s.autoPlaying = false; stopCountdown(s); }
+    if (s) { s.autoPlaying = false; }
     renderSessionTabs();
     return;
   }
@@ -2676,6 +2736,7 @@ async function toggleAutoPlay() {
 
   const mySessionId = sessionId; // capture for guard
   autoPlaying = true;
+  lockHumanControls();
   updateAutoBtn();
   const s = getActiveSession();
   if (s) {
@@ -2695,13 +2756,10 @@ async function toggleAutoPlay() {
     // Guard: stop if user switched away from this session
     if (activeSessionId !== mySessionId) { autoPlaying = false; break; }
 
-    // Start countdown before LLM call
-    if (s) startCountdown(s);
     const _callStart = performance.now();
     const resp = await askLLM();
-    if (s) {
-      stopCountdown(s);
-      if (resp && resp.call_duration_ms) { s.callDurations.push(resp.call_duration_ms); updateModelEta(); }
+    if (s && resp && resp.call_duration_ms) {
+      s.callDurations.push(resp.call_duration_ms);
     }
 
     if (!autoPlaying) break;
@@ -2734,7 +2792,7 @@ async function toggleAutoPlay() {
     }
   }
   autoPlaying = false;
-  if (s) { s.autoPlaying = false; stopCountdown(s); }
+  if (s) { s.autoPlaying = false; }
   updateAutoBtn();
   renderSessionTabs();
 }
@@ -2749,30 +2807,56 @@ async function resetSession() {
 async function undoStep() {
   if (!sessionId || undoStack.length === 0) return;
 
-  const snapshot = undoStack.pop();
-  const data = await fetchJSON('/api/undo', { session_id: sessionId });
+  // Find the turnId of the top entry and count all entries with that turnId
+  const targetTurnId = undoStack[undoStack.length - 1].turnId;
+  let stepsToUndo = 0;
+  if (targetTurnId !== undefined) {
+    for (let i = undoStack.length - 1; i >= 0; i--) {
+      if (undoStack[i].turnId === targetTurnId) stepsToUndo++;
+      else break;
+    }
+  } else {
+    stepsToUndo = 1; // fallback for entries without turnId
+  }
+
+  // Pop all entries for this turn, keeping the earliest snapshot for state restore
+  let earliestSnapshot = null;
+  for (let i = 0; i < stepsToUndo; i++) {
+    earliestSnapshot = undoStack.pop();
+    if (moveHistory.length > 0) moveHistory.pop();
+    if (sessionStepsBuffer.length > 0) sessionStepsBuffer.pop();
+  }
+
+  // Single server call with count
+  const data = await fetchJSON('/api/undo', { session_id: sessionId, count: stepsToUndo });
   if (data.error) {
-    // Even if server undo fails, restore local state from our stack
     console.warn('Server undo failed:', data.error);
   }
 
-  // Restore local state
-  stepCount = snapshot.stepCount;
-  if (moveHistory.length > 0) moveHistory.pop();
+  // Restore local state from earliest snapshot
+  stepCount = earliestSnapshot.stepCount;
 
-  // Use server-returned grid if available, otherwise fall back to snapshot
-  const restoredGrid = (data && !data.error) ? data.grid : snapshot.grid;
+  const restoredGrid = (data && !data.error) ? data.grid : earliestSnapshot.grid;
   currentState.grid = restoredGrid;
-  currentState.state = snapshot.state;
-  currentState.levels_completed = snapshot.levels_completed;
+  currentState.state = earliestSnapshot.state;
+  currentState.levels_completed = earliestSnapshot.levels_completed;
   currentChangeMap = null;
   renderGrid(restoredGrid);
 
+  // Remove reasoning entries for this turn
+  if (targetTurnId !== undefined) {
+    document.querySelectorAll(`.reasoning-entry[data-turn-id="${targetTurnId}"]`).forEach(el => el.remove());
+  } else {
+    // Fallback: remove the topmost reasoning entry
+    const topEntry = document.querySelector('#reasoningContent .reasoning-entry');
+    if (topEntry) topEntry.remove();
+  }
+
   document.getElementById('stepCounter').textContent = `Step ${stepCount}`;
   const statusEl = document.getElementById('gameStatus');
-  statusEl.textContent = snapshot.state;
-  statusEl.className = 'status status-' + snapshot.state;
-  document.getElementById('levelInfo').textContent = `Level ${snapshot.levels_completed}/${currentState.win_levels}`;
+  statusEl.textContent = earliestSnapshot.state;
+  statusEl.className = 'status status-' + earliestSnapshot.state;
+  document.getElementById('levelInfo').textContent = `Level ${earliestSnapshot.levels_completed}/${currentState.win_levels}`;
 
   updateUndoBtn();
 }
@@ -3961,9 +4045,22 @@ async function resumeSession(sid) {
     sessionStepsBuffer = [];
     llmObservations = [];
     llmCallCount = 0;
+    turnCounter = 0;
     sessionTotalTokens = { input: 0, output: 0, cost: 0 };
     const steps = data.steps || [];
+    let _rebuildPlanRemaining = 0;
     for (const s of steps) {
+      // Rebuild turnIds: LLM leader starts new turn, followers inherit, human gets own turn
+      const llm = s.llm_response;
+      if (llm && llm.parsed) {
+        turnCounter++;
+        _rebuildPlanRemaining = ((llm.parsed.plan && Array.isArray(llm.parsed.plan)) ? llm.parsed.plan.length : 1) - 1;
+      } else if (_rebuildPlanRemaining > 0) {
+        _rebuildPlanRemaining--;
+      } else {
+        turnCounter++; // human action
+      }
+      const _turnId = turnCounter;
       // Rebuild moveHistory (with per-step game stats from server replay)
       moveHistory.push({
         step: s.step_num,
@@ -3972,6 +4069,7 @@ async function resumeSession(sid) {
         levels: s.levels_completed || 0,
         grid: s.grid || null,
         change_map: s.change_map || null,
+        turnId: _turnId,
       });
       // Rebuild sessionStepsBuffer
       sessionStepsBuffer.push({
@@ -3984,7 +4082,6 @@ async function resumeSession(sid) {
         timestamp: s.timestamp || 0,
       });
       // Rebuild llmObservations from LLM responses
-      const llm = s.llm_response;
       if (llm && llm.parsed) {
         llmCallCount++;
         llmObservations.push({
@@ -4081,9 +4178,21 @@ async function branchFromStep(stepNum) {
     sessionStepsBuffer = [];
     llmObservations = [];
     llmCallCount = 0;
+    turnCounter = 0;
     sessionTotalTokens = { input: 0, output: 0, cost: 0 };
     const steps = data.steps || [];
+    let _rebuildPlanRemaining = 0;
     for (const s of steps) {
+      const llm = s.llm_response;
+      if (llm && llm.parsed) {
+        turnCounter++;
+        _rebuildPlanRemaining = ((llm.parsed.plan && Array.isArray(llm.parsed.plan)) ? llm.parsed.plan.length : 1) - 1;
+      } else if (_rebuildPlanRemaining > 0) {
+        _rebuildPlanRemaining--;
+      } else {
+        turnCounter++;
+      }
+      const _turnId = turnCounter;
       moveHistory.push({
         step: s.step_num,
         action: s.action,
@@ -4091,6 +4200,7 @@ async function branchFromStep(stepNum) {
         levels: s.levels_completed || 0,
         grid: s.grid || null,
         change_map: s.change_map || null,
+        turnId: _turnId,
       });
       sessionStepsBuffer.push({
         step_num: s.step_num,
@@ -4101,7 +4211,6 @@ async function branchFromStep(stepNum) {
         llm_response: s.llm_response || null,
         timestamp: s.timestamp || 0,
       });
-      const llm = s.llm_response;
       if (llm && llm.parsed) {
         llmCallCount++;
         llmObservations.push({
@@ -4185,21 +4294,33 @@ async function branchHere() {
     sessionStepsBuffer = [];
     llmObservations = [];
     llmCallCount = 0;
+    turnCounter = 0;
     sessionTotalTokens = { input: 0, output: 0, cost: 0 };
     const steps = data.steps || [];
+    let _rebuildPlanRemaining = 0;
     for (const s of steps) {
+      const llm = s.llm_response;
+      if (llm && llm.parsed) {
+        turnCounter++;
+        _rebuildPlanRemaining = ((llm.parsed.plan && Array.isArray(llm.parsed.plan)) ? llm.parsed.plan.length : 1) - 1;
+      } else if (_rebuildPlanRemaining > 0) {
+        _rebuildPlanRemaining--;
+      } else {
+        turnCounter++;
+      }
+      const _turnId = turnCounter;
       moveHistory.push({
         step: s.step_num, action: s.action,
         result_state: s.result_state || 'NOT_FINISHED',
         levels: s.levels_completed || 0,
         grid: s.grid || null, change_map: s.change_map || null,
+        turnId: _turnId,
       });
       sessionStepsBuffer.push({
         step_num: s.step_num, action: s.action, data: s.data || {},
         grid: s.grid || null, change_map: s.change_map || null,
         llm_response: s.llm_response || null, timestamp: s.timestamp || 0,
       });
-      const llm = s.llm_response;
       if (llm && llm.parsed) {
         llmCallCount++;
         llmObservations.push({
@@ -4640,6 +4761,7 @@ function createNewSession() {
   currentState = {};
   stepCount = 0;
   llmCallCount = 0;
+  turnCounter = 0;
   moveHistory = [];
   undoStack = [];
   llmObservations = [];
@@ -4702,8 +4824,6 @@ function closeSession(id) {
   // Stop autoplay if running
   if (s.autoPlaying) { s.autoPlaying = false; }
   if (id === activeSessionId && autoPlaying) { autoPlaying = false; updateAutoBtn(); }
-  // Clear countdown
-  if (s.countdownInterval) { clearInterval(s.countdownInterval); s.countdownInterval = null; }
   sessions.delete(id);
   // Switch to another session or show empty
   if (id === activeSessionId) {
@@ -4755,43 +4875,8 @@ function updateEmptyAppState() {
 
 // ── Countdown timer functions ────────────────────────────────────────────
 
-function startCountdown(s) {
-  stopCountdown(s);
-  const est = s.avgCallDuration;
-  s.countdownTarget = performance.now() + est;
-  const update = () => {
-    const remaining = Math.max(0, s.countdownTarget - performance.now());
-    const sec = (remaining / 1000).toFixed(1);
-    // Update tab countdown
-    const tabEl = document.getElementById('tabCountdown_' + (s.sessionId || activeSessionId));
-    if (tabEl) tabEl.textContent = remaining > 0 ? `${sec}s` : '';
-    // Update reasoning countdown (only for active session)
-    if ((s.sessionId || activeSessionId) === activeSessionId) {
-      const cdEl = document.getElementById('countdownDisplay');
-      if (cdEl) {
-        if (remaining > 0) {
-          cdEl.textContent = `Waiting for LLM response... ~${sec}s`;
-          cdEl.style.display = 'block';
-        } else {
-          cdEl.textContent = 'Waiting for LLM response...';
-        }
-      }
-    }
-  };
-  update();
-  s.countdownInterval = setInterval(update, 200);
-}
-
-function stopCountdown(s) {
-  if (s.countdownInterval) {
-    clearInterval(s.countdownInterval);
-    s.countdownInterval = null;
-  }
-  const tabEl = document.getElementById('tabCountdown_' + (s.sessionId || activeSessionId));
-  if (tabEl) tabEl.textContent = '';
-  const cdEl = document.getElementById('countdownDisplay');
-  if (cdEl) { cdEl.textContent = ''; cdEl.style.display = 'none'; }
-}
+function startCountdown(s) { /* removed — countdown disabled */ }
+function stopCountdown(s) { /* removed — countdown disabled */ }
 
 // ── localStorage session index ───────────────────────────────────────────
 
