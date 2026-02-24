@@ -3189,6 +3189,95 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SCENE EDITOR — fd01 pixel editor
+# ═══════════════════════════════════════════════════════════════════════════
+
+import importlib.util as _importlib_util
+import numpy as _np
+
+_FD01_PATH = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "fd01.py"
+_CUSTOM_SCENES_FILE = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "custom_scenes.json"
+
+
+def _load_fd01_module():
+    """Import fd01.py as a module to access its draw functions and constants."""
+    spec = _importlib_util.spec_from_file_location("fd01_editor", str(_FD01_PATH))
+    mod = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _read_custom_scenes() -> dict:
+    try:
+        if _CUSTOM_SCENES_FILE.exists():
+            return json.loads(_CUSTOM_SCENES_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _write_custom_scenes(data: dict):
+    _CUSTOM_SCENES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CUSTOM_SCENES_FILE.write_text(json.dumps(data))
+
+
+@app.route("/draw")
+def draw_editor():
+    return render_template("draw.html", color_map=COLOR_MAP, color_names=COLOR_NAMES)
+
+
+@app.route("/api/draw/scene/<int:level>")
+def get_draw_scene(level):
+    if level < 0 or level >= 5:
+        return jsonify({"error": "Invalid level"}), 400
+    custom = _read_custom_scenes()
+    if str(level) in custom:
+        fd01 = _load_fd01_module()
+        diffs = [{"dx": d[0], "dy": d[1], "color": d[2], "side": d[3]}
+                 for d in fd01.DIFFS[level]]
+        return jsonify({"pixels": custom[str(level)],
+                        "width": 30, "height": 62,
+                        "custom": True, "diffs": diffs})
+    fd01 = _load_fd01_module()
+    img = _np.zeros((fd01.IMG_H, fd01.IMG_W), dtype=_np.int16)
+    fd01.SCENES[level](img)
+    diffs = [{"dx": d[0], "dy": d[1], "color": d[2], "side": d[3]}
+             for d in fd01.DIFFS[level]]
+    return jsonify({"pixels": img.tolist(),
+                    "width": fd01.IMG_W, "height": fd01.IMG_H,
+                    "custom": False, "diffs": diffs})
+
+
+@app.route("/api/draw/save", methods=["POST"])
+def save_draw_scene():
+    data = request.get_json(force=True)
+    level = data.get("level")
+    pixels = data.get("pixels")
+    if level is None or pixels is None:
+        return jsonify({"error": "level and pixels required"}), 400
+    custom = _read_custom_scenes()
+    custom[str(level)] = pixels
+    _write_custom_scenes(custom)
+    global arcade_instance
+    arcade_instance = None   # force reload on next game start
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/draw/reset", methods=["POST"])
+def reset_draw_scene():
+    data = request.get_json(force=True)
+    level = data.get("level")
+    if level is None:
+        return jsonify({"error": "level required"}), 400
+    custom = _read_custom_scenes()
+    custom.pop(str(level), None)
+    _write_custom_scenes(custom)
+    global arcade_instance
+    arcade_instance = None
+    return jsonify({"status": "ok"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # MAIN — dual-port serving
 # ═══════════════════════════════════════════════════════════════════════════
 

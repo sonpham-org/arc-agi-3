@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scene Editor — Find the Difference</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2129; --border: #30363d;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono','Cascadia Code','Fira Code',monospace; font-size: 13px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .header-title { font-size: 13px; color: var(--accent); font-weight: 600; flex: 1; }
+  .btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-family: inherit; transition: background 0.15s; white-space: nowrap; }
+  .btn:hover { background: var(--border); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: #1f6feb; border-color: #388bfd; color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: #388bfd; }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: #f8514918; }
+
+  /* ── Layout ── */
+  .layout { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar { width: 192px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 0; overflow-y: auto; flex-shrink: 0; }
+  .sidebar-section { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .sidebar-section h3 { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+
+  /* Level tabs */
+  .level-tab { padding: 5px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; border: 1px solid transparent; margin-bottom: 3px; transition: background 0.12s; }
+  .level-tab:hover { background: var(--border); }
+  .level-tab.active { background: #1f6feb22; border-color: var(--accent); color: var(--accent); }
+
+  /* Tool buttons */
+  .tools { display: flex; gap: 6px; }
+  .tool-btn { flex: 1; padding: 7px 4px; border-radius: 5px; cursor: pointer; font-size: 16px; text-align: center; border: 1px solid var(--border); background: transparent; color: var(--text); transition: background 0.12s; }
+  .tool-btn:hover { background: var(--border); }
+  .tool-btn.active { background: #1f6feb33; border-color: var(--accent); }
+
+  /* Palette */
+  .palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .swatch { aspect-ratio: 1; border-radius: 4px; cursor: pointer; border: 2px solid transparent; position: relative; transition: transform 0.1s; }
+  .swatch:hover { transform: scale(1.15); z-index: 1; }
+  .swatch.selected { border-color: #fff; box-shadow: 0 0 0 1px var(--accent); }
+  .swatch-tooltip { display: none; position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%); background: #000d; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 10px; white-space: nowrap; pointer-events: none; z-index: 20; }
+  .swatch:hover .swatch-tooltip { display: block; }
+
+  /* Color info */
+  .color-info { font-size: 11px; margin-top: 6px; color: var(--text-dim); }
+  .color-preview { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 4px; border: 1px solid var(--border); }
+
+  /* Diff overlay toggle */
+  .toggle-row { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
+  .toggle-row input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+
+  /* Bottom status */
+  .sidebar-bottom { margin-top: auto; padding: 8px 12px; border-top: 1px solid var(--border); }
+  .status-bar { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+  .custom-badge { display: inline-block; font-size: 10px; color: var(--green); background: #3fb95018; border: 1px solid #3fb95055; border-radius: 10px; padding: 1px 6px; margin-left: 6px; }
+
+  /* ── Canvas area ── */
+  .canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .canvas-toolbar { padding: 7px 14px; background: var(--surface2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .canvas-toolbar span { font-size: 12px; color: var(--text-dim); }
+  .canvas-scroll { flex: 1; overflow: auto; padding: 20px; display: flex; align-items: flex-start; justify-content: flex-start; }
+  canvas { cursor: crosshair; image-rendering: pixelated; image-rendering: crisp-edges; border: 1px solid var(--border); display: block; }
+  canvas.fill-cursor { cursor: cell; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <span class="header-title">Scene Editor — Find the Difference (fd01)</span>
+  <a href="/" class="btn">← Back to Game</a>
+  <button class="btn" id="undoBtn" onclick="undo()" title="Ctrl+Z">↩ Undo</button>
+  <button class="btn danger" onclick="resetLevel()">↺ Reset to Default</button>
+  <button class="btn primary" id="saveBtn" onclick="save()">Save</button>
+</div>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <div class="sidebar-section">
+      <h3>Level</h3>
+      <div id="levelTabs"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Tool</h3>
+      <div class="tools">
+        <button class="tool-btn active" id="toolDraw" onclick="setTool('draw')" title="Pencil (D)">✏️</button>
+        <button class="tool-btn" id="toolFill" onclick="setTool('fill')" title="Bucket fill (F)">🪣</button>
+        <button class="tool-btn" id="toolPick" onclick="setTool('pick')" title="Color pick (E)">🔬</button>
+      </div>
+      <div style="font-size:10px; color:var(--text-dim); margin-top:5px;">D = draw &nbsp; F = fill &nbsp; E = pick</div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Color</h3>
+      <div class="palette" id="palette"></div>
+      <div class="color-info">
+        <span class="color-preview" id="colorPreview"></span>
+        <span id="colorLabel">Black</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Overlays</h3>
+      <label class="toggle-row">
+        <input type="checkbox" id="showDiffs" onchange="render()" checked>
+        Show diff markers
+      </label>
+      <div style="font-size:10px; color:var(--text-dim); margin-top:4px;">
+        White = right panel<br>Black = left panel
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="status-bar" id="statusBar">Hover over canvas</div>
+    </div>
+
+  </div>
+
+  <!-- Canvas area -->
+  <div class="canvas-area">
+    <div class="canvas-toolbar">
+      <button class="btn" onclick="zoom(-1)" title="Zoom out">−</button>
+      <span id="zoomLabel">12×</span>
+      <button class="btn" onclick="zoom(1)" title="Zoom in">+</button>
+      <span style="margin-left:4px;">30 × 62 pixels</span>
+      <span id="customBadge" style="display:none" class="custom-badge">CUSTOM</span>
+    </div>
+    <div class="canvas-scroll">
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const W = 30, H = 62;
+const LEVEL_NAMES = [
+  'Level 1 — House', 'Level 2 — Ocean',
+  'Level 3 — Space', 'Level 4 — Forest', 'Level 5 — City'
+];
+const COLOR_MAP   = {{ color_map | tojson }};
+const COLOR_NAMES = {{ color_names | tojson }};
+const ZOOM_STEPS  = [4, 6, 8, 10, 12, 16, 20, 28];
+
+// ── State ─────────────────────────────────────────────────────────────────
+let pixels      = [];
+let history     = [];       // undo stack
+let diffs       = [];       // current level's diff markers
+let currentLevel = 0;
+let selectedColor = 5;
+let tool        = 'draw';
+let PIXEL_SIZE  = 12;
+let isDrawing   = false;
+let isCustom    = {};
+
+// ── Init ──────────────────────────────────────────────────────────────────
+function init() {
+  buildLevelTabs();
+  buildPalette();
+  setupCanvas();
+  loadLevel(0);
+}
+
+function buildLevelTabs() {
+  const el = document.getElementById('levelTabs');
+  LEVEL_NAMES.forEach((name, i) => {
+    const div = document.createElement('div');
+    div.className = 'level-tab' + (i === 0 ? ' active' : '');
+    div.id = `tab${i}`;
+    div.textContent = name;
+    div.onclick = () => switchLevel(i);
+    el.appendChild(div);
+  });
+}
+
+function buildPalette() {
+  const el = document.getElementById('palette');
+  for (let c = 0; c < 16; c++) {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (c === selectedColor ? ' selected' : '');
+    sw.style.background = COLOR_MAP[c];
+    sw.id = `swatch${c}`;
+    sw.onclick = () => selectColor(c);
+    const tip = document.createElement('span');
+    tip.className = 'swatch-tooltip';
+    tip.textContent = `${c}: ${COLOR_NAMES[c]}`;
+    sw.appendChild(tip);
+    el.appendChild(sw);
+  }
+  updateColorInfo();
+}
+
+function setupCanvas() {
+  const canvas = document.getElementById('canvas');
+  resizeCanvas();
+
+  canvas.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const {x, y} = cellAt(e);
+    if (outOfBounds(x, y)) return;
+    if (tool === 'draw') {
+      isDrawing = true;
+      pushHistory();
+      setPixel(x, y, selectedColor);
+      renderCell(x, y);
+    } else if (tool === 'fill') {
+      pushHistory();
+      floodFill(x, y, selectedColor);
+      render();
+    } else if (tool === 'pick') {
+      selectColor(pixels[y][x]);
+    }
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    const {x, y} = cellAt(e);
+    if (isDrawing && tool === 'draw' && !outOfBounds(x, y)) {
+      setPixel(x, y, selectedColor);
+      renderCell(x, y);
+    }
+    if (!outOfBounds(x, y)) {
+      const c = pixels[y][x];
+      document.getElementById('statusBar').textContent =
+        `x=${x}  y=${y}  →  ${c}: ${COLOR_NAMES[c]}`;
+    }
+  });
+
+  canvas.addEventListener('mouseup',    () => { isDrawing = false; });
+  canvas.addEventListener('mouseleave', () => { isDrawing = false; document.getElementById('statusBar').textContent = 'Hover over canvas'; });
+
+  // Right-click = eyedropper
+  canvas.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const {x, y} = cellAt(e);
+    if (!outOfBounds(x, y)) selectColor(pixels[y][x]);
+  });
+
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === 'd') setTool('draw');
+      if (e.key === 'f') setTool('fill');
+      if (e.key === 'e') setTool('pick');
+    }
+  });
+}
+
+// ── Level loading ─────────────────────────────────────────────────────────
+function switchLevel(i) {
+  document.querySelectorAll('.level-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab${i}`).classList.add('active');
+  currentLevel = i;
+  history = [];
+  loadLevel(i);
+}
+
+function loadLevel(level) {
+  fetch(`/api/draw/scene/${level}`)
+    .then(r => r.json())
+    .then(data => {
+      pixels = data.pixels;
+      diffs  = data.diffs || [];
+      isCustom[level] = data.custom || false;
+      updateCustomBadge();
+      render();
+    });
+}
+
+// ── Pixel helpers ─────────────────────────────────────────────────────────
+function cellAt(e) {
+  const canvas = document.getElementById('canvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = (W * PIXEL_SIZE) / rect.width;
+  const scaleY = (H * PIXEL_SIZE) / rect.height;
+  return {
+    x: Math.floor((e.clientX - rect.left) * scaleX / PIXEL_SIZE),
+    y: Math.floor((e.clientY - rect.top)  * scaleY / PIXEL_SIZE),
+  };
+}
+function outOfBounds(x, y) { return x < 0 || x >= W || y < 0 || y >= H; }
+function setPixel(x, y, c) { pixels[y][x] = c; }
+
+// ── Flood fill ────────────────────────────────────────────────────────────
+function floodFill(sx, sy, fill) {
+  const target = pixels[sy][sx];
+  if (target === fill) return;
+  const visited = new Uint8Array(W * H);
+  const stack = [[sx, sy]];
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < 0 || x >= W || y < 0 || y >= H) continue;
+    if (visited[y * W + x] || pixels[y][x] !== target) continue;
+    visited[y * W + x] = 1;
+    pixels[y][x] = fill;
+    stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+  }
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────
+function render() {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw pixels
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      ctx.fillStyle = COLOR_MAP[pixels[y][x]];
+      ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+    }
+  }
+
+  // Grid lines
+  if (PIXEL_SIZE >= 6) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= W; x++) {
+      ctx.beginPath(); ctx.moveTo(x * PIXEL_SIZE, 0);
+      ctx.lineTo(x * PIXEL_SIZE, H * PIXEL_SIZE); ctx.stroke();
+    }
+    for (let y = 0; y <= H; y++) {
+      ctx.beginPath(); ctx.moveTo(0, y * PIXEL_SIZE);
+      ctx.lineTo(W * PIXEL_SIZE, y * PIXEL_SIZE); ctx.stroke();
+    }
+  }
+
+  // Diff markers
+  if (document.getElementById('showDiffs').checked) {
+    diffs.forEach(d => {
+      const px = d.dx * PIXEL_SIZE;
+      const py = d.dy * PIXEL_SIZE;
+      const sz = 4 * PIXEL_SIZE;
+      // Outer ring
+      ctx.strokeStyle = d.side === 'L' ? '#000' : '#fff';
+      ctx.lineWidth = Math.max(1, PIXEL_SIZE / 4);
+      ctx.strokeRect(px - PIXEL_SIZE + 0.5, py - PIXEL_SIZE + 0.5, sz, sz);
+      // Inner cross
+      ctx.beginPath();
+      ctx.moveTo(px + PIXEL_SIZE, py - PIXEL_SIZE);
+      ctx.lineTo(px - PIXEL_SIZE, py + sz - PIXEL_SIZE);
+      ctx.moveTo(px - PIXEL_SIZE, py - PIXEL_SIZE);
+      ctx.lineTo(px + PIXEL_SIZE, py + sz - PIXEL_SIZE);
+      ctx.stroke();
+    });
+  }
+}
+
+function renderCell(x, y) {
+  const ctx = document.getElementById('canvas').getContext('2d');
+  ctx.fillStyle = COLOR_MAP[pixels[y][x]];
+  ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+  // Redraw grid line over the cell
+  if (PIXEL_SIZE >= 6) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x * PIXEL_SIZE + 0.5, y * PIXEL_SIZE + 0.5, PIXEL_SIZE - 1, PIXEL_SIZE - 1);
+  }
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────
+function selectColor(c) {
+  document.querySelector('.swatch.selected')?.classList.remove('selected');
+  document.getElementById(`swatch${c}`).classList.add('selected');
+  selectedColor = c;
+  updateColorInfo();
+  if (tool === 'pick') setTool('draw');  // auto-switch back to draw after picking
+}
+
+function updateColorInfo() {
+  document.getElementById('colorPreview').style.background = COLOR_MAP[selectedColor];
+  document.getElementById('colorLabel').textContent = `${selectedColor}: ${COLOR_NAMES[selectedColor]}`;
+}
+
+function setTool(t) {
+  tool = t;
+  ['draw','fill','pick'].forEach(n => {
+    const el = document.getElementById(`tool${n.charAt(0).toUpperCase() + n.slice(1)}`);
+    if (el) el.classList.toggle('active', n === t);
+  });
+  const canvas = document.getElementById('canvas');
+  canvas.className = t === 'fill' ? 'fill-cursor' : '';
+}
+
+function zoom(dir) {
+  const idx = ZOOM_STEPS.indexOf(PIXEL_SIZE);
+  const newIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, idx + dir));
+  PIXEL_SIZE = ZOOM_STEPS[newIdx];
+  document.getElementById('zoomLabel').textContent = `${PIXEL_SIZE}×`;
+  resizeCanvas();
+  render();
+}
+
+function resizeCanvas() {
+  const canvas = document.getElementById('canvas');
+  canvas.width  = W * PIXEL_SIZE;
+  canvas.height = H * PIXEL_SIZE;
+}
+
+// ── History ───────────────────────────────────────────────────────────────
+function pushHistory() {
+  if (history.length >= 60) history.shift();
+  history.push(pixels.map(row => [...row]));
+}
+
+function undo() {
+  if (!history.length) return;
+  pixels = history.pop();
+  render();
+}
+
+// ── Save / Reset ──────────────────────────────────────────────────────────
+function save() {
+  const btn = document.getElementById('saveBtn');
+  btn.textContent = 'Saving…';
+  btn.disabled = true;
+  fetch('/api/draw/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({level: currentLevel, pixels})
+  })
+  .then(r => r.json())
+  .then(() => {
+    btn.textContent = '✓ Saved!';
+    btn.style.background = '#3fb950';
+    isCustom[currentLevel] = true;
+    updateCustomBadge();
+    setTimeout(() => {
+      btn.textContent = 'Save';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 1800);
+  })
+  .catch(() => {
+    btn.textContent = '✗ Error';
+    btn.disabled = false;
+  });
+}
+
+function resetLevel() {
+  if (!confirm(`Reset Level ${currentLevel + 1} to its default scene?\nThis will erase your custom drawing.`)) return;
+  fetch('/api/draw/reset', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({level: currentLevel})
+  })
+  .then(r => r.json())
+  .then(() => {
+    history = [];
+    isCustom[currentLevel] = false;
+    updateCustomBadge();
+    loadLevel(currentLevel);
+  });
+}
+
+function updateCustomBadge() {
+  document.getElementById('customBadge').style.display =
+    isCustom[currentLevel] ? 'inline-block' : 'none';
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

@@ -1,7 +1,20 @@
+import json
 import numpy as np
+from pathlib import Path
 from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay
 
 IMG_W, IMG_H = 30, 62
+
+CUSTOM_SCENES_FILE = Path(__file__).parent / "custom_scenes.json"
+
+
+def _load_custom_scenes() -> dict:
+    try:
+        if CUSTOM_SCENES_FILE.exists():
+            return json.loads(CUSTOM_SCENES_FILE.read_text())
+    except Exception:
+        pass
+    return {}
 DIV_START, RIGHT_START = 30, 34
 HEADER_H = 2
 TOLERANCE = 3
@@ -87,11 +100,24 @@ def draw_city(img):
 SCENES = [draw_house, draw_ocean, draw_space, draw_forest, draw_city]
 
 DIFFS = [
-    [(9, 25, 12), (26, 5, 12), (14, 35, 9), (15, 55, 12), (15, 16, 8)],   # L1: was (15,55,2) same as ground
-    [(14, 28, 6), (24, 12, 12), (5, 50, 12), (20, 57, 8), (15, 18, 11)],
-    [(15, 20, 8), (27, 5, 11), (5, 40, 12), (20, 50, 9), (10, 10, 9)],
-    [(5, 30, 8), (15, 52, 8), (25, 8, 12), (10, 45, 12), (20, 35, 11)],   # L4: was (25,8,9) same as sky
-    [(10, 30, 12), (20, 50, 9), (5, 10, 12), (26, 20, 8), (15, 5, 11)],   # L5: was (5,10,9) same as sky
+    # L1 (house): 5 diffs — each on a different scene element, all distinct colors
+    # sky(9)→8  ground(2)→14  house wall(4)→11  window(0)→3  door(6)→12
+    [(20, 5, 8, 'R'), (10, 55, 14, 'L'), (10, 29, 11, 'R'), (14, 34, 3, 'L'), (15, 40, 12, 'R')],
+    # L2 (ocean): 6 diffs — placed on 6 different scene elements
+    # water(9)→8  sandy(11)→7  deep sand(4)→11  fish1(12)→6  fish2(6)→12  seaweed(2)→14
+    [(5, 10, 8, 'R'), (20, 52, 7, 'L'), (8, 57, 11, 'R'), (8, 33, 6, 'L'), (22, 24, 12, 'R'), (9, 47, 14, 'L')],
+    # L3 (space): 7 diffs — placed on 7 different scene elements
+    # sky(0)→3  planet body(8)→9  planet surface(9)→8  ring(3)→0
+    # rocket flame(7)→4  moon(15)→5  rocket tip(12)→6
+    [(5, 3, 3, 'R'), (11, 30, 9, 'L'), (17, 32, 8, 'R'), (20, 24, 0, 'L'), (26, 21, 4, 'R'), (2, 50, 5, 'L'), (24, 4, 6, 'R')],
+    # L4 (forest): 8 diffs — placed on 8 different scene elements
+    # trunk(3)→0  flower2(14)→2  sun(11)→4  mushroom cap(12)→6
+    # flower1(11)→7  sky(9)→8  mushroom stem(7)→11  canopy(2)→14
+    [(5, 30, 0, 'R'), (26, 43, 2, 'L'), (22, 3, 4, 'R'), (15, 36, 6, 'L'), (11, 43, 7, 'R'), (25, 8, 8, 'L'), (15, 41, 11, 'R'), (5, 18, 14, 'L')],
+    # L5 (city): 9 diffs — placed on diverse scene elements
+    # sky(9)→8  sky(9)→8  cloud(15)→5  building(3)→0  building(3)→0
+    # building(3)→5  window b1(11)→4  window b2(11)→7  car(12)→6
+    [(5, 12, 8, 'R'), (28, 10, 8, 'L'), (22, 5, 5, 'R'), (8, 30, 0, 'L'), (20, 35, 0, 'R'), (25, 20, 5, 'L'), (4, 27, 4, 'R'), (19, 29, 7, 'L'), (7, 56, 6, 'R')],
 ]
 
 levels = [
@@ -110,18 +136,19 @@ class FdDisplay(RenderableUserDisplay):
         frame[HEADER_H:, :IMG_W] = g.base_img
         # Blue divider
         frame[HEADER_H:, DIV_START:RIGHT_START] = 9
-        # Right panel: copy base then apply diffs
+        # Right panel: copy base then apply diffs to their respective sides
         frame[HEADER_H:, RIGHT_START:RIGHT_START + IMG_W] = g.base_img
-        for dx, dy, rc in g.diffs:
+        for dx, dy, rc, side in g.diffs:
             r0 = HEADER_H + max(0, dy - 1)
             r1 = HEADER_H + min(IMG_H, dy + 3)
-            c0l = max(0, dx - 1)
-            c1l = min(IMG_W, dx + 3)
-            c0r = RIGHT_START + c0l
-            c1r = RIGHT_START + c1l
-            frame[r0:r1, c0r:c1r] = rc
+            c0 = max(0, dx - 1)
+            c1 = min(IMG_W, dx + 3)
+            if side == 'L':
+                frame[r0:r1, c0:c1] = rc
+            else:
+                frame[r0:r1, RIGHT_START + c0:RIGHT_START + c1] = rc
         # Green outlines for found diffs
-        for i, (dx, dy, rc) in enumerate(g.diffs):
+        for i, (dx, dy, rc, side) in enumerate(g.diffs):
             if g.found[i]:
                 for panel_x in [dx, RIGHT_START + dx]:
                     fr = HEADER_H + dy
@@ -135,11 +162,14 @@ class FdDisplay(RenderableUserDisplay):
                     r1 = min(64, fr + 4)
                     for col in [max(0, panel_x - 2), min(63, panel_x + 3)]:
                         frame[r0:r1, col] = 14
-        # Progress bar: rows 0-1, 5 segments of 12px each (with 2px gap)
-        for seg in range(5):
+        # Progress bar: rows 0-1, N segments scaled to fit 64px width
+        n = len(g.diffs)
+        spacing = 64 // n
+        width = max(2, spacing - 2)
+        for seg in range(n):
             color = 11 if g.found[seg] else 3
-            c0 = seg * 13
-            c1 = c0 + 11
+            c0 = seg * spacing
+            c1 = min(64, c0 + width)
             frame[0:2, c0:c1] = color
         return frame
 
@@ -149,7 +179,7 @@ class Fd01(ARCBaseGame):
         self.display = FdDisplay(self)
         self.base_img = np.zeros((IMG_H, IMG_W), dtype=np.int16)
         self.diffs = DIFFS[0]
-        self.found = [False] * 5
+        self.found = [False] * len(self.diffs)
         super().__init__(
             "fd01",
             levels,
@@ -162,9 +192,13 @@ class Fd01(ARCBaseGame):
     def on_set_level(self, level: Level) -> None:
         i = self.level_index
         self.base_img = np.zeros((IMG_H, IMG_W), dtype=np.int16)
-        SCENES[i](self.base_img)
+        custom = _load_custom_scenes()
+        if str(i) in custom:
+            self.base_img[:] = np.array(custom[str(i)], dtype=np.int16)
+        else:
+            SCENES[i](self.base_img)
         self.diffs = DIFFS[i]
-        self.found = [False] * 5
+        self.found = [False] * len(self.diffs)
 
     def step(self) -> None:
         if self.action.id.value == 6:
@@ -179,7 +213,7 @@ class Fd01(ARCBaseGame):
                 else:
                     self.complete_action()
                     return
-                for i, (dx, dy, _) in enumerate(self.diffs):
+                for i, (dx, dy, _, _side) in enumerate(self.diffs):
                     if not self.found[i] and abs(ix - dx) <= TOLERANCE and abs(iy - dy) <= TOLERANCE:
                         self.found[i] = True
                         break
