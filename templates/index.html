@@ -2160,15 +2160,26 @@ async function checkInterrupt(expected, grid, changeMap) {
       rawResult = `${data.result} (${data.model_used || '?'})`;
       _syncInterruptResult(rawResult);
       return parseInterruptResult(data.result);
-    } else if (interruptModelSel === 'same' || interruptModelSel === 'auto') {
-      const model = interruptModelSel === 'same' ? agentModel : agentModel;
-      const info = getModelInfo(model);
-      if (info && getByokKey(info.provider)) {
+    } else {
+      // BYOK / Puter.js path
+      const model = interruptModelSel === 'same' ? agentModel
+        : (interruptModelSel === 'auto' || interruptModelSel === 'auto-fastest') ? null
+        : interruptModelSel;
+      const info = model ? getModelInfo(model) : getModelInfo(agentModel);
+      // Check if selected model is a Puter.js model
+      const isPuter = info?.provider === 'puter';
+      if (isPuter && FEATURES.puter_js) {
+        const result = await askLLMPuter(prompt, model || 'gpt-4o-mini');
+        rawResult = `${result} (puter/${model || 'gpt-4o-mini'})`;
+        _syncInterruptResult(rawResult);
+        return parseInterruptResult(result);
+      } else if (model && info && getByokKey(info.provider)) {
         const result = await askLLMBYOK(prompt, model);
         rawResult = `${result} (${model})`;
         _syncInterruptResult(rawResult);
         return parseInterruptResult(result);
       } else if (FEATURES.puter_js) {
+        // Fallback to Puter.js
         const result = await askLLMPuter(prompt, 'gpt-4o-mini');
         rawResult = `${result} (puter/gpt-4o-mini)`;
         _syncInterruptResult(rawResult);
@@ -2238,6 +2249,8 @@ Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels 
       if (compactModelSel === 'auto-fastest') body.strategy = 'fastest';
       const data = await fetchJSON('/api/llm/summarize', body);
       summary = data.summary;
+    } else if (compactModel && getModelInfo(compactModel)?.provider === 'puter' && FEATURES.puter_js) {
+      summary = await askLLMPuter(summaryPrompt, compactModel);
     } else if (compactModel && getByokKey(getModelInfo(compactModel)?.provider)) {
       summary = await askLLMBYOK(summaryPrompt, compactModel);
     } else if (FEATURES.puter_js) {
@@ -3149,6 +3162,17 @@ async function loadModels() {
     }
     csel.appendChild(grp);
   }
+  // Add Puter.js models
+  if (FEATURES.puter_js) {
+    const grp = document.createElement('optgroup');
+    grp.label = 'Puter.js (free)';
+    for (const m of ['gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'mistral-large-latest']) {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = `${m} — Free (Puter.js)`;
+      grp.appendChild(opt);
+    }
+    csel.appendChild(grp);
+  }
   // Add unavailable (BYOK) models
   if (unavail.length) {
     const grp = document.createElement('optgroup');
@@ -3164,6 +3188,47 @@ async function loadModels() {
   }
   // Restore previous selection if still valid
   if (savedVal && [...csel.options].some(o => o.value === savedVal)) csel.value = savedVal;
+
+  // Populate interrupt model selector — same pattern
+  const isel = document.getElementById('interruptModelSelect');
+  const iSavedVal = isel.value;
+  isel.querySelectorAll('optgroup').forEach(g => g.remove());
+  for (const prov of providerOrder) {
+    const models = groups[prov];
+    if (!models?.length) continue;
+    const grp = document.createElement('optgroup');
+    grp.label = prov;
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = `${m.name} — ${m.price}`;
+      grp.appendChild(opt);
+    }
+    isel.appendChild(grp);
+  }
+  if (FEATURES.puter_js) {
+    const grp = document.createElement('optgroup');
+    grp.label = 'Puter.js (free)';
+    for (const m of ['gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'mistral-large-latest']) {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = `${m} — Free (Puter.js)`;
+      grp.appendChild(opt);
+    }
+    isel.appendChild(grp);
+  }
+  if (unavail.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = MODE === 'online' ? 'Bring Your Own Key' : 'Missing API key';
+    for (const m of unavail) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = MODE === 'online' ? `${m.name} — ${m.price} (BYOK)` : `${m.name} (no key)`;
+      if (MODE !== 'online') opt.disabled = true;
+      grp.appendChild(opt);
+    }
+    isel.appendChild(grp);
+  }
+  if (iSavedVal && [...isel.options].some(o => o.value === iSavedVal)) isel.value = iSavedVal;
 
   updateModelCaps();
 }
