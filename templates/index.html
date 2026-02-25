@@ -88,7 +88,7 @@
     color: var(--text-dim); font-size: 14px; text-align: center; padding: 40px; line-height: 1.8; }
 
   /* ── Right panel ─────────────────────────────────────────────────────── */
-  .right-panel { width: 530px; background: var(--surface); border-left: 1px solid var(--border);
+  .right-panel { width: 636px; background: var(--surface); border-left: 1px solid var(--border);
     display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
 
   /* ── Option sections ─────────────────────────────────────────────────── */
@@ -172,6 +172,35 @@
     padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
   .coord-ref { cursor: pointer; border-bottom: 1px dashed var(--accent); transition: background 0.15s; }
   .coord-ref:hover { background: rgba(88, 166, 255, 0.2); border-radius: 2px; }
+  /* Timeline tab */
+  .timeline-scroll { flex: 1; overflow-y: auto; padding: 10px 14px;
+    display: flex; flex-direction: column; justify-content: flex-start; }
+  .timeline-block {
+    width: 100%; border-radius: 4px; padding: 6px 10px;
+    font-size: 11px; font-weight: 600; box-sizing: border-box;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 2px; cursor: default; transition: opacity 0.15s;
+    min-height: 28px;
+  }
+  .timeline-block:hover { opacity: 0.85; }
+  .timeline-block.reasoning { background: #58a6ff22; color: var(--accent); border-left: 3px solid var(--accent); }
+  .timeline-block.compact   { background: #bc8cff22; color: var(--purple); border-left: 3px solid var(--purple); }
+  .timeline-block.interrupt  { background: #e3b34122; color: var(--yellow); border-left: 3px solid var(--yellow); }
+  .timeline-block .tl-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .timeline-block .tl-dur   { font-size: 10px; opacity: 0.7; flex-shrink: 0; margin-left: 8px; }
+  .timeline-turn-marker {
+    font-size: 10px; color: var(--text-dim); padding: 4px 0 2px;
+    border-top: 1px solid var(--border); margin-top: 4px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .timeline-block.in-flight {
+    animation: tl-pulse 1.2s ease-in-out infinite;
+    border-left-style: dashed;
+  }
+  @keyframes tl-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+  .tl-steps { margin-left: 8px; font-weight: 400; font-size: 10px; opacity: 0.7; }
+  .tl-step { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; margin-right: 2px; }
+
   .ad-banner { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--surface); flex-shrink: 0; }
   .ad-banner-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
   .ad-support-msg { font-size: 9px; color: var(--dim); font-style: italic; }
@@ -625,6 +654,7 @@
             <button onclick="switchSubTab('reasoning')">
               Reasoning <span id="llmSpinner" style="display:none;margin-left:4px;"><span class="spinner"></span></span>
             </button>
+            <button onclick="switchSubTab('timeline')">Timeline</button>
           </div>
 
           <!-- ── Settings subtab ── -->
@@ -904,6 +934,15 @@
             </div>
           </div>
 
+          <!-- ── Timeline subtab ── -->
+          <div class="subtab-pane" id="subtabTimeline">
+            <div class="timeline-scroll" id="timelineContent">
+              <div class="empty-state" style="height:auto;font-size:12px;">
+                Timeline will populate as LLM calls are made.
+              </div>
+            </div>
+          </div>
+
         <!-- Hidden history elements (used by replay JS) -->
         <div id="historyList" style="display:none;"></div>
         <div id="replayReasoningPanel" style="display:none;">
@@ -997,6 +1036,10 @@ class SessionState {
     this.tabLabel = '';
     // LLM call in flight
     this.waitingForLLM = false;
+    this.abortController = null;   // AbortController for in-flight fetch
+    this.waitStartTime = null;     // performance.now() when LLM call started
+    // Timeline
+    this.timelineEvents = [];  // [{type, duration, turn, model?, callNum?}]
   }
   get avgCallDuration() {
     if (!this.callDurations.length) return 5000; // default 5s
@@ -1007,6 +1050,30 @@ class SessionState {
 const sessions = new Map();  // sessionId -> SessionState
 let activeSessionId = null;
 function getActiveSession() { return sessions.get(activeSessionId) || null; }
+
+// ── Sync SessionState back to globals (only if ss is the active session) ──
+function syncSessionToGlobals(ss) {
+  if (!ss || activeSessionId !== ss.sessionId) return;
+  sessionId = ss.sessionId;
+  currentGrid = ss.currentGrid;
+  previousGrid = ss.previousGrid;
+  currentChangeMap = ss.currentChangeMap;
+  currentState = ss.currentState;
+  stepCount = ss.stepCount;
+  llmCallCount = ss.llmCallCount;
+  turnCounter = ss.turnCounter;
+  moveHistory = ss.moveHistory;
+  undoStack = ss.undoStack;
+  llmObservations = ss.llmObservations;
+  autoPlaying = ss.autoPlaying;
+  sessionTotalTokens = ss.sessionTotalTokens;
+  sessionStepsBuffer = ss.sessionStepsBuffer;
+  syncStepCounter = ss.syncStepCounter;
+  _cachedCompactSummary = ss._cachedCompactSummary;
+  _compactSummaryAtCall = ss._compactSummaryAtCall;
+  _compactSummaryAtStep = ss._compactSummaryAtStep;
+  _lastCompactPrompt = ss._lastCompactPrompt;
+}
 
 // ── Bridge: save globals → SessionState ──────────────────────────────────
 function saveSessionToState() {
@@ -1071,6 +1138,28 @@ function restoreSessionFromState(s) {
   const rc = document.getElementById('reasoningContent');
   if (rc) rc.innerHTML = s.reasoningHTML || '<div class="empty-state" style="height:auto;font-size:12px;">No reasoning yet.</div>';
 
+  // If session has an LLM call in flight, show waiting indicator with elapsed time
+  if (s.waitingForLLM && s.waitStartTime) {
+    const elapsed = ((performance.now() - s.waitStartTime) / 1000).toFixed(1);
+    const waitEl = document.createElement('div');
+    waitEl.className = 'reasoning-entry llm-waiting';
+    waitEl.innerHTML = `<div class="step-label" style="color:var(--dim);"><span class="spinner" style="margin-right:6px;"></span>Waiting for model response... <span class="wait-timer">${elapsed}s</span></div>`;
+    if (rc.querySelector('.empty-state')) rc.innerHTML = '';
+    rc.insertBefore(waitEl, rc.firstChild);
+    // Live-update the timer until the LLM call completes
+    const _restoreWaitStart = s.waitStartTime;
+    const _restoreWaitInterval = setInterval(() => {
+      if (!s.waitingForLLM || !waitEl.parentNode) { clearInterval(_restoreWaitInterval); waitEl.remove(); return; }
+      const el = waitEl.querySelector('.wait-timer');
+      if (el) el.textContent = ((performance.now() - _restoreWaitStart) / 1000).toFixed(1) + 's';
+    }, 100);
+    document.getElementById('llmSpinner').style.display = 'inline';
+    document.getElementById('topSpinner').style.display = 'inline';
+  } else {
+    document.getElementById('llmSpinner').style.display = 'none';
+    document.getElementById('topSpinner').style.display = 'none';
+  }
+
   // Re-render grid
   if (currentGrid) {
     canvas.style.display = 'block';
@@ -1097,6 +1186,11 @@ function restoreSessionFromState(s) {
   updateAutoBtn();
   updatePanelBlur();
   updateGameListLock();
+
+  // Re-render timeline if that tab is active
+  if (document.getElementById('subtabTimeline')?.classList.contains('active')) {
+    renderTimeline(s);
+  }
 
   // Highlight the matching game card in the sidebar
   const restoredGameId = currentState.game_id || '';
@@ -1781,13 +1875,14 @@ function switchTopTab(tab) {
 function switchSubTab(tab) {
   document.querySelectorAll('.subtab-bar button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.subtab-pane').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
-  const tabMap = { settings: 'subtabSettings', graphics: 'subtabGraphics', memory: 'subtabMemory', reasoning: 'subtabReasoning' };
+  const tabMap = { settings: 'subtabSettings', graphics: 'subtabGraphics', memory: 'subtabMemory', reasoning: 'subtabReasoning', timeline: 'subtabTimeline' };
   const buttons = document.querySelectorAll('.subtab-bar button');
-  const idx = { settings: 0, graphics: 1, memory: 2, reasoning: 3 }[tab] || 0;
+  const idx = { settings: 0, graphics: 1, memory: 2, reasoning: 3, timeline: 4 }[tab] || 0;
   if (buttons[idx]) buttons[idx].classList.add('active');
   const pane = document.getElementById(tabMap[tab]);
   if (pane) { pane.classList.add('active'); pane.style.display = 'flex'; }
   if (tab === 'memory') loadMemoryContent();
+  if (tab === 'timeline') renderTimeline(getActiveSession());
 }
 
 function toggleAdBanner() {
@@ -2177,8 +2272,12 @@ function clearCellHighlights() {
 }
 
 function annotateCoordRefs(element) {
-  // Combined regex: (row, col) | rows? N[-N] | cols? N[-N]
-  const COORD_RE = /\((\d+),\s*(\d+)\)|(?:rows?)\s+(\d+)(?:\s*[-–]\s*(\d+))?|(?:cols?)\s+(\d+)(?:\s*[-–]\s*(\d+))?/gi;
+  // Combined regex — order matters (longest first):
+  // 1. Region: "rows N-M, cols N-M" (combined into one highlight)
+  // 2. Point: (row, col)
+  // 3. rows? N[-N]
+  // 4. cols? N[-N]
+  const COORD_RE = /(?:rows?)\s+(\d+)(?:\s*[-–]\s*(\d+))?\s*,\s*(?:cols?)\s+(\d+)(?:\s*[-–]\s*(\d+))?|\((\d+),\s*(\d+)\)|(?:rows?)\s+(\d+)(?:\s*[-–]\s*(\d+))?|(?:cols?)\s+(\d+)(?:\s*[-–]\s*(\d+))?/gi;
 
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   const textNodes = [];
@@ -2200,15 +2299,19 @@ function annotateCoordRefs(element) {
       const span = document.createElement('span');
       span.className = 'coord-ref';
       if (match[1] !== undefined) {
-        // (row, col) point
-        span.dataset.row = match[1];
-        span.dataset.col = match[2];
-      } else if (match[3] !== undefined) {
-        // rows N or rows N-M
-        span.dataset.rows = match[4] !== undefined ? `${match[3]}-${match[4]}` : match[3];
+        // Region: rows N-M, cols N-M
+        span.dataset.rows = match[2] !== undefined ? `${match[1]}-${match[2]}` : match[1];
+        span.dataset.cols = match[4] !== undefined ? `${match[3]}-${match[4]}` : match[3];
       } else if (match[5] !== undefined) {
+        // (row, col) point
+        span.dataset.row = match[5];
+        span.dataset.col = match[6];
+      } else if (match[7] !== undefined) {
+        // rows N or rows N-M
+        span.dataset.rows = match[8] !== undefined ? `${match[7]}-${match[8]}` : match[7];
+      } else if (match[9] !== undefined) {
         // cols N or cols N-M
-        span.dataset.cols = match[6] !== undefined ? `${match[5]}-${match[6]}` : match[5];
+        span.dataset.cols = match[10] !== undefined ? `${match[9]}-${match[10]}` : match[9];
       }
       span.textContent = match[0];
       frag.appendChild(span);
@@ -2226,13 +2329,24 @@ function cellsFromCoordRef(ref) {
   if (!currentGrid) return cells;
   const h = currentGrid.length, w = currentGrid[0].length;
   if (ref.dataset.row !== undefined && ref.dataset.col !== undefined) {
+    // Single point
     cells.push({row: parseInt(ref.dataset.row), col: parseInt(ref.dataset.col)});
+  } else if (ref.dataset.rows !== undefined && ref.dataset.cols !== undefined) {
+    // Region: rows + cols combined
+    const rp = ref.dataset.rows.split('-').map(Number);
+    const cp = ref.dataset.cols.split('-').map(Number);
+    const r0 = rp[0], r1 = rp.length > 1 ? rp[1] : r0;
+    const c0 = cp[0], c1 = cp.length > 1 ? cp[1] : c0;
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++) cells.push({row: r, col: c});
   } else if (ref.dataset.rows !== undefined) {
+    // Rows only — highlight full rows
     const parts = ref.dataset.rows.split('-').map(Number);
     const r0 = parts[0], r1 = parts.length > 1 ? parts[1] : r0;
     for (let r = r0; r <= r1; r++)
       for (let c = 0; c < w; c++) cells.push({row: r, col: c});
   } else if (ref.dataset.cols !== undefined) {
+    // Cols only — highlight full columns
     const parts = ref.dataset.cols.split('-').map(Number);
     const c0 = parts[0], c1 = parts.length > 1 ? parts[1] : c0;
     for (let r = 0; r < h; r++)
@@ -2645,11 +2759,12 @@ function trimHistoryForTokens(history, maxTokens) {
   });
 }
 
-function collectObservation(resp) {
+function collectObservation(resp, ss) {
   if (!resp || !resp.parsed) return;
   const p = resp.parsed;
-  llmObservations.push({
-    step: stepCount,
+  const obs = ss || { llmObservations, stepCount };
+  obs.llmObservations.push({
+    step: obs.stepCount,
     observation: p.observation || '',
     reasoning: p.reasoning || '',
     action: p.action,
@@ -2732,8 +2847,10 @@ async function checkInterrupt(expected, grid, changeMap) {
     return false;
   }
 
+  const _intStart = performance.now();
   try {
     let rawResult = '';
+    let _intResult;
     if (FEATURES.server_llm) {
       const body = { prompt, session_id: sessionId, agent_model: agentModel };
       if (interruptModelSel === 'auto-fastest') body.strategy = 'fastest';
@@ -2742,7 +2859,7 @@ async function checkInterrupt(expected, grid, changeMap) {
       const data = await fetchJSON('/api/llm/interrupt-check', body);
       rawResult = `${data.result} (${data.model_used || '?'})`;
       _syncInterruptResult(rawResult);
-      return parseInterruptResult(data.result);
+      _intResult = parseInterruptResult(data.result);
     } else {
       // BYOK / Puter.js path
       const model = interruptModelSel === 'same' ? agentModel
@@ -2755,20 +2872,27 @@ async function checkInterrupt(expected, grid, changeMap) {
         const result = await askLLMPuter(prompt, model || 'gpt-4o-mini');
         rawResult = `${result} (puter/${model || 'gpt-4o-mini'})`;
         _syncInterruptResult(rawResult);
-        return parseInterruptResult(result);
+        _intResult = parseInterruptResult(result);
       } else if (model && info && getByokKey(info.provider)) {
         const result = await askLLMBYOK(prompt, model);
         rawResult = `${result} (${model})`;
         _syncInterruptResult(rawResult);
-        return parseInterruptResult(result);
+        _intResult = parseInterruptResult(result);
       } else if (FEATURES.puter_js) {
         // Fallback to Puter.js
         const result = await askLLMPuter(prompt, 'gpt-4o-mini');
         rawResult = `${result} (puter/gpt-4o-mini)`;
         _syncInterruptResult(rawResult);
-        return parseInterruptResult(result);
+        _intResult = parseInterruptResult(result);
       }
     }
+    // Record interrupt timing in timeline
+    const _intDur = Math.round(performance.now() - _intStart);
+    const _intSs = getActiveSession();
+    if (_intSs && _intSs.timelineEvents) {
+      _intSs.timelineEvents.push({ type: 'interrupt', duration: _intDur, turn: _intSs.llmCallCount });
+    }
+    if (_intResult !== undefined) return _intResult;
   } catch (e) {
     console.warn('Interrupt check failed:', e);
     _syncInterruptResult('ERROR: ' + e.message);
@@ -2781,21 +2905,23 @@ function _syncInterruptResult(text) {
   if (el) el.value = text;
 }
 
-async function buildCompactContext() {
+async function buildCompactContext(ss) {
   // Use LLM to summarize the game history into key takeaways.
   // Falls back to heuristic if LLM call fails.
   // Re-summarize every 5 calls to stay current.
+  // ss = SessionState (optional, falls back to globals)
+  const _ss = ss || { _cachedCompactSummary, llmCallCount, _compactSummaryAtCall, _compactSummaryAtStep, llmObservations, moveHistory, currentState, _lastCompactPrompt, sessionId: sessionId, stepCount };
   const REFRESH_INTERVAL = 5;
-  if (_cachedCompactSummary && (llmCallCount - _compactSummaryAtCall) < REFRESH_INTERVAL) {
-    return _cachedCompactSummary;
+  if (_ss._cachedCompactSummary && (_ss.llmCallCount - _ss._compactSummaryAtCall) < REFRESH_INTERVAL) {
+    return _ss._cachedCompactSummary;
   }
 
   // Build a summary prompt from observations + history
-  const obsText = llmObservations.map(o =>
+  const obsText = _ss.llmObservations.map(o =>
     `Step ${o.step}: action=${ACTION_NAMES[o.action] || o.action}, obs="${o.observation || ''}", reasoning="${(o.reasoning || '').substring(0, 150)}"`
   ).join('\n');
 
-  const histText = moveHistory.slice(-20).map(h =>
+  const histText = _ss.moveHistory.slice(-20).map(h =>
     `Step ${h.step}: ${ACTION_NAMES[h.action] || '?'} -> ${h.result_state || '?'}`
   ).join('\n');
 
@@ -2810,10 +2936,11 @@ ${obsText}
 RECENT MOVE HISTORY:
 ${histText}
 
-Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels || 0}`;
+Progress: Level ${_ss.currentState.levels_completed || 0}/${_ss.currentState.win_levels || 0}`;
 
   // Store the prompt for display in Memory tab
-  _lastCompactPrompt = summaryPrompt;
+  _ss._lastCompactPrompt = summaryPrompt;
+  if (!ss) _lastCompactPrompt = summaryPrompt;
   _syncCompactPromptToMemoryTab();
 
   // Determine compact model
@@ -2826,8 +2953,9 @@ Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels 
 
   try {
     let summary;
+    const _compactStart = performance.now();
     if (FEATURES.server_llm) {
-      const body = { prompt: summaryPrompt, session_id: sessionId, agent_model: agentModel };
+      const body = { prompt: summaryPrompt, session_id: _ss.sessionId, agent_model: agentModel };
       if (compactModel) body.model = compactModel;
       if (compactModelSel === 'auto-fastest') body.strategy = 'fastest';
       const data = await fetchJSON('/api/llm/summarize', body);
@@ -2840,18 +2968,25 @@ Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels 
       summary = await askLLMPuter(summaryPrompt, 'gpt-4o-mini');
     }
     if (summary) {
-      _cachedCompactSummary = `## COMPACT CONTEXT (LLM-summarized game knowledge)\n${summary}`;
-      _compactSummaryAtCall = llmCallCount;
-      _compactSummaryAtStep = stepCount;
+      const _compactDur = Math.round(performance.now() - _compactStart);
+      const _tlTarget = ss || getActiveSession();
+      if (_tlTarget && _tlTarget.timelineEvents) {
+        _tlTarget.timelineEvents.push({ type: 'compact', duration: _compactDur, turn: _ss.llmCallCount });
+      }
+      _ss._cachedCompactSummary = `## COMPACT CONTEXT (LLM-summarized game knowledge)\n${summary}`;
+      _ss._compactSummaryAtCall = _ss.llmCallCount;
+      _ss._compactSummaryAtStep = _ss.stepCount;
+      if (!ss) { _cachedCompactSummary = _ss._cachedCompactSummary; _compactSummaryAtCall = _ss._compactSummaryAtCall; _compactSummaryAtStep = _ss._compactSummaryAtStep; }
       _syncCompactToMemoryTab();
-      return _cachedCompactSummary;
+      return _ss._cachedCompactSummary;
     }
   } catch (e) {
     console.warn('Compact summary LLM call failed, using fallback:', e);
   }
   const fallback = buildCompactContextFallback();
   if (fallback) {
-    _cachedCompactSummary = fallback;
+    _ss._cachedCompactSummary = fallback;
+    if (!ss) _cachedCompactSummary = fallback;
     _syncCompactToMemoryTab();
   }
   return fallback;
@@ -2869,17 +3004,22 @@ function logSessionEvent(eventType, stepNum, data = {}) {
 
 async function manualCompact() {
   if (!sessionId || moveHistory.length === 0) return;
+  saveSessionToState();  // sync globals → ss
+  const ss = getActiveSession();
   const btn = document.getElementById('compactBtn');
   btn.disabled = true;
   btn.textContent = '\u23f3 Compacting...';
   try {
     _cachedCompactSummary = '';  // force refresh
-    const summary = await buildCompactContext();
+    if (ss) ss._cachedCompactSummary = '';
+    const summary = await buildCompactContext(ss);
     if (summary) {
       _cachedCompactSummary = summary;
+      if (ss) ss._cachedCompactSummary = summary;
       _syncCompactToMemoryTab();
       _compactSummaryAtCall = llmCallCount;
       _compactSummaryAtStep = stepCount;
+      if (ss) { ss._compactSummaryAtCall = llmCallCount; ss._compactSummaryAtStep = stepCount; }
       logSessionEvent('compact', stepCount, { call_count: llmCallCount, history_length: moveHistory.length, trigger: 'manual' });
       const content = document.getElementById('reasoningContent');
       if (content.querySelector('.empty-state')) content.innerHTML = '';
@@ -2966,8 +3106,92 @@ const TOKEN_PRICES = {
 
 let sessionTotalTokens = { input: 0, output: 0, cost: 0 };
 
-function formatTokenInfo(resp) {
+// ── Timeline helpers ──────────────────────────────────────────────────────
+function _rebuildTimelineFromSteps(steps) {
+  const events = [];
+  let callNum = 0;
+  let planRemaining = 0;
+  let currentEvent = null;
+  for (const s of steps) {
+    const llm = s.llm_response;
+    if (llm && llm.parsed) {
+      callNum++;
+      const plan = llm.parsed.plan && Array.isArray(llm.parsed.plan) ? llm.parsed.plan : [{ action: llm.parsed.action }];
+      currentEvent = {
+        type: 'reasoning', duration: llm.call_duration_ms || 0, turn: callNum,
+        model: llm.model || '', stepStart: s.step_num, actions: plan.map(p => p.action),
+      };
+      planRemaining = plan.length - 1; // first step is this one
+      events.push(currentEvent);
+    } else if (currentEvent && planRemaining > 0) {
+      planRemaining--;
+    } else {
+      currentEvent = null;
+      planRemaining = 0;
+    }
+  }
+  return events;
+}
+
+// ── Timeline rendering ────────────────────────────────────────────────────
+function renderTimeline(ss) {
+  const container = document.getElementById('timelineContent');
+  if (!container) return;
+  let events = ss ? ss.timelineEvents : [];
+  // If in replay mode and no session events, build from replayData
+  if (!events.length && typeof replayData !== 'undefined' && replayData && replayData.steps) {
+    events = _rebuildTimelineFromSteps(replayData.steps);
+  }
+  if (!events.length && !(ss && ss.waitingForLLM)) {
+    container.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Timeline will populate as LLM calls are made.</div>';
+    return;
+  }
+  // Group events by turn
+  const turns = {};
+  for (const ev of events) {
+    const t = ev.turn || 0;
+    if (!turns[t]) turns[t] = [];
+    turns[t].push(ev);
+  }
+  let html = '';
+  // In-flight block (pulsing, live timer)
+  if (ss && ss.waitingForLLM && ss.waitStartTime) {
+    const elapsed = ((performance.now() - ss.waitStartTime) / 1000).toFixed(1);
+    html += `<div class="timeline-block reasoning in-flight" id="tlInFlight">
+      <span class="tl-label"><span class="spinner" style="margin-right:4px;"></span>Reasoning...</span>
+      <span class="tl-dur">${elapsed}s</span>
+    </div>`;
+  }
+  // Reverse chronological: newest turn first
+  for (const turn of Object.keys(turns).sort((a, b) => b - a)) {
+    html += `<div class="timeline-turn-marker">Turn ${turn}</div>`;
+    for (const ev of turns[turn]) {
+      const h = Math.max(28, Math.min(120, ev.duration / 50));
+      const dur = (ev.duration / 1000).toFixed(1) + 's';
+      const label = ev.type === 'reasoning'
+        ? (ev.model || 'Reasoning')
+        : ev.type.charAt(0).toUpperCase() + ev.type.slice(1);
+      // Build step details
+      let stepsHtml = '';
+      if (ev.actions && ev.actions.length) {
+        const stepParts = ev.actions.map((a, i) => {
+          const stepNum = (ev.stepStart || 0) + i;
+          const name = ACTION_NAMES[a] || `A${a}`;
+          return `<span class="tl-step">${stepNum}:${name}</span>`;
+        });
+        stepsHtml = `<span class="tl-steps">${stepParts.join(' ')}</span>`;
+      }
+      html += `<div class="timeline-block ${ev.type}" style="height:${h}px">
+        <span class="tl-label">${label}${stepsHtml}</span><span class="tl-dur">${dur}</span>
+      </div>`;
+    }
+  }
+  container.innerHTML = html;
+}
+
+function formatTokenInfo(resp, tokensObj) {
   // Use API-reported usage if available
+  const tokens = tokensObj || sessionTotalTokens;
   let inputTok = resp.usage?.input_tokens || resp.usage?.prompt_tokens || 0;
   let outputTok = resp.usage?.output_tokens || resp.usage?.completion_tokens || 0;
 
@@ -2986,13 +3210,13 @@ function formatTokenInfo(resp) {
   let costStr = '';
   if (prices) {
     const cost = (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
-    sessionTotalTokens.input += inputTok;
-    sessionTotalTokens.output += outputTok;
-    sessionTotalTokens.cost += cost;
-    costStr = ` · $${cost.toFixed(4)} (session: $${sessionTotalTokens.cost.toFixed(3)})`;
+    tokens.input += inputTok;
+    tokens.output += outputTok;
+    tokens.cost += cost;
+    costStr = ` · $${cost.toFixed(4)} (session: $${tokens.cost.toFixed(3)})`;
   } else {
-    sessionTotalTokens.input += inputTok;
-    sessionTotalTokens.output += outputTok;
+    tokens.input += inputTok;
+    tokens.output += outputTok;
   }
 
   return `<div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;">` +
@@ -3021,70 +3245,93 @@ function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-async function askLLM() {
-  if (!currentState.grid) return;
+async function askLLM(ss) {
+  // ss = SessionState to operate on (optional, falls back to globals for backward compat)
+  const _ss = ss || null;
+  const _cur = _ss || { currentState, llmCallCount, moveHistory, stepCount, currentChangeMap,
+    sessionId: sessionId, sessionTotalTokens, _cachedCompactSummary, _compactSummaryAtCall,
+    _compactSummaryAtStep, _lastCompactPrompt, autoPlaying, llmObservations };
+
+  if (!_cur.currentState.grid) return;
   const model = getSelectedModel();
   if (!model) { alert('Select or type a model name'); return; }
 
   // Capture session at call time — used to discard stale responses
-  const _callSessionId = sessionId;
-  const _callSession = getActiveSession();
+  const _callSessionId = _cur.sessionId;
+  const _callSession = _ss || getActiveSession();
+  const isActive = () => activeSessionId === _callSessionId;
 
-  document.getElementById('llmSpinner').style.display = 'inline';
-  document.getElementById('topSpinner').style.display = 'inline';
+  // Create AbortController for this call
+  if (_ss) { _ss.abortController = new AbortController(); _ss.waitStartTime = performance.now(); }
+
+  if (isActive()) {
+    document.getElementById('llmSpinner').style.display = 'inline';
+    document.getElementById('topSpinner').style.display = 'inline';
+  }
   if (_callSession) { _callSession.waitingForLLM = true; renderSessionTabs(); }
 
-  // Show waiting indicator in reasoning tab
+  // Show waiting indicator in reasoning tab (only if active)
   const _waitEl = document.createElement('div');
   _waitEl.className = 'reasoning-entry llm-waiting';
   _waitEl.innerHTML = `<div class="step-label" style="color:var(--dim);"><span class="spinner" style="margin-right:6px;"></span>Waiting for model response... <span class="wait-timer">0s</span></div>`;
-  const _reasoningContent = document.getElementById('reasoningContent');
-  if (_reasoningContent.querySelector('.empty-state')) _reasoningContent.innerHTML = '';
-  _reasoningContent.insertBefore(_waitEl, _reasoningContent.firstChild);
-  switchTopTab('agent');
-  switchSubTab('reasoning');
+  if (isActive()) {
+    const _reasoningContent = document.getElementById('reasoningContent');
+    if (_reasoningContent.querySelector('.empty-state')) _reasoningContent.innerHTML = '';
+    _reasoningContent.insertBefore(_waitEl, _reasoningContent.firstChild);
+    switchTopTab('agent');
+    switchSubTab('reasoning');
+  }
   const _waitStart = performance.now();
+  if (_ss) _ss.waitStartTime = _waitStart;
+  if (isActive() && _callSession) renderTimeline(_callSession);
   const _waitInterval = setInterval(() => {
     const el = _waitEl.querySelector('.wait-timer');
     if (el) el.textContent = ((performance.now() - _waitStart) / 1000).toFixed(1) + 's';
+    // Update in-flight block in timeline
+    const tlFlight = document.getElementById('tlInFlight');
+    if (tlFlight) {
+      const tlDur = tlFlight.querySelector('.tl-dur');
+      if (tlDur) tlDur.textContent = ((performance.now() - _waitStart) / 1000).toFixed(1) + 's';
+    }
   }, 100);
 
   try {
     let resp;
     const inputSettings = getInputSettings();
 
-    llmCallCount++;
+    _cur.llmCallCount++;
+    if (_ss) { /* already on _ss */ } else { llmCallCount = _cur.llmCallCount; }
     const compact = getCompactSettings();
     const contextWindow = getSelectedModelContextWindow();
     const maxHistTokens = getContextTokenLimit(compact, contextWindow);
-    const callTrigger = compact.enabled && compact.after && llmCallCount >= compact.after;
+    const callTrigger = compact.enabled && compact.after && _cur.llmCallCount >= compact.after;
     // Also trigger compact if estimated history tokens exceed % of model context
-    const histTokenEst = estimateTokens(JSON.stringify(moveHistory));
+    const histTokenEst = estimateTokens(JSON.stringify(_cur.moveHistory));
     const tokenTrigger = compact.enabled && histTokenEst > maxHistTokens;
     const needsCompact = callTrigger || tokenTrigger;
-    const prevCompactCall = _compactSummaryAtCall;
-    const compactBlock = needsCompact ? await buildCompactContext() : '';
+    const prevCompactCall = _cur._compactSummaryAtCall;
+    const compactBlock = needsCompact ? await buildCompactContext(_ss) : '';
 
     // Guard: session changed during compact — discard
     if (!sessions.has(_callSessionId)) { console.log('[askLLM] session closed during compact, discarding'); return null; }
 
     // Only show reasoning entry when a NEW compact was generated (not cached)
-    if (compactBlock && _compactSummaryAtCall !== prevCompactCall) {
-      logSessionEvent('compact', stepCount, { trigger: callTrigger ? 'calls' : 'tokens', call_count: llmCallCount });
+    if (compactBlock && _cur._compactSummaryAtCall !== prevCompactCall && isActive()) {
+      logSessionEvent('compact', _cur.stepCount, { trigger: callTrigger ? 'calls' : 'tokens', call_count: _cur.llmCallCount });
       const content = document.getElementById('reasoningContent');
       if (content.querySelector('.empty-state')) content.innerHTML = '';
       const cEntry = document.createElement('div');
       cEntry.className = 'reasoning-entry';
-      const trigger = callTrigger ? `after ${llmCallCount} calls` : `tokens exceeded ${maxHistTokens}`;
-      cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">&#128220; Auto-compacted at step ${stepCount} (${trigger})</div>`;
+      const trigger = callTrigger ? `after ${_cur.llmCallCount} calls` : `tokens exceeded ${maxHistTokens}`;
+      cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">&#128220; Auto-compacted at step ${_cur.stepCount} (${trigger})</div>`;
       content.insertBefore(cEntry, content.firstChild);
     }
 
     // When compact context exists, only send history AFTER the compaction point
     // (the compact summary already covers everything before it)
-    const postCompactHistory = (compactBlock && _compactSummaryAtStep > 0)
-      ? moveHistory.filter(h => h.step > _compactSummaryAtStep)
-      : moveHistory;
+    const postCompactHistory = (compactBlock && _cur._compactSummaryAtStep > 0)
+      ? _cur.moveHistory.filter(h => h.step > _cur._compactSummaryAtStep)
+      : _cur.moveHistory;
     const historyForLLM = compact.enabled
       ? trimHistoryForTokens(postCompactHistory, maxHistTokens)
       : postCompactHistory;
@@ -3099,15 +3346,15 @@ async function askLLM() {
     if (useServerLLM) {
       // ── Server-side LLM (local mode) ─────────────────────────────────
       const payload = {
-        grid: currentState.grid,
-        state: currentState.state,
-        available_actions: currentState.available_actions,
-        levels_completed: currentState.levels_completed,
-        win_levels: currentState.win_levels,
-        game_id: currentState.game_id,
+        grid: _cur.currentState.grid,
+        state: _cur.currentState.state,
+        available_actions: _cur.currentState.available_actions,
+        levels_completed: _cur.currentState.levels_completed,
+        win_levels: _cur.currentState.win_levels,
+        game_id: _cur.currentState.game_id,
         history: historyForLLM,
-        change_map: currentChangeMap,
-        session_id: sessionId,
+        change_map: _cur.currentChangeMap,
+        session_id: _cur.sessionId,
         compact_context: compactBlock,
         settings: {
           model: model,
@@ -3125,12 +3372,12 @@ async function askLLM() {
       if (!sessions.has(_callSessionId)) { console.log('[askLLM] session closed during server LLM call, discarding'); return null; }
       // For non-Gemini server models: extract code blocks and run via server sandbox
       if (resp && !resp.error && resp.tools_active && !resp.tool_calls?.length && resp.raw) {
-        const toolCalls = await executeToolBlocks(resp.raw, currentState.grid, previousGrid);
+        const toolCalls = await executeToolBlocks(resp.raw, _cur.currentState.grid, _ss ? _ss.previousGrid : previousGrid);
         if (toolCalls.length) resp.tool_calls = toolCalls;
       }
     } else {
       // ── Client-side LLM (Puter.js or BYOK) ────────────────────────────
-      const prompt = buildClientPrompt(currentState, historyForLLM, currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
+      const prompt = buildClientPrompt(_cur.currentState, historyForLLM, _cur.currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
       let rawContent;
       try {
         if (isByokModel) {
@@ -3158,7 +3405,7 @@ async function askLLM() {
         resp.tools_active = getToolsMode() === 'on';
         // Execute Python code blocks if tools are on (Pyodide online, server local)
         if (resp.tools_active && (FEATURES.server_llm || _pyodideReady) && rawContent) {
-          const toolCalls = await executeToolBlocks(rawContent, currentState.grid, previousGrid);
+          const toolCalls = await executeToolBlocks(rawContent, _cur.currentState.grid, _ss ? _ss.previousGrid : previousGrid);
           if (toolCalls.length) {
             resp.tool_calls = toolCalls;
           }
@@ -3176,17 +3423,23 @@ async function askLLM() {
     // Attach call duration
     if (resp) resp.call_duration_ms = Math.round(performance.now() - _callStart);
 
+    // Push reasoning event to timeline
+    if (resp && resp.call_duration_ms && _callSession && _callSession.timelineEvents) {
+      const _tlPlan = resp.parsed?.plan && Array.isArray(resp.parsed.plan) ? resp.parsed.plan : (resp.parsed ? [{ action: resp.parsed.action }] : []);
+      const _tlActions = _tlPlan.map(p => p.action);
+      _callSession.timelineEvents.push({ type: 'reasoning', duration: resp.call_duration_ms, turn: _cur.llmCallCount, model: resp.model || model, stepStart: _cur.stepCount + 1, actions: _tlActions });
+      if (isActive()) renderTimeline(_callSession);
+    }
+
     // Collect observation for compact context
-    collectObservation(resp);
+    collectObservation(resp, _ss);
 
-    const content = document.getElementById('reasoningContent');
-    if (content.querySelector('.empty-state')) content.innerHTML = '';
-
+    // Build reasoning entry (always create it, but only insert into DOM if active)
     const entry = document.createElement('div');
     entry.className = 'reasoning-entry';
 
     if (resp.truncated) {
-      const tokensHtml = formatTokenInfo(resp);
+      const tokensHtml = formatTokenInfo(resp, _cur.sessionTotalTokens);
       const durationHtml = resp.call_duration_ms
         ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(resp.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
       entry.innerHTML = `<div class="step-label" style="color:var(--yellow);">Truncated — ${resp.model || model}${durationHtml}</div>
@@ -3198,12 +3451,10 @@ async function askLLM() {
           <button class="btn" style="font-size:11px;padding:4px 12px;" onclick="truncIncreaseAndRetry(this)">Double limit &amp; retry</button>
         </div>`;
       // Pause autoplay so user can decide
-      if (autoPlaying) {
-        autoPlaying = false;
-        updateAutoBtn();
-        unlockSettings();
-        const s = getActiveSession();
-        if (s) { s.autoPlaying = false; }
+      if (_cur.autoPlaying) {
+        _cur.autoPlaying = false;
+        if (_ss) { /* already on _ss */ } else { autoPlaying = false; }
+        if (isActive()) { updateAutoBtn(); unlockSettings(); }
         renderSessionTabs();
       }
     } else if (resp.error) {
@@ -3223,9 +3474,9 @@ async function askLLM() {
       const planBadge = p.plan ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
       const analysisHtml = p.analysis
         ? `<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">${p.analysis}</div></details>` : '';
-      const ci = currentChangeMap?.change_count > 0
-        ? `<div style="font-size:11px;color:var(--yellow);">${currentChangeMap.change_count} cells changed</div>` : '';
-      const tokensHtml = formatTokenInfo(resp);
+      const ci = _cur.currentChangeMap?.change_count > 0
+        ? `<div style="font-size:11px;color:var(--yellow);">${_cur.currentChangeMap.change_count} cells changed</div>` : '';
+      const tokensHtml = formatTokenInfo(resp, _cur.sessionTotalTokens);
       const durationHtml = resp.call_duration_ms
         ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(resp.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
 
@@ -3242,11 +3493,11 @@ async function askLLM() {
         return `<div class="plan-step" data-plan-idx="${i}">${i + 1}. <span class="action-btn">${aName}</span>${dataStr}</div>`;
       }).join('');
       const stepLabel = steps.length > 1
-        ? `Steps ${stepCount + 1}-${stepCount + steps.length}`
-        : `Step ${stepCount + 1}`;
-      entry.dataset.branchStep = stepCount + steps.length;
+        ? `Steps ${_cur.stepCount + 1}-${_cur.stepCount + steps.length}`
+        : `Step ${_cur.stepCount + 1}`;
+      entry.dataset.branchStep = _cur.stepCount + steps.length;
       entry.innerHTML = `
-        <button class="branch-btn" onclick="branchFromStep(${stepCount + steps.length})" title="Branch from here">&#8627; branch</button>
+        <button class="branch-btn" onclick="branchFromStep(${_cur.stepCount + steps.length})" title="Branch from here">&#8627; branch</button>
         <div class="step-label">${stepLabel} — ${resp.model}${durationHtml}${thinkBadge}${toolsBadge}${cacheBadge}${compactBadge}${planBadge}</div>
         ${tokensHtml}${ci}
         <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
@@ -3255,23 +3506,33 @@ async function askLLM() {
         <div class="plan-progress">${planHtml}</div>
         ${thinkHtml}`;
     } else {
-      entry.dataset.branchStep = stepCount;
+      entry.dataset.branchStep = _cur.stepCount;
       entry.innerHTML = `
-        <button class="branch-btn" onclick="branchFromStep(${stepCount})" title="Branch from here">&#8627; branch</button>
-        <div class="step-label">Step ${stepCount} — ${resp.model}</div>
+        <button class="branch-btn" onclick="branchFromStep(${_cur.stepCount})" title="Branch from here">&#8627; branch</button>
+        <div class="step-label">Step ${_cur.stepCount} — ${resp.model}</div>
         <div style="white-space:pre-wrap;font-size:11px;">${resp.raw || 'No response'}</div>`;
     }
 
-    content.insertBefore(entry, content.firstChild);
-    annotateCoordRefs(entry);
-    switchTopTab('agent');
-    switchSubTab('reasoning');
+    if (isActive()) {
+      const content = document.getElementById('reasoningContent');
+      if (content.querySelector('.empty-state')) content.innerHTML = '';
+      content.insertBefore(entry, content.firstChild);
+      annotateCoordRefs(entry);
+      switchTopTab('agent');
+      switchSubTab('reasoning');
+    }
+
+    // Sync session state back to globals if still active
+    if (_ss) syncSessionToGlobals(_ss);
     return resp;
   } finally {
     clearInterval(_waitInterval);
-    _waitEl.remove();
-    document.getElementById('llmSpinner').style.display = 'none';
-    document.getElementById('topSpinner').style.display = 'none';
+    if (_waitEl.parentNode) _waitEl.remove();
+    if (_ss) { _ss.abortController = null; _ss.waitStartTime = null; }
+    if (isActive()) {
+      document.getElementById('llmSpinner').style.display = 'none';
+      document.getElementById('topSpinner').style.display = 'none';
+    }
     if (_callSession) { _callSession.waitingForLLM = false; renderSessionTabs(); }
   }
 }
@@ -3296,66 +3557,80 @@ function updateAutoBtn() {
   }
 }
 
-async function executePlan(plan, resp, entry, expected) {
+async function executePlan(plan, resp, entry, expected, ss) {
   // Execute a multi-step plan, updating UI live
-  const _planSessionId = sessionId;  // guard against session switch mid-plan
+  // ss = SessionState (optional, falls back to globals)
+  const _ss = ss || null;
+  const _cur = _ss || { sessionId: sessionId, currentState, undoStack, stepCount, turnCounter,
+    moveHistory, currentGrid: currentGrid, previousGrid: previousGrid, currentChangeMap,
+    autoPlaying, sessionTotalTokens, sessionStepsBuffer, syncStepCounter,
+    llmCallCount, _cachedCompactSummary, _compactSummaryAtCall, _compactSummaryAtStep };
+  const _planSessionId = _cur.sessionId;
+  const isActive = () => activeSessionId === _planSessionId;
   const planSteps = entry ? entry.querySelectorAll('.plan-step') : [];
   let consecutiveNoChange = 0;
-  const levelsBefore = currentState.levels_completed || 0;
+  const levelsBefore = _cur.currentState.levels_completed || 0;
   let completed = 0;
 
   // Assign a turn ID for the entire plan
-  turnCounter++;
-  const currentTurnId = turnCounter;
+  _cur.turnCounter++;
+  if (!_ss) turnCounter = _cur.turnCounter;
+  const currentTurnId = _cur.turnCounter;
   if (entry) entry.setAttribute('data-turn-id', currentTurnId);
 
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
-    if (!autoPlaying && completed > 0) break; // allow stop during auto-play plans
+    if (!_cur.autoPlaying && completed > 0) break; // allow stop during auto-play plans
 
     // Mark step as executing
-    if (planSteps[i]) {
+    if (isActive() && planSteps[i]) {
       planSteps[i].className = 'plan-step executing';
     }
 
     // Save undo snapshot
-    const prevGrid = currentState.grid ? JSON.stringify(currentState.grid) : '';
-    undoStack.push({
-      grid: currentState.grid ? currentState.grid.map(r => [...r]) : [],
-      state: currentState.state,
-      levels_completed: currentState.levels_completed,
-      stepCount: stepCount,
+    const prevGrid = _cur.currentState.grid ? JSON.stringify(_cur.currentState.grid) : '';
+    _cur.undoStack.push({
+      grid: _cur.currentState.grid ? _cur.currentState.grid.map(r => [...r]) : [],
+      state: _cur.currentState.state,
+      levels_completed: _cur.currentState.levels_completed,
+      stepCount: _cur.stepCount,
       turnId: currentTurnId,
     });
 
-    stepCount++;
-    const extras = { session_cost: sessionTotalTokens.cost };
+    _cur.stepCount++;
+    if (!_ss) stepCount = _cur.stepCount;
+    const extras = { session_cost: _cur.sessionTotalTokens.cost };
     if (resp?._clientSide) extras.llm_response = (i === 0) ? resp : null;
     const data = await gameStep(_planSessionId, step.action, step.data || {}, extras);
 
-    // Guard: session changed mid-plan — stop executing further steps
-    if (sessionId !== _planSessionId) {
-      console.log('[executePlan] session changed mid-plan, aborting remaining steps');
+    // Guard: session closed mid-plan — stop executing further steps
+    if (!sessions.has(_planSessionId)) {
+      console.log('[executePlan] session closed mid-plan, aborting remaining steps');
       break;
     }
 
     if (data.error) {
-      undoStack.pop();
-      stepCount--;
-      if (planSteps[i]) planSteps[i].className = 'plan-step failed';
+      _cur.undoStack.pop();
+      _cur.stepCount--;
+      if (!_ss) stepCount = _cur.stepCount;
+      if (isActive() && planSteps[i]) planSteps[i].className = 'plan-step failed';
       // Mark remaining as skipped
-      for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped';
+      if (isActive()) { for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped'; }
       break;
     }
 
-    moveHistory.push({ step: stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
-    recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null);
-    updateUI(data);
-    updateUndoBtn();
+    // Update session state with new data
+    _cur.currentState = data;
+    if (_ss) { _ss.currentGrid = data.grid; _ss.currentChangeMap = data.change_map; }
+    else { currentState = data; currentGrid = data.grid; currentChangeMap = data.change_map; }
+
+    _cur.moveHistory.push({ step: _cur.stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
+    recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null, _ss);
+    if (isActive()) { updateUI(data); updateUndoBtn(); }
     completed++;
 
     // Mark step as done
-    if (planSteps[i]) {
+    if (isActive() && planSteps[i]) {
       planSteps[i].className = 'plan-step done';
       const btn = planSteps[i].querySelector('.action-btn');
       if (btn) { btn.style.background = 'var(--green)'; btn.style.color = '#000'; btn.style.borderColor = 'var(--green)'; }
@@ -3363,7 +3638,7 @@ async function executePlan(plan, resp, entry, expected) {
 
     // Surprise detection: game ended
     if (data.state !== 'NOT_FINISHED') {
-      for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped';
+      if (isActive()) { for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped'; }
       checkSessionEndAndUpload();
       break;
     }
@@ -3373,7 +3648,7 @@ async function executePlan(plan, resp, entry, expected) {
     if (newGrid === prevGrid) {
       consecutiveNoChange++;
       if (consecutiveNoChange >= 3) {
-        for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped';
+        if (isActive()) { for (let j = i + 1; j < planSteps.length; j++) planSteps[j].className = 'plan-step skipped'; }
         break;
       }
     } else {
@@ -3385,14 +3660,16 @@ async function executePlan(plan, resp, entry, expected) {
     if (interruptEnabled && expected && i < plan.length - 1) {
       const shouldInterrupt = await checkInterrupt(expected, data.grid, data.change_map);
       if (shouldInterrupt) {
-        for (let j = i + 1; j < planSteps.length; j++)
-          planSteps[j].className = 'plan-step interrupted';
-        // Add visual indicator in reasoning
-        const content = document.getElementById('reasoningContent');
-        const intEntry = document.createElement('div');
-        intEntry.className = 'reasoning-entry';
-        intEntry.innerHTML = `<div class="step-label" style="color:var(--yellow);">⚡ Plan interrupted at step ${i + 1}/${plan.length}: expected "${expected}" not met</div>`;
-        content.insertBefore(intEntry, content.firstChild);
+        if (isActive()) {
+          for (let j = i + 1; j < planSteps.length; j++)
+            planSteps[j].className = 'plan-step interrupted';
+          // Add visual indicator in reasoning
+          const content = document.getElementById('reasoningContent');
+          const intEntry = document.createElement('div');
+          intEntry.className = 'reasoning-entry';
+          intEntry.innerHTML = `<div class="step-label" style="color:var(--yellow);">⚡ Plan interrupted at step ${i + 1}/${plan.length}: expected "${expected}" not met</div>`;
+          content.insertBefore(intEntry, content.firstChild);
+        }
         break;
       }
     }
@@ -3401,28 +3678,31 @@ async function executePlan(plan, resp, entry, expected) {
     await new Promise(r => setTimeout(r, 100));
   }
 
-  // Guard: if session changed mid-plan, don't touch UI or globals
-  if (sessionId !== _planSessionId) {
+  // Guard: if session closed mid-plan, don't touch UI or globals
+  if (!sessions.has(_planSessionId)) {
     return { completed, total: plan.length, interrupted: true };
   }
 
   // Detect level change and show indicator + auto-compact
-  const levelsAfter = currentState.levels_completed || 0;
-  if (levelsAfter > levelsBefore) {
+  const levelsAfter = _cur.currentState.levels_completed || 0;
+  if (levelsAfter > levelsBefore && isActive()) {
     const lvlEntry = document.createElement('div');
     lvlEntry.className = 'reasoning-entry';
-    lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${currentState.win_levels} \u2192 ${levelsAfter}/${currentState.win_levels})</div>`;
+    lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${_cur.currentState.win_levels} \u2192 ${levelsAfter}/${_cur.currentState.win_levels})</div>`;
     const content = document.getElementById('reasoningContent');
     content.insertBefore(lvlEntry, content.firstChild);
     if (document.getElementById('compactOnLevel').checked) {
-      _cachedCompactSummary = '';
-      const summary = await buildCompactContext();
+      _cur._cachedCompactSummary = '';
+      if (!_ss) _cachedCompactSummary = '';
+      const summary = await buildCompactContext(_ss);
       if (summary) {
-        _cachedCompactSummary = summary;
+        _cur._cachedCompactSummary = summary;
+        if (!_ss) _cachedCompactSummary = summary;
         _syncCompactToMemoryTab();
-        _compactSummaryAtCall = llmCallCount;
-        _compactSummaryAtStep = stepCount;
-        logSessionEvent('compact', stepCount, { trigger: 'level_up', level: levelsAfter });
+        _cur._compactSummaryAtCall = _cur.llmCallCount;
+        _cur._compactSummaryAtStep = _cur.stepCount;
+        if (!_ss) { _compactSummaryAtCall = _cur._compactSummaryAtCall; _compactSummaryAtStep = _cur._compactSummaryAtStep; }
+        logSessionEvent('compact', _cur.stepCount, { trigger: 'level_up', level: levelsAfter });
         const cEntry = document.createElement('div');
         cEntry.className = 'reasoning-entry';
         cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context auto-compacted on level ${levelsAfter}</div>`;
@@ -3431,15 +3711,18 @@ async function executePlan(plan, resp, entry, expected) {
     }
   }
   // Update the entry with level info
-  if (entry) {
+  if (isActive() && entry) {
     const levelBadge = document.createElement('span');
     levelBadge.className = 'tools-badge';
     levelBadge.style.cssText = levelsAfter > levelsBefore
       ? 'background:#3fb95033;color:var(--green);' : 'background:var(--bg);color:var(--text-dim);';
-    levelBadge.textContent = `L${levelsAfter}/${currentState.win_levels || '?'}`;
+    levelBadge.textContent = `L${levelsAfter}/${_cur.currentState.win_levels || '?'}`;
     const stepLabel = entry.querySelector('.step-label');
     if (stepLabel) stepLabel.appendChild(levelBadge);
   }
+
+  // Sync session state back to globals if still active
+  if (_ss) syncSessionToGlobals(_ss);
 
   checkSessionEndAndUpload();
   return { completed, total: plan.length, interrupted: completed < plan.length };
@@ -3509,7 +3792,9 @@ async function stepOnce() {
   const _ab = document.getElementById('autoPlayBtn');
   if (_ab) _ab.classList.remove('btn-blink');
 
-  const resp = await askLLM();
+  saveSessionToState();  // sync globals → ss before async pipeline
+  const ss = getActiveSession();
+  const resp = await askLLM(ss);
   if (!resp || resp.error || resp.truncated || !resp.parsed) return;
   const p = resp.parsed;
 
@@ -3523,22 +3808,23 @@ async function stepOnce() {
 
   const entry = document.querySelector('#reasoningContent .reasoning-entry');
   const expected = resp.parsed.expected || null;
-  return await executePlan(plan, resp, entry, expected);
+  return await executePlan(plan, resp, entry, expected, ss);
 }
 
 async function truncAutoRetry(btn, maxRetries) {
   // Disable all sibling buttons
   btn.closest('div').querySelectorAll('button').forEach(b => b.disabled = true);
+  saveSessionToState();  // sync globals → ss before async pipeline
+  const ss = getActiveSession();
   autoPlaying = true;
   lockSettings();
   updateAutoBtn();
-  const s = getActiveSession();
-  if (s) { s.autoPlaying = true; renderSessionTabs(); }
+  if (ss) { ss.autoPlaying = true; renderSessionTabs(); }
 
   for (let i = 0; i < maxRetries; i++) {
-    if (!autoPlaying) break;
-    const resp = await askLLM();
-    if (!autoPlaying) break;
+    if (ss ? !ss.autoPlaying : !autoPlaying) break;
+    const resp = await askLLM(ss);
+    if (ss ? !ss.autoPlaying : !autoPlaying) break;
     if (!resp) break;
     if (resp.error) break;
     if (resp.truncated) {
@@ -3556,20 +3842,20 @@ async function truncAutoRetry(btn, maxRetries) {
       if (plan) {
         const entry = document.querySelector('#reasoningContent .reasoning-entry');
         const expected = p.expected || null;
-        await executePlan(plan, resp, entry, expected);
+        await executePlan(plan, resp, entry, expected, ss);
       }
     }
     autoPlaying = false;
     updateAutoBtn();
     unlockSettings();
-    if (s) { s.autoPlaying = false; renderSessionTabs(); }
+    if (ss) { ss.autoPlaying = false; renderSessionTabs(); }
     return;
   }
   // Exhausted retries or stopped
   autoPlaying = false;
   updateAutoBtn();
   unlockSettings();
-  if (s) { s.autoPlaying = false; renderSessionTabs(); }
+  if (ss) { ss.autoPlaying = false; renderSessionTabs(); }
 }
 
 function truncIncreaseAndRetry(btn) {
@@ -3581,12 +3867,13 @@ function truncIncreaseAndRetry(btn) {
 }
 
 async function toggleAutoPlay() {
-  if (autoPlaying) {
+  saveSessionToState();  // sync globals → ss before async pipeline
+  const ss = getActiveSession();
+  if (ss ? ss.autoPlaying : autoPlaying) {
     autoPlaying = false;
+    if (ss) { ss.autoPlaying = false; ss.waitingForLLM = false; }
     updateAutoBtn();
     unlockSettings();
-    const s = getActiveSession();
-    if (s) { s.autoPlaying = false; s.waitingForLLM = false; }
     // Clear spinners immediately so UI doesn't look like it's still working
     document.getElementById('llmSpinner').style.display = 'none';
     document.getElementById('topSpinner').style.display = 'none';
@@ -3604,38 +3891,44 @@ async function toggleAutoPlay() {
   lockHumanControls();
   lockSettings();
   updateAutoBtn();
-  const s = getActiveSession();
-  if (s) {
-    s.autoPlaying = true;
+  if (ss) {
+    ss.autoPlaying = true;
     // Generate session tab name on first autoplay: model + task + random
-    if (!s.tabLabel) {
+    if (!ss.tabLabel) {
       const model = (getSelectedModel() || 'agent').split('/').pop().split('-').slice(0, 2).join('-');
-      const game = (currentState.game_id || 'game').split('-')[0];
+      const game = (ss.currentState.game_id || currentState.game_id || 'game').split('-')[0];
       const rand = Math.random().toString(36).slice(2, 5);
-      s.tabLabel = `${model} · ${game} · ${rand}`;
-      s.model = getSelectedModel() || '';
+      ss.tabLabel = `${model} · ${game} · ${rand}`;
+      ss.model = getSelectedModel() || '';
     }
   }
   renderSessionTabs();
 
-  while (autoPlaying && currentState.state === 'NOT_FINISHED') {
-    // Guard: stop if user switched away from this session
-    if (activeSessionId !== mySessionId) { autoPlaying = false; break; }
+  while (ss ? ss.autoPlaying : autoPlaying) {
+    // Check game state from ss if available
+    const gameState = ss ? ss.currentState.state : currentState.state;
+    if (gameState !== 'NOT_FINISHED') break;
 
-    const _callStart = performance.now();
-    const resp = await askLLM();
-    if (s && resp && resp.call_duration_ms) {
-      s.callDurations.push(resp.call_duration_ms);
+    // Guard: stop if session was closed
+    if (!sessions.has(mySessionId)) { break; }
+
+    const resp = await askLLM(ss);
+    if (ss && resp && resp.call_duration_ms) {
+      ss.callDurations.push(resp.call_duration_ms);
     }
 
-    if (!autoPlaying) {
-      // Paused — discard the reasoning entry and undo the call count
-      const discarded = document.querySelector('#reasoningContent .reasoning-entry');
-      if (discarded && resp && !resp.error) { discarded.remove(); llmCallCount--; }
+    if (ss ? !ss.autoPlaying : !autoPlaying) {
+      // Paused — discard the reasoning entry and undo the call count (only if active)
+      if (activeSessionId === mySessionId) {
+        const discarded = document.querySelector('#reasoningContent .reasoning-entry');
+        if (discarded && resp && !resp.error) { discarded.remove(); }
+      }
+      if (ss) ss.llmCallCount--;
+      else llmCallCount--;
       break;
     }
-    if (activeSessionId !== mySessionId) { autoPlaying = false; break; }
-    if (!resp || resp.error || resp.truncated || !resp.parsed) { autoPlaying = false; break; }
+    if (!sessions.has(mySessionId)) break;
+    if (!resp || resp.error || resp.truncated || !resp.parsed) { if (ss) ss.autoPlaying = false; else autoPlaying = false; break; }
     const p = resp.parsed;
 
     // Normalize: single action becomes a 1-step plan
@@ -3644,27 +3937,29 @@ async function toggleAutoPlay() {
       : (p.action !== undefined && p.action !== null)
         ? [{ action: p.action, data: p.data || {} }]
         : null;
-    if (!plan) { autoPlaying = false; break; }
+    if (!plan) { if (ss) ss.autoPlaying = false; else autoPlaying = false; break; }
 
-    const entry = document.querySelector('#reasoningContent .reasoning-entry');
+    const entry = (activeSessionId === mySessionId) ? document.querySelector('#reasoningContent .reasoning-entry') : null;
     const expected = resp.parsed.expected || null;
-    const result = await executePlan(plan, resp, entry, expected);
+    const result = await executePlan(plan, resp, entry, expected, ss);
     if (!result || result.interrupted) {
       await new Promise(r => setTimeout(r, 200));
     }
 
     // Update session tabs to reflect progress
-    if (s) { s.stepCount = stepCount; s.status = currentState.state; }
+    if (ss) { ss.status = ss.currentState.state; }
     renderSessionTabs();
     saveSessionIndex();
 
     // If game is still going, brief pause so user can see the grid update
-    if (autoPlaying && currentState.state === 'NOT_FINISHED') {
+    const stillGoing = ss ? ss.currentState.state === 'NOT_FINISHED' : currentState.state === 'NOT_FINISHED';
+    const stillPlaying = ss ? ss.autoPlaying : autoPlaying;
+    if (stillPlaying && stillGoing) {
       await new Promise(r => setTimeout(r, 200));
     }
   }
   autoPlaying = false;
-  if (s) { s.autoPlaying = false; }
+  if (ss) { ss.autoPlaying = false; }
   unlockSettings();
   updateAutoBtn();
   renderSessionTabs();
@@ -4606,26 +4901,33 @@ let syncStepCounter = 0; // counts steps since last periodic sync
 
 function puterKvKey(sid) { return `arc_session:${sid}`; }
 
-function buildSessionPayload() {
-  if (!sessionId || !currentState.game_id) return null;
+function buildSessionPayload(ss) {
+  const _s = ss || null;
+  const _sid = _s ? _s.sessionId : sessionId;
+  const _cs = _s ? _s.currentState : currentState;
+  const _sc = _s ? _s.stepCount : stepCount;
+  const _buf = _s ? _s.sessionStepsBuffer : sessionStepsBuffer;
+  const _st = _s ? _s.sessionStartTime : sessionStartTime;
+  if (!_sid || !_cs.game_id) return null;
   return {
     session: {
-      id: sessionId,
-      game_id: currentState.game_id,
-      model: getSelectedModel() || '',
+      id: _sid,
+      game_id: _cs.game_id,
+      model: (_s ? _s.model : null) || getSelectedModel() || '',
       mode: MODE,
-      created_at: sessionStartTime || (Date.now() / 1000),
-      result: currentState.state || 'NOT_FINISHED',
-      steps: stepCount,
-      levels: currentState.levels_completed || 0,
+      created_at: _st || (Date.now() / 1000),
+      result: _cs.state || 'NOT_FINISHED',
+      steps: _sc,
+      levels: _cs.levels_completed || 0,
     },
-    steps: sessionStepsBuffer,
+    steps: _buf,
   };
 }
 
-function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResponse) {
+function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResponse, ss) {
+  const _ss = ss || { stepCount, sessionStepsBuffer, syncStepCounter, sessionId: sessionId };
   const stepEntry = {
-    step_num: stepCount,
+    step_num: _ss.stepCount,
     action: actionId,
     data: actionData || {},
     grid: grid,
@@ -4633,27 +4935,29 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
     llm_response: llmResponse || null,
     timestamp: Date.now() / 1000,
   };
-  sessionStepsBuffer.push(stepEntry);
-  syncStepCounter++;
+  _ss.sessionStepsBuffer.push(stepEntry);
+  _ss.syncStepCounter++;
+  if (!ss) { syncStepCounter = _ss.syncStepCounter; }
   updateShareBtnVisibility();
 
   // Save to localStorage periodically (online mode or Pyodide — per-user local history)
-  if ((MODE === 'online' || _pyodideGameActive) && (syncStepCounter % 5 === 0 || stepCount <= 1)) {
-    const payload = buildSessionPayload();
+  if ((MODE === 'online' || _pyodideGameActive) && (_ss.syncStepCounter % 5 === 0 || _ss.stepCount <= 1)) {
+    const payload = buildSessionPayload(ss);
     if (payload) saveLocalSession(payload.session, payload.steps);
   }
 
   // Fire-and-forget puter.kv write (online mode only)
   if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
-    const payload = buildSessionPayload();
+    const payload = buildSessionPayload(ss);
     if (payload) {
-      puter.kv.set(puterKvKey(sessionId), JSON.stringify(payload)).catch(() => {});
+      puter.kv.set(puterKvKey(_ss.sessionId), JSON.stringify(payload)).catch(() => {});
     }
   }
 
   // Periodic sync every 30 steps
-  if (syncStepCounter >= 30) {
-    syncStepCounter = 0;
+  if (_ss.syncStepCounter >= 30) {
+    _ss.syncStepCounter = 0;
+    if (!ss) syncStepCounter = 0;
     autoUploadSession();
   }
 }
@@ -5169,6 +5473,13 @@ async function resumeSession(sid) {
       registerSession(sid, s);
     }
     activeSessionId = sid;
+
+    // Rebuild timelineEvents from step history
+    const _tlSs = sessions.get(sid);
+    if (_tlSs) {
+      _tlSs.timelineEvents = _rebuildTimelineFromSteps(steps);
+    }
+
     saveSessionToState();
     renderSessionTabs();
     saveSessionIndex();
@@ -5287,6 +5598,10 @@ async function branchFromStep(stepNum) {
     bs.gameId = data.game_id || currentState.game_id || '';
     bs.status = data.state || 'NOT_FINISHED';
     registerSession(data.session_id, bs);
+
+    // Rebuild timelineEvents from step history
+    bs.timelineEvents = _rebuildTimelineFromSteps(steps);
+
     saveSessionToState();
     renderSessionTabs();
     saveSessionIndex();
@@ -5400,6 +5715,10 @@ async function branchHere() {
     bs.gameId = data.game_id || '';
     bs.status = data.state || 'NOT_FINISHED';
     registerSession(data.session_id, bs);
+
+    // Rebuild timelineEvents from step history
+    bs.timelineEvents = _rebuildTimelineFromSteps(steps);
+
     saveSessionToState();
     renderSessionTabs();
     saveSessionIndex();
@@ -5778,7 +6097,14 @@ function renderSessionTabs() {
   const newBtn = document.createElement('button');
   newBtn.className = 'session-tab-new';
   newBtn.textContent = '+ New Session';
-  newBtn.onclick = createNewSession;
+  if (sessions.size >= 1) {
+    newBtn.disabled = true;
+    newBtn.title = 'Multi-session coming soon!';
+    newBtn.style.opacity = '0.4';
+    newBtn.style.cursor = 'not-allowed';
+  } else {
+    newBtn.onclick = createNewSession;
+  }
   bar.appendChild(newBtn);
   updateEmptyAppState();
 }
@@ -5841,8 +6167,9 @@ function switchSession(targetId) {
   const target = sessions.get(targetId);
   if (!target) return;
 
-  // Stop autoplay on current session
-  if (autoPlaying) { autoPlaying = false; updateAutoBtn(); }
+  // Clear global autoPlaying flag (the session's ss.autoPlaying keeps running independently)
+  autoPlaying = false;
+  updateAutoBtn();
   // Close replay if open
   closeReplay();
   // Save current session
@@ -5853,10 +6180,6 @@ function switchSession(targetId) {
   activeSessionId = targetId;
   restoreSessionFromState(target);
   renderSessionTabs();
-  // Update spinners to reflect the target session's LLM state
-  const isWaiting = target.waitingForLLM || false;
-  document.getElementById('llmSpinner').style.display = isWaiting ? 'inline' : 'none';
-  document.getElementById('topSpinner').style.display = isWaiting ? 'inline' : 'none';
 
   // If this is a restored stub (no grid data), resume from server
   if (!target.currentGrid && target.sessionId && !target.sessionId.startsWith('pending_')) {
@@ -5870,6 +6193,8 @@ function closeSession(id) {
   // Stop autoplay if running
   if (s.autoPlaying) { s.autoPlaying = false; }
   if (id === activeSessionId && autoPlaying) { autoPlaying = false; updateAutoBtn(); }
+  // Abort in-flight LLM fetch
+  if (s.abortController) { s.abortController.abort(); s.abortController = null; }
 
   // Upload session to main DB before deleting (if enough steps)
   if (id === activeSessionId) saveSessionToState();
