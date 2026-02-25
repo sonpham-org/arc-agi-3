@@ -5152,9 +5152,9 @@ async function loadSessionHistory() {
       return;
     }
     list.innerHTML = '';
-    sessions = sessions.filter(s => (s.steps || 0) >= 20);
+    sessions = sessions.filter(s => (s.steps || 0) >= 5);
     if (!sessions.length) {
-      list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No sessions with 20+ steps yet.</div>';
+      list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No sessions yet. Play a game!</div>';
       return;
     }
     for (const s of sessions) {

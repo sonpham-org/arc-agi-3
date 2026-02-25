@@ -2832,31 +2832,61 @@ def resume_session():
     session_id = payload.get("session_id")
     if not session_id:
         return jsonify({"error": "session_id required"}), 400
-    # Fetch session metadata and step rows from DB
+    # Fetch session metadata and step rows from DB (local SQLite, then Turso fallback)
     try:
         conn = _get_db()
         sess = conn.execute(
             "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
-        if not sess:
-            conn.close()
-            return jsonify({"error": "Session not found"}), 404
+        if sess:
+            sess = dict(sess)
 
-        # For branched sessions, collect parent steps up to branch point first
         parent_rows = []
-        if sess["parent_session_id"] and sess["branch_at_step"] is not None:
-            parent_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                (sess["parent_session_id"], sess["branch_at_step"]),
-            ).fetchall()
+        own_rows = []
 
-        # Then this session's own steps (taken after branching)
-        own_rows = conn.execute(
-            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-            (session_id,),
-        ).fetchall()
+        if sess:
+            if sess.get("parent_session_id") and sess.get("branch_at_step") is not None:
+                parent_rows = conn.execute(
+                    "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                    (sess["parent_session_id"], sess["branch_at_step"]),
+                ).fetchall()
+            own_rows = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                (session_id,),
+            ).fetchall()
         conn.close()
+
+        # Turso fallback: if local SQLite doesn't have this session
+        if not sess or not own_rows:
+            turso_conn = _get_turso_db()
+            if turso_conn:
+                try:
+                    if not sess:
+                        cur = turso_conn.execute(
+                            "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+                            (session_id,),
+                        )
+                        sess = _turso_dict_fetchone(cur)
+                    if sess:
+                        if not own_rows:
+                            cur2 = turso_conn.execute(
+                                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                                (session_id,),
+                            )
+                            own_rows = _turso_dict_fetchall(cur2)
+                        if sess.get("parent_session_id") and sess.get("branch_at_step") is not None and not parent_rows:
+                            cur3 = turso_conn.execute(
+                                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                                (sess["parent_session_id"], sess["branch_at_step"]),
+                            )
+                            parent_rows = _turso_dict_fetchall(cur3)
+                    turso_conn.close()
+                except Exception as e:
+                    app.logger.warning(f"Turso resume fallback failed: {e}")
+
+        if not sess:
+            return jsonify({"error": "Session not found"}), 404
     except Exception as e:
         return jsonify({"error": f"DB error: {e}"}), 500
 
