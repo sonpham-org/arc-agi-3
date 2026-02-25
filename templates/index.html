@@ -975,6 +975,7 @@ class SessionState {
     // Compact context
     this._cachedCompactSummary = '';
     this._compactSummaryAtCall = 0;
+    this._compactSummaryAtStep = 0;
     this._lastCompactPrompt = '';
     // Cost
     this.sessionTotalTokens = { input: 0, output: 0, cost: 0 };
@@ -1030,6 +1031,7 @@ function saveSessionToState() {
   s.syncStepCounter = syncStepCounter;
   s._cachedCompactSummary = _cachedCompactSummary;
   s._compactSummaryAtCall = _compactSummaryAtCall;
+  s._compactSummaryAtStep = _compactSummaryAtStep;
   s._lastCompactPrompt = _lastCompactPrompt;
   // Save reasoning HTML
   const rc = document.getElementById('reasoningContent');
@@ -1062,6 +1064,7 @@ function restoreSessionFromState(s) {
   syncStepCounter = s.syncStepCounter;
   _cachedCompactSummary = s._cachedCompactSummary;
   _compactSummaryAtCall = s._compactSummaryAtCall;
+  _compactSummaryAtStep = s._compactSummaryAtStep;
   _lastCompactPrompt = s._lastCompactPrompt;
 
   // Restore reasoning HTML
@@ -2319,6 +2322,7 @@ async function startGame(gameId) {
   turnCounter = 0;
   _cachedCompactSummary = '';
   _compactSummaryAtCall = 0;
+  _compactSummaryAtStep = 0;
   moveHistory = [];
   undoStack = [];
   sessionStepsBuffer = [];
@@ -2655,6 +2659,7 @@ function collectObservation(resp) {
 
 let _cachedCompactSummary = '';  // LLM-generated summary, cached until refreshed
 let _compactSummaryAtCall = 0;   // llmCallCount when summary was last generated
+let _compactSummaryAtStep = 0;   // stepCount when summary was last generated (history cutoff)
 let _lastCompactPrompt = '';     // last prompt sent to compact model
 
 function _syncCompactToMemoryTab() {
@@ -2670,6 +2675,7 @@ function applyCompactEdit() {
   if (el) {
     _cachedCompactSummary = el.value;
     _compactSummaryAtCall = llmCallCount;
+    _compactSummaryAtStep = stepCount;
   }
 }
 
@@ -2836,6 +2842,7 @@ Progress: Level ${currentState.levels_completed || 0}/${currentState.win_levels 
     if (summary) {
       _cachedCompactSummary = `## COMPACT CONTEXT (LLM-summarized game knowledge)\n${summary}`;
       _compactSummaryAtCall = llmCallCount;
+      _compactSummaryAtStep = stepCount;
       _syncCompactToMemoryTab();
       return _cachedCompactSummary;
     }
@@ -2872,6 +2879,7 @@ async function manualCompact() {
       _cachedCompactSummary = summary;
       _syncCompactToMemoryTab();
       _compactSummaryAtCall = llmCallCount;
+      _compactSummaryAtStep = stepCount;
       logSessionEvent('compact', stepCount, { call_count: llmCallCount, history_length: moveHistory.length, trigger: 'manual' });
       const content = document.getElementById('reasoningContent');
       if (content.querySelector('.empty-state')) content.innerHTML = '';
@@ -3072,10 +3080,14 @@ async function askLLM() {
       content.insertBefore(cEntry, content.firstChild);
     }
 
-    // Trim history grids if approaching context limit
-    const historyForLLM = compact.enabled
-      ? trimHistoryForTokens(moveHistory, maxHistTokens)
+    // When compact context exists, only send history AFTER the compaction point
+    // (the compact summary already covers everything before it)
+    const postCompactHistory = (compactBlock && _compactSummaryAtStep > 0)
+      ? moveHistory.filter(h => h.step > _compactSummaryAtStep)
       : moveHistory;
+    const historyForLLM = compact.enabled
+      ? trimHistoryForTokens(postCompactHistory, maxHistTokens)
+      : postCompactHistory;
 
     // Determine if this model uses client-side LLM (Puter.js/BYOK)
     const modelInfo = getModelInfo(model);
@@ -3409,6 +3421,7 @@ async function executePlan(plan, resp, entry, expected) {
         _cachedCompactSummary = summary;
         _syncCompactToMemoryTab();
         _compactSummaryAtCall = llmCallCount;
+        _compactSummaryAtStep = stepCount;
         logSessionEvent('compact', stepCount, { trigger: 'level_up', level: levelsAfter });
         const cEntry = document.createElement('div');
         cEntry.className = 'reasoning-entry';
@@ -3474,6 +3487,7 @@ async function executeOneAction(resp) {
         _cachedCompactSummary = summary;
         _syncCompactToMemoryTab();
         _compactSummaryAtCall = llmCallCount;
+        _compactSummaryAtStep = stepCount;
         logSessionEvent('compact', stepCount, { trigger: 'level_up', level: levelsAfter });
         const cEntry = document.createElement('div');
         cEntry.className = 'reasoning-entry';
@@ -5045,6 +5059,7 @@ async function resumeSession(sid) {
     autoPlaying = false;
     _cachedCompactSummary = '';
     _compactSummaryAtCall = 0;
+    _compactSummaryAtStep = 0;
     undoStack = [];
     syncStepCounter = 0;
 
@@ -5186,6 +5201,7 @@ async function branchFromStep(stepNum) {
     syncStepCounter = 0;
     _cachedCompactSummary = '';
     _compactSummaryAtCall = 0;
+    _compactSummaryAtStep = 0;
     autoPlaying = false;
 
     // Rebuild state from returned steps (same as resume)
@@ -5301,6 +5317,7 @@ async function branchHere() {
     syncStepCounter = 0;
     _cachedCompactSummary = '';
     _compactSummaryAtCall = 0;
+    _compactSummaryAtStep = 0;
     autoPlaying = false;
     replayData = null;
 
@@ -5797,6 +5814,7 @@ function createNewSession() {
   syncStepCounter = 0;
   _cachedCompactSummary = '';
   _compactSummaryAtCall = 0;
+  _compactSummaryAtStep = 0;
   _lastCompactPrompt = '';
   // Reset UI
   canvas.style.display = 'none';
