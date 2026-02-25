@@ -303,7 +303,9 @@ def _init_db():
     # Schema migration: add columns (idempotent)
     for col, defn in [("parent_session_id", "TEXT DEFAULT NULL"),
                       ("branch_at_step", "INTEGER DEFAULT NULL"),
-                      ("total_cost", "REAL DEFAULT 0")]:
+                      ("total_cost", "REAL DEFAULT 0"),
+                      ("prompts_json", "TEXT DEFAULT NULL"),
+                      ("timeline_json", "TEXT DEFAULT NULL")]:
         try:
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
@@ -526,7 +528,9 @@ def _init_turso_db():
                 levels INTEGER DEFAULT 0,
                 parent_session_id TEXT DEFAULT NULL,
                 branch_at_step INTEGER DEFAULT NULL,
-                total_cost REAL DEFAULT 0
+                total_cost REAL DEFAULT 0,
+                prompts_json TEXT DEFAULT NULL,
+                timeline_json TEXT DEFAULT NULL
             );
             CREATE TABLE IF NOT EXISTS session_steps (
                 session_id TEXT NOT NULL,
@@ -541,6 +545,13 @@ def _init_turso_db():
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
         """)
+        # Schema migration: add columns (idempotent)
+        for col, defn in [("prompts_json", "TEXT DEFAULT NULL"),
+                          ("timeline_json", "TEXT DEFAULT NULL")]:
+            try:
+                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
+            except Exception:
+                pass  # column already exists
         conn.commit()
         conn.sync()
         conn.close()
@@ -557,18 +568,22 @@ def _turso_import_session(payload):
     try:
         sess = payload.get("session")
         steps = payload.get("steps", [])
+        prompts_json = json.dumps(sess.get("prompts")) if sess.get("prompts") else None
+        timeline_json = json.dumps(sess.get("timeline")) if sess.get("timeline") else None
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
-                 model = COALESCE(excluded.model, sessions.model)""",
+                 model = COALESCE(excluded.model, sessions.model),
+                 prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
+                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step")),
+             sess.get("branch_at_step"), prompts_json, timeline_json),
         )
         for s in steps:
             grid_snapshot = None
@@ -2761,19 +2776,23 @@ def import_session():
     if len(steps) < 20:
         return _cors_resp({"error": "Session too short (min 20 steps)", "skipped": True})
     try:
+        prompts_json = json.dumps(sess.get("prompts")) if sess.get("prompts") else None
+        timeline_json = json.dumps(sess.get("timeline")) if sess.get("timeline") else None
         conn = _get_db()
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
-                 model = COALESCE(excluded.model, sessions.model)""",
+                 model = COALESCE(excluded.model, sessions.model),
+                 prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
+                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step")),
+             sess.get("branch_at_step"), prompts_json, timeline_json),
         )
         for s in steps:
             grid_snapshot = None
@@ -3118,7 +3137,7 @@ def share_session(session_id):
             try:
                 cur = turso_conn.execute(
                     "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
-                    "parent_session_id, branch_at_step "
+                    "parent_session_id, branch_at_step, prompts_json, timeline_json "
                     "FROM sessions WHERE id = ?",
                     (session_id,),
                 )
@@ -3140,7 +3159,7 @@ def share_session(session_id):
             conn = _get_db()
             sess_row = conn.execute(
                 "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
-                "parent_session_id, branch_at_step "
+                "parent_session_id, branch_at_step, prompts_json, timeline_json "
                 "FROM sessions WHERE id = ?",
                 (session_id,),
             ).fetchone()
@@ -3200,6 +3219,20 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
         if parent_steps:
             step_list = parent_steps + step_list
 
+        # Parse prompts and timeline from session metadata
+        prompts = None
+        timeline = None
+        if sess.get("prompts_json"):
+            try:
+                prompts = json.loads(sess["prompts_json"]) if isinstance(sess["prompts_json"], str) else sess["prompts_json"]
+            except Exception:
+                pass
+        if sess.get("timeline_json"):
+            try:
+                timeline = json.loads(sess["timeline_json"]) if isinstance(sess["timeline_json"], str) else sess["timeline_json"]
+            except Exception:
+                pass
+
         return render_template(
             "share.html",
             session=sess,
@@ -3207,6 +3240,8 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
             color_map=COLOR_MAP,
             branch_at_step=len(parent_steps) if parent_steps else 0,
             umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
+            prompts=prompts,
+            timeline=timeline,
         )
     except Exception as e:
         app.logger.warning(f"Share page error: {e}")

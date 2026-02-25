@@ -158,6 +158,8 @@
   }
   .timeline-block:hover { opacity: 0.85; }
   .timeline-block.reasoning { background: #58a6ff22; color: var(--accent); border-left: 3px solid var(--accent); }
+  .timeline-block.compact   { background: #bc8cff22; color: var(--purple); border-left: 3px solid var(--purple); }
+  .timeline-block.interrupt  { background: #e3b34122; color: var(--yellow); border-left: 3px solid var(--yellow); }
   .timeline-block .tl-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .timeline-block .tl-dur   { font-size: 10px; opacity: 0.7; flex-shrink: 0; margin-left: 8px; }
   .tl-steps { margin-left: 8px; font-weight: 400; font-size: 10px; opacity: 0.7; }
@@ -253,7 +255,14 @@
     <!-- Prompt -->
     <div class="subtab-pane" id="pane-prompt">
       <div class="prompt-scroll" id="promptContent">
-        <div class="prompt-empty">Prompt data not stored in replay sessions.</div>
+        {% if prompts %}
+        <div class="prompt-section"><label>System Prompt</label><div class="prompt-box">{{ prompts.system_prompt or '(not set)' }}</div></div>
+        <div class="prompt-section"><label>Agent Priors</label><div class="prompt-box">{{ prompts.hard_memory or '(not set)' }}</div></div>
+        <div class="prompt-section"><label>Compact Prompt</label><div class="prompt-box">{{ prompts.compact_prompt or '(not set)' }}</div></div>
+        <div class="prompt-section"><label>Interrupt Prompt</label><div class="prompt-box">{{ prompts.interrupt_prompt or '(not set)' }}</div></div>
+        {% else %}
+        <div class="prompt-empty">No prompt data available for this session.</div>
+        {% endif %}
       </div>
     </div>
 
@@ -279,6 +288,7 @@ const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACT5',6:'C
 const SESSION = {{ session | tojson }};
 const STEPS = {{ steps | tojson }};
 const BRANCH_AT_STEP = {{ branch_at_step | default(0) }};
+const TIMELINE_DATA = {{ timeline | tojson if timeline else '[]' }};
 
 const canvas = document.getElementById('replayCanvas');
 const ctx = canvas.getContext('2d');
@@ -314,19 +324,24 @@ function switchTab(tab) {
 function renderShareTimeline() {
   const container = document.getElementById('timelineContent');
   if (!container) return;
-  // Build events from stepGroups (only LLM reasoning blocks have timing)
-  const events = [];
-  let turnNum = 0;
-  for (const g of stepGroups) {
-    if (g.type === 'llm' && g.llm) {
-      turnNum++;
-      const dur = g.llm.call_duration_ms || 0;
-      if (dur > 0) {
-        const plan = g.llm.parsed?.plan && Array.isArray(g.llm.parsed.plan) ? g.llm.parsed.plan : [{ action: g.llm.parsed?.action }];
-        events.push({
-          type: 'reasoning', duration: dur, turn: turnNum, model: g.llm.model || '',
-          stepStart: g.steps[0].step_num, actions: plan.map(p => p.action),
-        });
+  // Prefer server-provided timeline data (includes compact/interrupt),
+  // fall back to reconstructing from step groups (reasoning only)
+  let events = [];
+  if (TIMELINE_DATA && TIMELINE_DATA.length) {
+    events = TIMELINE_DATA;
+  } else {
+    let turnNum = 0;
+    for (const g of stepGroups) {
+      if (g.type === 'llm' && g.llm) {
+        turnNum++;
+        const dur = g.llm.call_duration_ms || 0;
+        if (dur > 0) {
+          const plan = g.llm.parsed?.plan && Array.isArray(g.llm.parsed.plan) ? g.llm.parsed.plan : [{ action: g.llm.parsed?.action }];
+          events.push({
+            type: 'reasoning', duration: dur, turn: turnNum, model: g.llm.model || '',
+            stepStart: g.steps[0].step_num, actions: plan.map(p => p.action),
+          });
+        }
       }
     }
   }
@@ -338,15 +353,19 @@ function renderShareTimeline() {
   // Top-to-bottom for replay (ascending turn order)
   const turns = {};
   for (const ev of events) {
-    if (!turns[ev.turn]) turns[ev.turn] = [];
-    turns[ev.turn].push(ev);
+    const t = ev.turn || 0;
+    if (!turns[t]) turns[t] = [];
+    turns[t].push(ev);
   }
   for (const turn of Object.keys(turns).sort((a, b) => a - b)) {
     html += `<div class="timeline-turn-marker">Turn ${turn}</div>`;
     for (const ev of turns[turn]) {
       const h = Math.max(28, Math.min(120, ev.duration / 50));
       const dur = (ev.duration / 1000).toFixed(1) + 's';
-      const label = ev.model || 'Reasoning';
+      const evType = ev.type || 'reasoning';
+      const label = evType === 'reasoning'
+        ? (ev.model || 'Reasoning')
+        : evType.charAt(0).toUpperCase() + evType.slice(1);
       let stepsHtml = '';
       if (ev.actions && ev.actions.length) {
         const stepParts = ev.actions.map((a, i) => {
@@ -356,7 +375,8 @@ function renderShareTimeline() {
         });
         stepsHtml = `<span class="tl-steps">${stepParts.join(' ')}</span>`;
       }
-      html += `<div class="timeline-block reasoning" style="height:${h}px">
+      const colorClass = evType === 'compact' ? 'compact' : evType === 'interrupt' ? 'interrupt' : 'reasoning';
+      html += `<div class="timeline-block ${colorClass}" style="height:${h}px">
         <span class="tl-label">${esc(label)}${stepsHtml}</span><span class="tl-dur">${dur}</span>
       </div>`;
     }

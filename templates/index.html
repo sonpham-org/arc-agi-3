@@ -4901,6 +4901,15 @@ let syncStepCounter = 0; // counts steps since last periodic sync
 
 function puterKvKey(sid) { return `arc_session:${sid}`; }
 
+function _collectPrompts() {
+  return {
+    system_prompt: document.getElementById('memorySystemPrompt')?.value || '',
+    hard_memory: document.getElementById('memoryHardMemory')?.value || '',
+    compact_prompt: document.getElementById('memoryCompactPrompt')?.value || '',
+    interrupt_prompt: document.getElementById('memoryInterruptPrompt')?.value || '',
+  };
+}
+
 function buildSessionPayload(ss) {
   const _s = ss || null;
   const _sid = _s ? _s.sessionId : sessionId;
@@ -4909,6 +4918,7 @@ function buildSessionPayload(ss) {
   const _buf = _s ? _s.sessionStepsBuffer : sessionStepsBuffer;
   const _st = _s ? _s.sessionStartTime : sessionStartTime;
   if (!_sid || !_cs.game_id) return null;
+  const _tlEvents = _s ? _s.timelineEvents : (getActiveSession()?.timelineEvents || []);
   return {
     session: {
       id: _sid,
@@ -4919,6 +4929,8 @@ function buildSessionPayload(ss) {
       result: _cs.state || 'NOT_FINISHED',
       steps: _sc,
       levels: _cs.levels_completed || 0,
+      prompts: _collectPrompts(),
+      timeline: _tlEvents,
     },
     steps: _buf,
   };
@@ -4994,6 +5006,8 @@ function uploadClosedSession(s) {
       result: s.currentState?.state || s.status || 'NOT_FINISHED',
       steps: s.stepCount || steps.length,
       levels: s.currentState?.levels_completed || 0,
+      prompts: _collectPrompts(),
+      timeline: s.timelineEvents || [],
     },
     steps: steps,
   };
