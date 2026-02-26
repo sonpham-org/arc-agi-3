@@ -854,7 +854,7 @@ const _linearReasoningFields = [
       hint: 'On = Python sandbox' + (MODE === 'prod' ? ' (Pyodide)' : '') },
   ]},
   { type: 'multiswitch', id: 'planningMode', name: 'planMode', label: 'Planning horizon',
-    options: [{v:'off',l:'Off'},{v:'5',l:'5'},{v:'10',l:'10',checked:true},{v:'20',l:'20'},{v:'unlimited',l:'\u221E'}],
+    options: [{v:'off',l:'Off'},{v:'5',l:'5'},{v:'10',l:'10',checked:true},{v:'15',l:'15'},{v:'20',l:'20'},{v:'unlimited',l:'\u221E'}],
     hint: 'LLM returns a multi-step plan instead of one action. Saves tokens.' },
   { type: 'number-spin', id: 'maxTokensLimit', label: 'Max tokens',
     default: 16384, min: 1024, max: 65536, step: 1024, spinFn: 'spinMaxTokens' },
