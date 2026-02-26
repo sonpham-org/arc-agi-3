@@ -831,7 +831,7 @@ const _linearReasoningFields = [
       hint: 'Thinking token budget' },
     { type: 'triswitch', id: 'toolsMode', name: 'toolsMode', label: 'Tool calls',
       options: [{v:'off',l:'Off'},{v:'on',l:'On',checked:true}],
-      hint: 'On = Python sandbox' + (MODE === 'online' ? ' (Pyodide)' : '') },
+      hint: 'On = Python sandbox' + (MODE === 'prod' ? ' (Pyodide)' : '') },
   ]},
   { type: 'multiswitch', id: 'planningMode', name: 'planMode', label: 'Planning horizon',
     options: [{v:'off',l:'Off'},{v:'5',l:'5'},{v:'10',l:'10',checked:true},{v:'20',l:'20'},{v:'unlimited',l:'\u221E'}],
@@ -2544,7 +2544,7 @@ function updateByokPrompt() {
   }
   // In online mode, all providers except puter/copilot/ollama/local need BYOK keys
   const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = MODE === 'online' ? !freeProviders.includes(info.provider) : !info.available;
+  const needsKey = MODE === 'prod' ? !freeProviders.includes(info.provider) : !info.available;
   if (needsKey) {
     const label = PROVIDER_LABELS[info.provider] || info.provider;
     keyInput.placeholder = `Paste API key for ${label} here...`;
@@ -2620,7 +2620,7 @@ function updateCompactByokPrompt() {
 
   // Check if compact model needs a key
   const freeProviders2 = ['puter', 'copilot', 'ollama', 'local'];
-  const compactNeedsKey = MODE === 'online' ? !freeProviders2.includes(info.provider) : !info.available;
+  const compactNeedsKey = MODE === 'prod' ? !freeProviders2.includes(info.provider) : !info.available;
   if (compactNeedsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
     const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
@@ -2678,7 +2678,7 @@ function updateInterruptByokPrompt() {
   }
 
   const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = MODE === 'online' ? !freeProviders.includes(info.provider) : !info.available;
+  const needsKey = MODE === 'prod' ? !freeProviders.includes(info.provider) : !info.available;
   if (needsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
     const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
@@ -2957,7 +2957,7 @@ async function fetchJSON(url, body) {
 async function loadGames() {
   let games = await fetchJSON('/api/games');
   // Hide "Find the Difference" on the online/global server for now
-  if (MODE === 'online') games = games.filter(g => g.game_id !== 'fd01-00000001');
+  if (MODE === 'prod') games = games.filter(g => g.game_id !== 'fd01-00000001');
   const el = document.getElementById('gameList');
   el.innerHTML = '';
   games.forEach(g => {
@@ -5409,7 +5409,7 @@ async function loadSessionHistory() {
       // Merge with localStorage sessions (online mode), dedup by id
       const byId = {};
       for (const s of serverSessions) byId[s.id] = s;
-      if (MODE === 'online') {
+      if (MODE === 'prod') {
         for (const s of getLocalSessions()) {
           if (!byId[s.id]) byId[s.id] = s;
         }
@@ -5418,7 +5418,7 @@ async function loadSessionHistory() {
       sessions.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
     } catch (e) {
       // Fallback to localStorage only
-      sessions = MODE === 'online' ? getLocalSessions() : [];
+      sessions = MODE === 'prod' ? getLocalSessions() : [];
     }
     if (!sessions.length) {
       list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No sessions yet. Play a game!</div>';
@@ -5474,7 +5474,7 @@ async function loadSessionHistory() {
 async function loadReplay(sid) {
   try {
     let data;
-    if (MODE === 'online') {
+    if (MODE === 'prod') {
       data = getLocalSessionData(sid);
       if (!data) {
         data = await fetchJSON(`/api/sessions/${sid}`);
@@ -5706,13 +5706,13 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
   updateShareBtnVisibility();
 
   // Save to localStorage periodically (online mode or Pyodide — per-user local history)
-  if ((MODE === 'online' || _pyodideGameActive) && (_ss.syncStepCounter % 5 === 0 || _ss.stepCount <= 1)) {
+  if ((MODE === 'prod' || _pyodideGameActive) && (_ss.syncStepCounter % 5 === 0 || _ss.stepCount <= 1)) {
     const payload = buildSessionPayload(ss);
     if (payload) saveLocalSession(payload.session, payload.steps);
   }
 
   // Fire-and-forget puter.kv write (online mode only)
-  if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+  if (MODE === 'prod' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
     const payload = buildSessionPayload(ss);
     if (payload) {
       puter.kv.set(puterKvKey(_ss.sessionId), JSON.stringify(payload)).catch(() => {});
@@ -5775,7 +5775,7 @@ function uploadClosedSession(s) {
     body: JSON.stringify(payload),
   }).catch(() => {});
   // Also upload to Railway if running locally
-  if (MODE === 'local') {
+  if (MODE === 'staging') {
     fetch('https://arc3.sonpham.net/api/sessions/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -5794,19 +5794,19 @@ function checkSessionEndAndUpload() {
   renderSessionTabs();
   if (st === 'WIN' || st === 'GAME_OVER') {
     // Final save to localStorage (online mode or Pyodide)
-    if (MODE === 'online' || _pyodideGameActive) {
+    if (MODE === 'prod' || _pyodideGameActive) {
       const payload = buildSessionPayload();
       if (payload) saveLocalSession(payload.session, payload.steps);
     }
     // Auto-upload completed session to server
     autoUploadSession().then(() => {
       // Clean up puter.kv entry on success (online mode only)
-      if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+      if (MODE === 'prod' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
         puter.kv.del(puterKvKey(sessionId)).catch(() => {});
       }
     });
     // Upload to Railway for sharing (local mode only — online already uploads to itself)
-    if (MODE === 'local') {
+    if (MODE === 'staging') {
       const payload = buildSessionPayload();
       if (payload && (payload.steps || []).length >= MIN_STEPS_FOR_UPLOAD) {
         fetch('https://arc3.sonpham.net/api/sessions/import', {
@@ -5825,7 +5825,7 @@ function checkSessionEndAndUpload() {
 }
 
 function showShareLink(sid) {
-  const base = (MODE === 'local') ? 'https://arc3.sonpham.net' : '';
+  const base = (MODE === 'staging') ? 'https://arc3.sonpham.net' : '';
   const url = `${base}/share/${sid}`;
   // Remove existing share banner if any
   const old = document.getElementById('shareBanner');
@@ -5863,7 +5863,7 @@ async function shareCurrentSession() {
       body: JSON.stringify(payload),
     });
     // Also upload to Railway if running locally
-    if (MODE === 'local') {
+    if (MODE === 'staging') {
       const resp = await fetch('https://arc3.sonpham.net/api/sessions/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5958,7 +5958,7 @@ async function resumeFromPuterKv(kvKey) {
 
 function dismissResumeBanner(kvKey) {
   document.getElementById('resumeBanner')?.remove();
-  if (MODE === 'online' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
+  if (MODE === 'prod' && FEATURES.puter_js && typeof puter !== 'undefined' && puter.kv) {
     puter.kv.del(kvKey).catch(() => {});
   }
 }
@@ -6713,7 +6713,7 @@ async function loadBrowseByGame() {
   // Populate game list
   try {
     let games = await fetchJSON('/api/games');
-    if (MODE === 'online') games = games.filter(g => g.game_id !== 'fd01-00000001');
+    if (MODE === 'prod') games = games.filter(g => g.game_id !== 'fd01-00000001');
     listEl.innerHTML = '';
     for (const g of games) {
       const div = document.createElement('div');
@@ -6759,7 +6759,7 @@ async function loadBrowseGlobal() {
   try {
     const allSessions = await fetchAllSessions(true);
     let filtered = allSessions.filter(s => (s.steps || 0) >= 20);
-    if (MODE === 'online') filtered = filtered.filter(s => s.game_id !== 'fd01-00000001');
+    if (MODE === 'prod') filtered = filtered.filter(s => s.game_id !== 'fd01-00000001');
     const header = document.getElementById('browseGlobalHeader');
     header.textContent = `All sessions from server (${filtered.length} with 20+ steps)`;
     if (!filtered.length) {
@@ -6797,7 +6797,7 @@ async function fetchAllSessions(forceRefresh) {
   const data = await fetchJSON('/api/sessions');
   let serverSessions = data.sessions || [];
   // Merge localStorage sessions (dedup)
-  if (MODE === 'online') {
+  if (MODE === 'prod') {
     const byId = {};
     for (const s of serverSessions) byId[s.id] = s;
     for (const s of getLocalSessions()) { if (!byId[s.id]) byId[s.id] = s; }
