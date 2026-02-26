@@ -4074,6 +4074,9 @@ async function askLLM(ss) {
     } else {
       // ── Client-side LLM (Puter.js or BYOK) ────────────────────────────
       const prompt = buildClientPrompt(_cur.currentState, historyForLLM, _cur.currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
+      // Stash grid context for BYOK MALFORMED_FUNCTION_CALL recovery (Pyodide)
+      window._lastLLMGrid = _cur.currentState.grid;
+      window._lastLLMPrevGrid = _ss ? _ss.previousGrid : previousGrid;
       let rawContent;
       try {
         if (isByokModel) {
@@ -5255,8 +5258,34 @@ async function askLLMBYOK(prompt, model, maxTokens = 16384) {
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     const fr = data.candidates?.[0]?.finishReason;
     // MALFORMED_FUNCTION_CALL: model emitted code instead of a proper function call.
-    // Retry without tools (plain text generation) since client-side has no sandbox.
+    // Extract code from finishMessage and run it via Pyodide (mirrors server-side recovery).
     if (fr === 'MALFORMED_FUNCTION_CALL') {
+      const finishMsg = data.candidates?.[0]?.finishMessage || '';
+      const codeMatch = finishMsg.match(/```python\s*\n([\s\S]*?)```/);
+      if (codeMatch && _pyodideReady) {
+        console.warn('BYOK Gemini: MALFORMED_FUNCTION_CALL — extracting code, running via Pyodide');
+        const code = codeMatch[1].trim();
+        const grid = window._lastLLMGrid || [[]];
+        const prevGrid = window._lastLLMPrevGrid || null;
+        const output = await runPyodide(code, grid, prevGrid);
+        // Feed the code output back to the model for a proper text answer
+        const retryResp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              { parts: [{ text: prompt }] },
+              { role: 'model', parts: [{ text: '```python\n' + code + '\n```' }] },
+              { parts: [{ text: '[Code output]:\n' + output + '\n\nBased on this analysis, provide your answer as JSON only. No code.' }] },
+            ],
+            generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
+          }),
+        });
+        const retryData = await retryResp.json();
+        if (retryData.error) throw new Error(retryData.error.message || JSON.stringify(retryData.error));
+        return retryData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      }
+      // No code or no Pyodide — retry without tools
       console.warn('BYOK Gemini: MALFORMED_FUNCTION_CALL, retrying without tools');
       const retryResp = await fetch(url, {
         method: 'POST',
