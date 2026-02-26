@@ -905,6 +905,9 @@ OLLAMA_VRAM = {
 # Models that support vision via Ollama (llava family)
 OLLAMA_VISION_MODELS = {"llava", "llava:latest", "llava:13b", "bakllava"}
 
+# Runtime dict of discovered local OpenAI-compatible models (populated by /api/llm/models)
+_discovered_local_models: dict = {}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # GRID HELPERS
@@ -1171,6 +1174,371 @@ def _cleanup_tool_session(session_id: str):
     """Remove a tool session when the game session is reset/ended."""
     with _tool_session_lock:
         _tool_sessions.pop(session_id, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RLM (RECURSIVE LANGUAGE MODEL) SCAFFOLDING
+# ═══════════════════════════════════════════════════════════════════════════
+
+_RLM_SYSTEM_PROMPT = """\
+You are tasked with answering a query about a game environment. You can access, transform, \
+and analyze the game context interactively in a REPL environment that can recursively query \
+sub-LLMs. You will be queried iteratively until you provide a final answer.
+
+The REPL environment is initialized with:
+1. A `context` variable (dict) containing the full game state: grid, history, change_map, \
+available_actions, levels_completed, win_levels, game_id, compact_context.
+2. `llm_query(prompt) -> str` — fast single LLM call for analysis/reasoning.
+3. `llm_query_batched(prompts) -> list[str]` — concurrent batch of llm_query calls.
+4. `SHOW_VARS()` — lists all variables you've created in the REPL.
+5. `print()` to view REPL output.
+
+Write code in ```repl blocks (not ```python). Variables persist across iterations.
+
+When you have determined the best action, call FINAL() with a JSON object:
+  FINAL({"action": <int>, "reasoning": "...", "observation": "..."})
+
+For multi-step plans:
+  FINAL({"plan": [{"action": <int>, "observation": "..."}, ...], "reasoning": "..."})
+
+Or use FINAL_VAR(variable_name) to return a variable containing the JSON.
+
+IMPORTANT: The action must be one of the available_actions integers. \
+Do NOT provide a final answer until you have analyzed the game state."""
+
+_RLM_USER_PROMPT_FIRST = """\
+Your game context is stored in the `context` variable (dict). It contains:
+- context['grid']: 2D list of color values (the current game board)
+- context['available_actions']: list of valid action integers
+- context['history']: recent move history
+- context['change_map']: cells that changed since last action
+- context['levels_completed']: current progress
+- context['win_levels']: target levels to win
+- context['compact_context']: summarized game knowledge (if available)
+
+Think step-by-step about what to do using the REPL environment to analyze the game state \
+and determine the best action. Start by examining the context."""
+
+_RLM_USER_PROMPT_CONTINUE = """\
+Continue using the REPL environment to analyze the game context and determine your next action. \
+Your next action:"""
+
+# RLM REPL sessions — separate from tool sessions, include llm_query etc.
+_RLM_REPL_CODE_PATTERN = re.compile(r"```repl\s*\n(.*?)\n```", re.DOTALL)
+_RLM_FINAL_PATTERN = re.compile(r"^\s*FINAL\((.+)\)\s*$", re.MULTILINE | re.DOTALL)
+_RLM_FINAL_VAR_PATTERN = re.compile(r"^\s*FINAL_VAR\((\w+)\)", re.MULTILINE)
+
+
+def _create_rlm_repl(session_id: str, context: dict, model_key: str,
+                      thinking_level: str, max_tokens: int,
+                      sub_model_key: str | None = None,
+                      sub_thinking_level: str = "low",
+                      sub_max_tokens: int = 8192,
+                      max_depth: int = 1, current_depth: int = 0) -> dict:
+    """Create an RLM REPL environment with llm_query/rlm_query injected."""
+    import numpy as np
+    import collections
+    import itertools
+
+    # Build safe builtins (same as tool sessions)
+    if isinstance(__builtins__, dict):
+        safe_builtins = dict(__builtins__)
+    else:
+        safe_builtins = {k: getattr(__builtins__, k) for k in dir(__builtins__)
+                         if not k.startswith('_')}
+        safe_builtins['__import__'] = __builtins__.__import__
+    safe_builtins['open'] = None
+    safe_builtins['eval'] = None
+    safe_builtins['exec'] = None
+    safe_builtins['compile'] = None
+    safe_builtins['breakpoint'] = None
+    safe_builtins['exit'] = None
+    safe_builtins['quit'] = None
+    safe_builtins['__import__'] = _safe_import
+
+    ns = {
+        '__builtins__': safe_builtins,
+        'np': np,
+        'numpy': np,
+        'collections': collections,
+        'itertools': itertools,
+        'Counter': collections.Counter,
+        'defaultdict': collections.defaultdict,
+        'context': context,
+    }
+
+    # Track final answer
+    repl_state = {
+        'namespace': ns,
+        'final_answer': None,
+        'sub_call_count': 0,
+        'max_sub_calls': 50,  # safety limit
+    }
+
+    # ── llm_query: single LLM call (no REPL, no recursion) ──
+    def llm_query(prompt: str) -> str:
+        if repl_state['sub_call_count'] >= repl_state['max_sub_calls']:
+            return "[ERROR] Maximum sub-LLM call limit reached."
+        repl_state['sub_call_count'] += 1
+        _model = sub_model_key or model_key
+        try:
+            result = _route_model_call(
+                _model, prompt, None,
+                thinking_level=sub_thinking_level,
+                max_tokens=sub_max_tokens,
+            )
+            if isinstance(result, dict):
+                return result.get("text", "")
+            return str(result)
+        except Exception as e:
+            return f"[LLM ERROR] {e}"
+
+    # ── llm_query_batched: concurrent batch ──
+    def llm_query_batched(prompts: list) -> list:
+        import concurrent.futures
+        results = [None] * len(prompts)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(prompts), 4)) as ex:
+            futures = {ex.submit(llm_query, p): i for i, p in enumerate(prompts)}
+            for f in concurrent.futures.as_completed(futures):
+                results[futures[f]] = f.result()
+        return results
+
+    # ── SHOW_VARS ──
+    def show_vars() -> str:
+        user_vars = {k: type(v).__name__ for k, v in ns.items()
+                     if not k.startswith('_') and k not in (
+                         'np', 'numpy', 'collections', 'itertools',
+                         'Counter', 'defaultdict', 'context',
+                         'llm_query', 'llm_query_batched', 'SHOW_VARS',
+                         'FINAL', 'FINAL_VAR')}
+        lines = [f"  {k}: {t}" for k, t in sorted(user_vars.items())]
+        result = "User variables:\n" + ("\n".join(lines) if lines else "  (none)")
+        return result
+
+    # ── FINAL_VAR ──
+    def final_var(var_name: str):
+        val = ns.get(var_name)
+        if val is None:
+            return f"[ERROR] Variable '{var_name}' not found. Use SHOW_VARS() to see available variables."
+        repl_state['final_answer'] = str(val) if not isinstance(val, str) else val
+        return repl_state['final_answer']
+
+    ns['llm_query'] = llm_query
+    ns['llm_query_batched'] = llm_query_batched
+    ns['SHOW_VARS'] = show_vars
+    ns['FINAL_VAR'] = final_var
+    # FINAL is parsed from text, not a callable — the LM writes FINAL(...) in prose
+
+    return repl_state
+
+
+def _rlm_execute_code(repl_state: dict, code: str, timeout: float = 10.0,
+                      max_output: int = 20_000) -> str:
+    """Execute code in the RLM REPL, capturing output."""
+    ns = repl_state['namespace']
+    output_buf = io.StringIO()
+    error = [None]
+
+    def _run():
+        import builtins
+        def captured_print(*args, **kwargs):
+            kwargs['file'] = output_buf
+            builtins.print(*args, **kwargs)
+        if isinstance(ns['__builtins__'], dict):
+            ns['__builtins__']['print'] = captured_print
+        try:
+            exec(code, ns)
+        except Exception as e:
+            error[0] = f"{type(e).__name__}: {e}"
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+
+    if t.is_alive():
+        return "[TIMEOUT] Code execution exceeded time limit."
+
+    output = output_buf.getvalue()
+    if error[0]:
+        output = (output + "\n" + error[0]).strip()
+
+    # Truncate
+    if len(output) > max_output:
+        truncated = len(output) - max_output
+        output = output[:max_output] + f"\n... [{truncated} chars truncated]"
+
+    return output or "(no output)"
+
+
+def _rlm_find_final(text: str, repl_state: dict) -> str | None:
+    """Check for FINAL() or FINAL_VAR() in LLM response text (outside code blocks)."""
+    # Strip code blocks before checking
+    stripped = _RLM_REPL_CODE_PATTERN.sub("", text)
+
+    # FINAL_VAR first
+    m = _RLM_FINAL_VAR_PATTERN.search(stripped)
+    if m:
+        var_name = m.group(1).strip()
+        val = repl_state['namespace'].get(var_name)
+        if val is not None:
+            return str(val) if not isinstance(val, str) else val
+
+    # FINAL(...)
+    m = _RLM_FINAL_PATTERN.search(stripped)
+    if m:
+        return m.group(1).strip()
+
+    # Check if FINAL_VAR was called inside code (sets repl_state['final_answer'])
+    if repl_state.get('final_answer'):
+        return repl_state['final_answer']
+
+    return None
+
+
+def _handle_rlm_scaffolding(payload: dict, settings: dict) -> dict:
+    """Run the full RLM iteration loop and return a parsed response dict.
+
+    Returns the same format as _parse_llm_response for compatibility.
+    """
+    model_key = settings.get("model") or "gemini-2.5-flash"
+    input_settings = settings.get("input", {"diff": True, "full_grid": True})
+    thinking_level = settings.get("thinking_level", "low")
+    max_tokens = min(int(settings.get("max_tokens", 16384)), 65536)
+    sub_model_key = settings.get("sub_model") or None
+    sub_thinking_level = settings.get("sub_thinking_level", "low")
+    sub_max_tokens = min(int(settings.get("sub_max_tokens", 8192)), 65536)
+    max_depth = int(settings.get("max_depth", 1))
+    max_iterations = int(settings.get("max_iterations", 10))
+    output_truncation = int(settings.get("output_truncation", 5000))
+    session_id = payload.get("session_id", "anonymous")
+
+    # Build the context dict for the REPL
+    context = {
+        "grid": payload.get("grid", []),
+        "available_actions": payload.get("available_actions", []),
+        "history": payload.get("history", []),
+        "change_map": payload.get("change_map", {}),
+        "levels_completed": payload.get("levels_completed", 0),
+        "win_levels": payload.get("win_levels", 0),
+        "game_id": payload.get("game_id", "unknown"),
+        "state": payload.get("state", ""),
+        "compact_context": payload.get("compact_context", ""),
+    }
+
+    # Create REPL
+    repl = _create_rlm_repl(
+        session_id, context, model_key,
+        thinking_level=thinking_level, max_tokens=max_tokens,
+        sub_model_key=sub_model_key,
+        sub_thinking_level=sub_thinking_level,
+        sub_max_tokens=sub_max_tokens,
+        max_depth=max_depth,
+    )
+
+    # Build conversation history for the iteration loop
+    messages = [
+        {"role": "system", "content": _RLM_SYSTEM_PROMPT},
+        {"role": "user", "content": _RLM_USER_PROMPT_FIRST},
+    ]
+
+    iterations_log = []  # track each iteration for the client
+    final_answer = None
+
+    for iteration in range(max_iterations):
+        # Build prompt from message history
+        prompt = "\n\n".join(
+            f"{'[SYSTEM]' if m['role'] == 'system' else '[USER]' if m['role'] == 'user' else '[ASSISTANT]'}: {m['content']}"
+            for m in messages
+        )
+
+        # Call the main model
+        try:
+            response = _route_model_call(
+                model_key, prompt, None,
+                thinking_level=thinking_level,
+                max_tokens=max_tokens,
+            )
+            if isinstance(response, dict):
+                response_text = response.get("text", "")
+            else:
+                response_text = str(response)
+        except Exception as e:
+            app.logger.error(f"RLM iteration {iteration} LLM call failed: {e}")
+            iterations_log.append({
+                "iteration": iteration,
+                "error": str(e),
+            })
+            break
+
+        # Extract and execute code blocks
+        code_blocks = _RLM_REPL_CODE_PATTERN.findall(response_text)
+        repl_outputs = []
+        for code in code_blocks:
+            output = _rlm_execute_code(repl, code, max_output=output_truncation)
+            repl_outputs.append(output)
+
+        # Log this iteration
+        iter_log = {
+            "iteration": iteration,
+            "response": response_text[:2000],  # truncate for client
+            "code_blocks": len(code_blocks),
+            "repl_outputs": [o[:1000] for o in repl_outputs],  # truncate each
+            "sub_calls": repl['sub_call_count'],
+        }
+        iterations_log.append(iter_log)
+
+        # Check for final answer
+        final_answer = _rlm_find_final(response_text, repl)
+        if final_answer:
+            break
+
+        # Append to conversation
+        messages.append({"role": "assistant", "content": response_text})
+
+        # Build REPL output feedback
+        if repl_outputs:
+            repl_feedback = "\n\n".join(
+                f"[REPL output {i+1}]:\n{out}" for i, out in enumerate(repl_outputs)
+            )
+            messages.append({"role": "user", "content": repl_feedback + "\n\n" + _RLM_USER_PROMPT_CONTINUE})
+        else:
+            messages.append({"role": "user", "content": _RLM_USER_PROMPT_CONTINUE})
+
+    # Parse the final answer into the standard response format
+    if final_answer:
+        # Try to parse as JSON action
+        parsed = _extract_json(final_answer)
+        if not parsed:
+            # Try wrapping in braces
+            try:
+                parsed = json.loads(final_answer)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+    else:
+        # No FINAL — try to parse last response for action
+        parsed = None
+        if iterations_log:
+            last_resp = iterations_log[-1].get("response", "")
+            parsed = _extract_json(last_resp)
+
+    total_sub_calls = repl['sub_call_count']
+    total_iterations = len(iterations_log)
+
+    result = {
+        "raw": final_answer or (iterations_log[-1].get("response", "") if iterations_log else ""),
+        "thinking": None,
+        "parsed": parsed,
+        "model": model_key,
+        "scaffolding": "rlm",
+        "rlm": {
+            "iterations": total_iterations,
+            "sub_calls": total_sub_calls,
+            "max_iterations": max_iterations,
+            "final_answer": final_answer,
+            "log": iterations_log,
+        },
+    }
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1825,8 +2193,14 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
     """
     info = MODEL_REGISTRY.get(model_key)
 
-    # If not in registry, try ollama
+    # If not in registry, check runtime-discovered local models, then try ollama
     if info is None:
+        if model_key in _discovered_local_models:
+            local_info = _discovered_local_models[model_key]
+            port = local_info["local_port"]
+            api_model = local_info.get("api_model", model_key)
+            url = f"http://localhost:{port}/v1/chat/completions"
+            return _call_openai_compatible(url, "no-key-needed", api_model, prompt, image_b64, max_tokens=max_tokens)
         return _call_ollama(model_key, prompt, image_b64)
 
     provider = info["provider"]
@@ -2124,6 +2498,39 @@ def llm_models():
         except Exception:
             pass
 
+    # Discover local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)
+    if mode == "local":
+        import httpx
+        LOCAL_PORTS = [
+            (1234, "LM Studio"),
+            (8080, "Local Server"),
+            (8000, "Local Server"),
+        ]
+        for port, label in LOCAL_PORTS:
+            try:
+                resp = httpx.get(f"http://localhost:{port}/v1/models", timeout=1.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    model_list = data.get("data", [])
+                    for m in model_list:
+                        mid = m.get("id", "")
+                        if not mid:
+                            continue
+                        entry = {
+                            "name": mid,
+                            "api_model": mid,
+                            "provider": "local",
+                            "local_port": port,
+                            "local_label": label,
+                            "price": f"Free ({label}:{port})",
+                            "capabilities": {"image": False, "reasoning": False, "tools": False},
+                            "available": True,
+                        }
+                        models.append(entry)
+                        _discovered_local_models[mid] = entry
+            except Exception:
+                pass
+
     return jsonify({"models": models, "mode": mode})
 
 
@@ -2303,6 +2710,19 @@ def llm_ask():
     payload = request.get_json(force=True)
     settings = payload.get("settings", {})
     scaffolding_type = settings.get("scaffolding", "linear")
+
+    # ── RLM scaffolding: run the full recursive loop ──
+    if scaffolding_type == "rlm":
+        session_id = payload.get("session_id")
+        result = _handle_rlm_scaffolding(payload, settings)
+        # Stash for session DB persistence
+        if session_id and feature_enabled("session_db"):
+            with session_lock:
+                session_last_llm[session_id] = result
+            model_key = settings.get("model") or "gemini-2.5-flash"
+            _db_update_session(session_id, model=model_key)
+        return jsonify(result)
+
     model_key = settings.get("model") or payload.get("model", "gemini-2.5-flash")
 
     input_settings = settings.get("input", {"diff": True, "full_grid": True})

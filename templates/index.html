@@ -266,6 +266,10 @@
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
     border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes scaffoldPulse { 0%,100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.4; } }
+  @keyframes scaffoldFlash { 0% { stroke: var(--green); stroke-width: 3; } 100% { stroke-width: 1.5; } }
+  #pipelineVisualizer .node-waiting rect { animation: scaffoldPulse 1.2s ease-in-out infinite; }
+  #pipelineVisualizer .node-done rect { animation: scaffoldFlash 0.6s ease-out forwards; }
 
   .step-counter { color: var(--text-dim); }
   .level-info { color: var(--yellow); }
@@ -630,8 +634,8 @@
           </div>
         </div>
         </div>
-        <!-- Transport controls -->
-        <div class="transport-strip" id="transportBar">
+        <!-- Transport controls (hidden until game loads) -->
+        <div class="transport-strip" id="transportBar" style="display:none;">
           <div class="transport-bar">
             <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
               onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
@@ -812,11 +816,120 @@ const clientId = 'client_' + Math.random().toString(36).slice(2, 10);
 
 let activeScaffoldingType = 'linear';
 
+const _linearInputFields = [
+  { type: 'toggle', id: 'inputGrid', label: 'Full grid (RLE)', default: true },
+  { type: 'toggle', id: 'inputImage', label: 'Image', default: false, rowId: 'imageRow',
+    labelHtml: 'Image <span class="opt-badge badge-img" id="imgBadge">IMG</span>' },
+  { type: 'toggle', id: 'inputDiff', label: 'Diff (change map)', default: true },
+  { type: 'toggle', id: 'inputHistogram', label: 'Color histogram', default: false },
+];
+const _linearReasoningFields = [
+  { type: 'model-select', id: 'modelSelect', capsId: 'modelCaps', testResultId: 'testResult' },
+  { type: 'grid-2col', marginBottom: '8px', children: [
+    { type: 'quadswitch', id: 'thinkingLevel', name: 'thinkingLevel', label: 'Thinking',
+      options: [{v:'off',l:'Off'},{v:'low',l:'Low',checked:true},{v:'med',l:'Med'},{v:'high',l:'High'}],
+      hint: 'Thinking token budget' },
+    { type: 'triswitch', id: 'toolsMode', name: 'toolsMode', label: 'Tool calls',
+      options: [{v:'off',l:'Off'},{v:'on',l:'On',checked:true}],
+      hint: 'On = Python sandbox' + (MODE === 'online' ? ' (Pyodide)' : '') },
+  ]},
+  { type: 'multiswitch', id: 'planningMode', name: 'planMode', label: 'Planning horizon',
+    options: [{v:'off',l:'Off'},{v:'5',l:'5'},{v:'10',l:'10',checked:true},{v:'20',l:'20'},{v:'unlimited',l:'\u221E'}],
+    hint: 'LLM returns a multi-step plan instead of one action. Saves tokens.' },
+  { type: 'number-spin', id: 'maxTokensLimit', label: 'Max tokens',
+    default: 16384, min: 1024, max: 65536, step: 1024, spinFn: 'spinMaxTokens' },
+];
+const _linearCompactGroup = {
+  subHeader: 'Compacting Model',
+  toggleId: 'compactContext', toggleDefault: true, toggleOnChange: 'toggleCompactSettings()',
+  bodyId: 'compactSettingsBody',
+  fields: [
+    { type: 'compact-model-select', id: 'compactModelSelectTop',
+      hint: 'Used to summarize game history when context gets long.' },
+    { type: 'grid-2col-body', children: [
+      { type: 'number-input', id: 'compactAfter', label: 'After call #',
+        placeholder: '\u2014', min: 1, max: 200, width: '55px' },
+      { type: 'number-spin-unit', id: 'compactContextPct', unitId: 'contextLimitUnit',
+        label: 'Context limit', default: 64000, min: 1, step: 1, width: '68px',
+        spinFn: 'spinContextLimit', unitChangeFn: 'onContextLimitUnitChange()',
+        units: [{v:'pct',l:'%'},{v:'tokens',l:'tok',selected:true}] },
+      { type: 'toggle', id: 'compactOnLevel', label: 'Compact on new level', default: true },
+    ]}
+  ]
+};
+const _linearInterruptGroup = {
+  subHeader: 'Interrupt Model',
+  toggleId: 'interruptPlan', toggleDefault: true, toggleOnChange: 'toggleInterruptSettings()',
+  bodyId: 'interruptSettingsBody',
+  fields: [
+    { type: 'compact-model-select', id: 'interruptModelSelect',
+      hint: 'After each plan step, a cheap model checks if things went as expected. Interrupts if not.' },
+  ]
+};
+
 const SCAFFOLDING_SCHEMAS = {
   linear: {
     id: 'linear',
     name: 'Linear',
-    description: 'Reasoning model with optional compaction and interrupt checking.',
+    description: 'Reasoning model with optional compaction.',
+    pipeline: [
+      { id: 'reasoning', label: 'Reasoning Model', color: 'var(--accent)', settingsRef: 'reasoning' },
+      { id: 'compact', label: 'Compact', color: 'var(--purple)', settingsRef: 'compact', optional: true, enabledBy: 'compact.enabled' },
+    ],
+    edges: [
+      { from: 'reasoning', to: 'compact', label: 'after N calls' },
+      { from: 'compact', to: 'reasoning', label: 'resummarized' },
+    ],
+    sections: [
+      { id: 'secInput', label: 'Input', open: true, bodyClass: 'settings-grid', fields: _linearInputFields },
+      {
+        id: 'secReasoning', label: 'Reasoning', open: true,
+        groups: [
+          { subHeader: 'Reasoning Model', fields: _linearReasoningFields },
+          _linearCompactGroup,
+        ]
+      },
+      {
+        id: 'secKeys', label: 'Model Keys', open: true,
+        customHtml: function() {
+          let h = '<div id="keysEmptyHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
+          h += '<div id="byokPrompt" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model key</div>';
+          h += '<input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          h += '<div id="compactByokPrompt" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Compact model key</div>';
+          h += '<input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          h += '<div id="interruptByokPrompt" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Interrupt model key</div>';
+          h += '<input type="password" class="text-input" id="interruptByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          if (FEATURES.copilot) {
+            h += '<div id="copilotNotAuth">';
+            h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">GitHub Copilot</div>';
+            h += '<button class="btn btn-primary" onclick="copilotStartAuth()" style="width:100%;font-size:11px;">Connect GitHub Copilot</button>';
+            h += '<div id="copilotDeviceCode" style="display:none;">';
+            h += '<div class="copilot-code" id="copilotUserCode">\u2014\u2014\u2014\u2014</div>';
+            h += '<div style="text-align:center;"><a id="copilotVerifyLink" href="#" target="_blank" class="copilot-link">Open GitHub to enter code</a></div>';
+            h += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;text-align:center;">Waiting for authorization...</div>';
+            h += '</div></div>';
+            h += '<div id="copilotAuthed" style="display:none;">';
+            h += '<div class="copilot-status"><span class="dot dot-green"></span><span style="color:var(--green);font-weight:600;">Connected</span></div>';
+            h += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;">';
+            h += 'Models: gpt-4.1, gpt-4o, gpt-5-mini<span class="tier-badge tier-free">FREE</span><br>';
+            h += 'claude-sonnet-4, gemini-2.5-pro<span class="tier-badge tier-premium">PREMIUM</span></div></div>';
+          }
+          return h;
+        }
+      }
+    ]
+  },
+
+  linear_interrupt: {
+    id: 'linear_interrupt',
+    name: 'Linear w/ Interrupt',
+    description: 'Reasoning model with compaction and interrupt checking after each plan step.',
     pipeline: [
       { id: 'reasoning', label: 'Reasoning Model', color: 'var(--accent)', settingsRef: 'reasoning' },
       { id: 'compact', label: 'Compact', color: 'var(--purple)', settingsRef: 'compact', optional: true, enabledBy: 'compact.enabled' },
@@ -829,65 +942,13 @@ const SCAFFOLDING_SCHEMAS = {
       { from: 'interrupt', to: 'reasoning', label: 'if interrupted' },
     ],
     sections: [
-      {
-        id: 'secInput', label: 'Input', open: true, bodyClass: 'settings-grid',
-        fields: [
-          { type: 'toggle', id: 'inputGrid', label: 'Full grid (RLE)', default: true },
-          { type: 'toggle', id: 'inputImage', label: 'Image', default: false, rowId: 'imageRow',
-            labelHtml: 'Image <span class="opt-badge badge-img" id="imgBadge">IMG</span>' },
-          { type: 'toggle', id: 'inputDiff', label: 'Diff (change map)', default: true },
-          { type: 'toggle', id: 'inputHistogram', label: 'Color histogram', default: false },
-        ]
-      },
+      { id: 'secInput', label: 'Input', open: true, bodyClass: 'settings-grid', fields: _linearInputFields },
       {
         id: 'secReasoning', label: 'Reasoning', open: true,
         groups: [
-          {
-            subHeader: 'Reasoning Model',
-            fields: [
-              { type: 'model-select', id: 'modelSelect', capsId: 'modelCaps', testResultId: 'testResult' },
-              { type: 'grid-2col', marginBottom: '8px', children: [
-                { type: 'quadswitch', id: 'thinkingLevel', name: 'thinkingLevel', label: 'Thinking',
-                  options: [{v:'off',l:'Off'},{v:'low',l:'Low',checked:true},{v:'med',l:'Med'},{v:'high',l:'High'}],
-                  hint: 'Thinking token budget' },
-                { type: 'triswitch', id: 'toolsMode', name: 'toolsMode', label: 'Tool calls',
-                  options: [{v:'off',l:'Off'},{v:'on',l:'On',checked:true}],
-                  hint: 'On = Python sandbox' + (MODE === 'online' ? ' (Pyodide)' : '') },
-              ]},
-              { type: 'multiswitch', id: 'planningMode', name: 'planMode', label: 'Planning horizon',
-                options: [{v:'off',l:'Off'},{v:'5',l:'5'},{v:'10',l:'10',checked:true},{v:'20',l:'20'},{v:'unlimited',l:'\u221E'}],
-                hint: 'LLM returns a multi-step plan instead of one action. Saves tokens.' },
-              { type: 'number-spin', id: 'maxTokensLimit', label: 'Max tokens',
-                default: 16384, min: 1024, max: 65536, step: 1024, spinFn: 'spinMaxTokens' },
-            ]
-          },
-          {
-            subHeader: 'Compacting Model',
-            toggleId: 'compactContext', toggleDefault: true, toggleOnChange: 'toggleCompactSettings()',
-            bodyId: 'compactSettingsBody',
-            fields: [
-              { type: 'compact-model-select', id: 'compactModelSelectTop',
-                hint: 'Used to summarize game history when context gets long.' },
-              { type: 'grid-2col-body', children: [
-                { type: 'number-input', id: 'compactAfter', label: 'After call #',
-                  placeholder: '\u2014', min: 1, max: 200, width: '55px' },
-                { type: 'number-spin-unit', id: 'compactContextPct', unitId: 'contextLimitUnit',
-                  label: 'Context limit', default: 64000, min: 1, step: 1, width: '68px',
-                  spinFn: 'spinContextLimit', unitChangeFn: 'onContextLimitUnitChange()',
-                  units: [{v:'pct',l:'%'},{v:'tokens',l:'tok',selected:true}] },
-                { type: 'toggle', id: 'compactOnLevel', label: 'Compact on new level', default: true },
-              ]}
-            ]
-          },
-          {
-            subHeader: 'Interrupt Model',
-            toggleId: 'interruptPlan', toggleDefault: false, toggleOnChange: 'toggleInterruptSettings()',
-            bodyId: 'interruptSettingsBody', bodyDisabledDefault: true,
-            fields: [
-              { type: 'compact-model-select', id: 'interruptModelSelect',
-                hint: 'After each plan step, a cheap model checks if things went as expected. Interrupts if not.' },
-            ]
-          }
+          { subHeader: 'Reasoning Model', fields: _linearReasoningFields },
+          _linearCompactGroup,
+          _linearInterruptGroup,
         ]
       },
       {
@@ -1182,6 +1243,49 @@ function updatePipelineOpacity() {
   renderPipelineVisualizer(schema);
 }
 
+function updateScaffoldingNodeState(nodeId, state) {
+  const container = document.getElementById('pipelineVisualizer');
+  if (!container) return;
+  const svgEl = container.querySelector('svg');
+  if (!svgEl) return;
+  const nodeGroup = svgEl.querySelector(`g[data-node="${nodeId}"]`);
+  if (!nodeGroup) return;
+
+  nodeGroup.classList.remove('node-waiting', 'node-done');
+
+  if (state === 'waiting') {
+    nodeGroup.classList.add('node-waiting');
+    if (!nodeGroup.querySelector('.node-spinner')) {
+      const rect = nodeGroup.querySelector('rect');
+      if (rect) {
+        const cx = parseFloat(rect.getAttribute('x')) + parseFloat(rect.getAttribute('width')) - 12;
+        const cy = parseFloat(rect.getAttribute('y')) + parseFloat(rect.getAttribute('height')) / 2;
+        const r = parseFloat(rect.getAttribute('height')) * 0.25;
+        const spinner = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        spinner.setAttribute('cx', cx);
+        spinner.setAttribute('cy', cy);
+        spinner.setAttribute('r', r);
+        spinner.setAttribute('fill', 'none');
+        spinner.setAttribute('stroke', 'var(--accent)');
+        spinner.setAttribute('stroke-width', '2');
+        spinner.setAttribute('stroke-dasharray', `${r * 2} ${r * 4}`);
+        spinner.classList.add('node-spinner');
+        spinner.style.transformOrigin = `${cx}px ${cy}px`;
+        spinner.style.animation = 'spin 0.6s linear infinite';
+        nodeGroup.appendChild(spinner);
+      }
+    }
+  } else if (state === 'done') {
+    const sp = nodeGroup.querySelector('.node-spinner');
+    if (sp) sp.remove();
+    nodeGroup.classList.add('node-done');
+    setTimeout(() => { nodeGroup.classList.remove('node-done'); }, 600);
+  } else {
+    const sp = nodeGroup.querySelector('.node-spinner');
+    if (sp) sp.remove();
+  }
+}
+
 // ── Scaffolding Settings Persistence ──────────────────────────────────────
 
 function saveScaffoldingToStorage() {
@@ -1196,8 +1300,8 @@ function loadScaffoldingFromStorage(schemaId) {
     const raw = localStorage.getItem(`arc_scaffolding_${schemaId}`);
     if (!raw) return;
     const s = JSON.parse(raw);
-    if (schemaId === 'linear') {
-      // Restore linear settings to DOM
+    if (schemaId === 'linear' || schemaId === 'linear_interrupt') {
+      // Restore linear/linear_interrupt settings to DOM
       _setChecked('inputGrid', s.input?.full_grid ?? true);
       _setChecked('inputImage', s.input?.image ?? false);
       _setChecked('inputDiff', s.input?.diff ?? true);
@@ -1212,8 +1316,10 @@ function loadScaffoldingFromStorage(schemaId) {
       if (s.compact?.contextLimitVal) _setVal('compactContextPct', s.compact.contextLimitVal);
       if (s.compact?.contextLimitUnit) _setSelectVal('contextLimitUnit', s.compact.contextLimitUnit);
       _setChecked('compactOnLevel', s.compact?.compactOnLevel ?? true);
-      _setChecked('interruptPlan', s.interrupt_plan ?? false);
-      toggleInterruptSettings();
+      if (schemaId === 'linear_interrupt') {
+        _setChecked('interruptPlan', s.interrupt_plan ?? true);
+        toggleInterruptSettings();
+      }
     } else if (schemaId === 'rlm') {
       _setChecked('sf_rlm_inputGrid', s.input?.full_grid ?? true);
       _setChecked('sf_rlm_inputImage', s.input?.image ?? false);
@@ -1970,6 +2076,8 @@ import copy
           pyodide.globals.set('_source_code', source);
           pyodide.globals.set('_class_name', class_name);
           pyodide.runPython(\`
+# Provide __file__ so game code using Path(__file__) works in exec()
+__file__ = '/virtual/game.py'
 exec(_source_code)
 _game_instance = eval(_class_name + "()")
 _undo_stack = []
@@ -2398,13 +2506,17 @@ function redrawGrid() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function getSelectedModel() {
-  return document.getElementById('modelSelect').value;
+  if (activeScaffoldingType === 'rlm') {
+    return document.getElementById('sf_rlm_modelSelect')?.value || '';
+  }
+  return document.getElementById('modelSelect')?.value || '';
 }
 
 // Provider name mapping for BYOK prompt
 const PROVIDER_LABELS = {
   gemini: 'Google Gemini', anthropic: 'Anthropic', openai: 'OpenAI',
   cloudflare: 'Cloudflare', groq: 'Groq', mistral: 'Mistral', huggingface: 'Huggingface',
+  local: 'Local Model', ollama: 'Ollama',
 };
 
 function updateKeysEmptyHint() {
@@ -2422,8 +2534,16 @@ function updateByokPrompt() {
   const model = getSelectedModel();
   const info = getModelInfo(model);
   if (!info) { prompt.style.display = 'none'; return; }
-  // In online mode, all providers except puter/copilot/ollama need BYOK keys
-  const freeProviders = ['puter', 'copilot', 'ollama'];
+  // If Copilot model selected, auto-open Model Keys to show GitHub login
+  if (info.provider === 'copilot') {
+    prompt.style.display = 'none';
+    const sec = document.getElementById('secKeys');
+    if (sec && !sec.classList.contains('open')) sec.classList.add('open');
+    updateKeysEmptyHint();
+    return;
+  }
+  // In online mode, all providers except puter/copilot/ollama/local need BYOK keys
+  const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
   const needsKey = MODE === 'online' ? !freeProviders.includes(info.provider) : !info.available;
   if (needsKey) {
     const label = PROVIDER_LABELS[info.provider] || info.provider;
@@ -2499,7 +2619,7 @@ function updateCompactByokPrompt() {
   }
 
   // Check if compact model needs a key
-  const freeProviders2 = ['puter', 'copilot', 'ollama'];
+  const freeProviders2 = ['puter', 'copilot', 'ollama', 'local'];
   const compactNeedsKey = MODE === 'online' ? !freeProviders2.includes(info.provider) : !info.available;
   if (compactNeedsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
@@ -2557,7 +2677,7 @@ function updateInterruptByokPrompt() {
     return;
   }
 
-  const freeProviders = ['puter', 'copilot', 'ollama'];
+  const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
   const needsKey = MODE === 'online' ? !freeProviders.includes(info.provider) : !info.available;
   if (needsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
@@ -3138,11 +3258,13 @@ window.addEventListener('beforeunload', (e) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function getCompactSettings() {
-  const enabled = document.getElementById('compactContext').checked;
-  const afterVal = document.getElementById('compactAfter').value;
+  const enabledEl = document.getElementById('compactContext');
+  if (!enabledEl) return { enabled: false, after: null, contextLimitUnit: 'tokens', contextLimitVal: 64000, compactOnLevel: false };
+  const enabled = enabledEl.checked;
+  const afterVal = document.getElementById('compactAfter')?.value;
   const after = afterVal ? parseInt(afterVal) : null;  // null = disabled
-  const unit = document.getElementById('contextLimitUnit').value; // 'pct' or 'tokens'
-  const rawVal = parseInt(document.getElementById('compactContextPct').value) || 64000;
+  const unit = document.getElementById('contextLimitUnit')?.value || 'tokens';
+  const rawVal = parseInt(document.getElementById('compactContextPct')?.value) || 64000;
   const compactOnLevel = document.getElementById('compactOnLevel')?.checked ?? true;
   return { enabled, after, contextLimitUnit: unit, contextLimitVal: rawVal, compactOnLevel };
 }
@@ -3535,7 +3657,7 @@ function getScaffoldingSettings() {
   const type = activeScaffoldingType;
   const s = { scaffolding: type };
 
-  if (type === 'linear') {
+  if (type === 'linear' || type === 'linear_interrupt') {
     s.input = getInputSettings();
     s.model = getSelectedModel();
     s.thinking_level = getThinkingLevel();
@@ -3752,6 +3874,8 @@ async function askLLM(ss) {
   if (isActive()) {
     document.getElementById('llmSpinner').style.display = 'inline';
     document.getElementById('topSpinner').style.display = 'inline';
+    updateScaffoldingNodeState('reasoning', 'waiting');
+    updateScaffoldingNodeState('root_lm', 'waiting');
   }
   if (_callSession) { _callSession.waitingForLLM = true; renderSessionTabs(); }
 
@@ -3795,7 +3919,9 @@ async function askLLM(ss) {
     const tokenTrigger = compact.enabled && histTokenEst > maxHistTokens;
     const needsCompact = callTrigger || tokenTrigger;
     const prevCompactCall = _cur._compactSummaryAtCall;
+    if (needsCompact && isActive()) updateScaffoldingNodeState('compact', 'waiting');
     const compactBlock = needsCompact ? await buildCompactContext(_ss) : '';
+    if (needsCompact && isActive()) updateScaffoldingNodeState('compact', 'done');
 
     // Guard: session changed during compact — discard
     if (!sessions.has(_callSessionId)) { console.log('[askLLM] session closed during compact, discarding'); return null; }
@@ -3841,10 +3967,10 @@ async function askLLM(ss) {
         change_map: _cur.currentChangeMap,
         session_id: _cur.sessionId,
         compact_context: compactBlock,
-        settings: Object.assign(getScaffoldingSettings(), {
+        settings: Object.assign(getScaffoldingSettings(), (activeScaffoldingType === 'linear' || activeScaffoldingType === 'linear_interrupt') ? {
           model: model,
           input: inputSettings,
-        }),
+        } : { model: model }),
       };
       if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
       resp = await fetchJSON('/api/llm/ask', payload);
@@ -3940,6 +4066,70 @@ async function askLLM(ss) {
     } else if (resp.error) {
       entry.innerHTML = `<div class="step-label">Error (${resp.model || model})</div>
         <div style="color:var(--red);">${resp.error}</div>`;
+    } else if (resp.scaffolding === 'rlm' && resp.rlm) {
+      // ── RLM scaffolding: show iteration details ──
+      const rlm = resp.rlm;
+      const durationHtml = resp.call_duration_ms
+        ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(resp.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
+      const rlmBadge = '<span class="tools-badge" style="background:#bc8cff33;color:var(--purple);">RLM</span>';
+      const iterBadge = `<span class="tools-badge" style="background:#58a6ff22;color:var(--accent);">${rlm.iterations}/${rlm.max_iterations} iter</span>`;
+      const subBadge = rlm.sub_calls > 0 ? `<span class="tools-badge" style="background:#e3b34133;color:var(--yellow);">${rlm.sub_calls} sub-calls</span>` : '';
+
+      // Build iteration log
+      let iterHtml = '';
+      if (rlm.log && rlm.log.length) {
+        const iterDetails = rlm.log.map((it, idx) => {
+          let content = '';
+          if (it.error) {
+            content = `<div style="color:var(--red);font-size:11px;">Error: ${esc(it.error)}</div>`;
+          } else {
+            // Show response excerpt
+            const respExcerpt = esc((it.response || '').substring(0, 500));
+            content = `<div style="font-size:11px;white-space:pre-wrap;color:var(--text-dim);max-height:100px;overflow:auto;">${respExcerpt}${it.response?.length > 500 ? '...' : ''}</div>`;
+            // Show REPL outputs
+            if (it.repl_outputs?.length) {
+              content += it.repl_outputs.map((o, j) =>
+                `<div style="margin-top:4px;padding:4px 8px;background:var(--bg);border-left:2px solid var(--green);font-size:10px;font-family:monospace;white-space:pre-wrap;max-height:80px;overflow:auto;"><span style="color:var(--green);">REPL ${j+1}:</span> ${esc(o)}</div>`
+              ).join('');
+            }
+          }
+          return `<div style="margin-bottom:8px;padding:4px 0;border-bottom:1px solid var(--border);">
+            <div style="font-size:10px;color:var(--accent);font-weight:600;">Iteration ${idx + 1} ${it.code_blocks ? `(${it.code_blocks} code blocks)` : ''}</div>
+            ${content}
+          </div>`;
+        }).join('');
+        iterHtml = `<details style="margin-top:6px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">RLM Iterations (${rlm.iterations})</summary>
+          <div style="margin-top:4px;max-height:300px;overflow:auto;">${iterDetails}</div></details>`;
+      }
+
+      // Standard parsed response display
+      if (resp.parsed) {
+        const p = resp.parsed;
+        const steps = (p.plan && Array.isArray(p.plan)) ? p.plan : [{ action: p.action, data: p.data || {} }];
+        const planHtml = steps.map((s, i) => {
+          const aName = ACTION_NAMES[s.action] || `ACTION${s.action}`;
+          const dataStr = s.data?.x !== undefined ? ` (${s.data.x},${s.data.y})` : '';
+          return `<div class="plan-step" data-plan-idx="${i}">${i + 1}. <span class="action-btn">${aName}</span>${dataStr}</div>`;
+        }).join('');
+        const stepLabel = steps.length > 1
+          ? `Steps ${_cur.stepCount + 1}-${_cur.stepCount + steps.length}`
+          : `Step ${_cur.stepCount + 1}`;
+        entry.dataset.branchStep = _cur.stepCount + steps.length;
+        entry.innerHTML = `
+          <button class="branch-btn" onclick="branchFromStep(${_cur.stepCount + steps.length})" title="Branch from here">&#8627; branch</button>
+          <div class="step-label">${stepLabel} — ${resp.model}${durationHtml}${rlmBadge}${iterBadge}${subBadge}</div>
+          <div class="observation"><strong>Obs:</strong> ${p.observation || '—'}</div>
+          <div style="margin-top:4px;"><strong>Reasoning:</strong> ${p.reasoning || '—'}</div>
+          <div class="plan-progress">${planHtml}</div>
+          ${iterHtml}`;
+      } else {
+        entry.dataset.branchStep = _cur.stepCount;
+        entry.innerHTML = `
+          <button class="branch-btn" onclick="branchFromStep(${_cur.stepCount})" title="Branch from here">&#8627; branch</button>
+          <div class="step-label">Step ${_cur.stepCount} — ${resp.model}${durationHtml}${rlmBadge}${iterBadge}${subBadge}</div>
+          <div style="color:var(--yellow);font-size:11px;">RLM did not produce a parseable action after ${rlm.iterations} iterations.</div>
+          ${iterHtml}`;
+      }
     } else if (resp.parsed) {
       const p = resp.parsed;
       const thinkHtml = resp.thinking
@@ -4012,6 +4202,8 @@ async function askLLM(ss) {
     if (isActive()) {
       document.getElementById('llmSpinner').style.display = 'none';
       document.getElementById('topSpinner').style.display = 'none';
+      updateScaffoldingNodeState('reasoning', 'done');
+      updateScaffoldingNodeState('root_lm', 'done');
     }
     if (_callSession) { _callSession.waitingForLLM = false; renderSessionTabs(); }
   }
@@ -4138,7 +4330,9 @@ async function executePlan(plan, resp, entry, expected, ss) {
     // Interrupt model check: ask cheap model if plan is going as expected
     const interruptEnabled = document.getElementById('interruptPlan')?.checked;
     if (interruptEnabled && expected && i < plan.length - 1) {
+      if (isActive()) updateScaffoldingNodeState('interrupt', 'waiting');
       const shouldInterrupt = await checkInterrupt(expected, data.grid, data.change_map);
+      if (isActive()) updateScaffoldingNodeState('interrupt', 'done');
       if (shouldInterrupt) {
         if (isActive()) {
           for (let j = i + 1; j < planSteps.length; j++)
@@ -4357,6 +4551,10 @@ async function toggleAutoPlay() {
     // Clear spinners immediately so UI doesn't look like it's still working
     document.getElementById('llmSpinner').style.display = 'none';
     document.getElementById('topSpinner').style.display = 'none';
+    updateScaffoldingNodeState('reasoning', 'idle');
+    updateScaffoldingNodeState('compact', 'idle');
+    updateScaffoldingNodeState('interrupt', 'idle');
+    updateScaffoldingNodeState('root_lm', 'idle');
     renderSessionTabs();
     return;
   }
@@ -4592,6 +4790,7 @@ async function loadModels() {
   const data = await fetchJSON('/api/llm/models');
   modelsData = data.models || [];
   const sel = document.getElementById('modelSelect');
+  if (sel) {
   sel.innerHTML = '';
 
   // Default blank option — no model pre-selected
@@ -4607,13 +4806,14 @@ async function loadModels() {
     (groups[key] ??= []).push(m);
   }
 
-  const providerOrder = ['Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
+  const providerOrder = ['Local', 'Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
+  const providerLabels = { Local: 'Local Models (free)' };
 
   for (const prov of providerOrder) {
     const models = groups[prov];
     if (!models?.length) continue;
     const grp = document.createElement('optgroup');
-    grp.label = prov;
+    grp.label = providerLabels[prov] || prov;
     for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m.name;
@@ -4640,24 +4840,39 @@ async function loadModels() {
     }
     sel.appendChild(grp);
   }
-  // Unavailable models — usable via BYOK key in any mode
+  // Unavailable models — usable via BYOK key in any mode, grouped by provider
   const unavail = modelsData.filter(m => !m.available);
-  if (unavail.length) {
+  const byokGroups = {};
+  for (const m of unavail) {
+    const key = m.provider.charAt(0).toUpperCase() + m.provider.slice(1);
+    (byokGroups[key] ??= []).push(m);
+  }
+  const byokProviderOrder = ['Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface'];
+  for (const prov of byokProviderOrder) {
+    const models = byokGroups[prov];
+    if (!models?.length) continue;
     const grp = document.createElement('optgroup');
-    grp.label = 'Bring Your Own Key';
-    for (const m of unavail) {
+    grp.label = `${prov} (BYOK)`;
+    for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m.name;
-      opt.textContent = `${m.name} — ${m.price} (BYOK)`;
+      const caps = [];
+      if (m.capabilities?.image) caps.push('IMG');
+      if (m.capabilities?.reasoning) caps.push('RSN');
+      if (m.capabilities?.tools) caps.push('TLS');
+      const capStr = caps.length ? ` [${caps.join(',')}]` : '';
+      opt.textContent = `${m.name} — ${m.price}${capStr}`;
       grp.appendChild(opt);
     }
     sel.appendChild(grp);
   }
 
   if (!sel.options.length) sel.innerHTML = '<option value="">No models</option>';
+  } // end main select block
 
   // Populate compact model selector — keep default options, add all models
   const csel = document.getElementById('compactModelSelectTop');
+  if (!csel) { /* compact select not in current scaffolding */ } else {
   const savedVal = csel.value;
   // Remove all optgroups (keep the static <option>s)
   csel.querySelectorAll('optgroup').forEach(g => g.remove());
@@ -4686,23 +4901,27 @@ async function loadModels() {
     }
     csel.appendChild(grp);
   }
-  // Add unavailable (BYOK) models
-  if (unavail.length) {
+  // Add unavailable (BYOK) models grouped by provider
+  for (const prov of byokProviderOrder) {
+    const models = byokGroups[prov];
+    if (!models?.length) continue;
     const grp = document.createElement('optgroup');
-    grp.label = 'Bring Your Own Key';
-    for (const m of unavail) {
+    grp.label = `${prov} (BYOK)`;
+    for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m.name;
-      opt.textContent = `${m.name} — ${m.price} (BYOK)`;
+      opt.textContent = `${m.name} — ${m.price}`;
       grp.appendChild(opt);
     }
     csel.appendChild(grp);
   }
   // Restore previous selection if still valid
   if (savedVal && [...csel.options].some(o => o.value === savedVal)) csel.value = savedVal;
+  } // end compact select block
 
   // Populate interrupt model selector — same pattern
   const isel = document.getElementById('interruptModelSelect');
+  if (!isel) { /* interrupt select not in current scaffolding */ } else {
   const iSavedVal = isel.value;
   isel.querySelectorAll('optgroup').forEach(g => g.remove());
   for (const prov of providerOrder) {
@@ -4728,18 +4947,72 @@ async function loadModels() {
     }
     isel.appendChild(grp);
   }
-  if (unavail.length) {
+  for (const prov of byokProviderOrder) {
+    const models = byokGroups[prov];
+    if (!models?.length) continue;
     const grp = document.createElement('optgroup');
-    grp.label = 'Bring Your Own Key';
-    for (const m of unavail) {
+    grp.label = `${prov} (BYOK)`;
+    for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m.name;
-      opt.textContent = `${m.name} — ${m.price} (BYOK)`;
+      opt.textContent = `${m.name} — ${m.price}`;
       grp.appendChild(opt);
     }
     isel.appendChild(grp);
   }
   if (iSavedVal && [...isel.options].some(o => o.value === iSavedVal)) isel.value = iSavedVal;
+  } // end interrupt select block
+
+  // Populate RLM model selects if they exist
+  for (const rlmSelId of ['sf_rlm_modelSelect', 'sf_rlm_subModelSelect']) {
+    const rlmSel = document.getElementById(rlmSelId);
+    if (!rlmSel) continue;
+    const rlmSaved = rlmSel.value;
+    rlmSel.innerHTML = '<option value="">Select a model...</option>';
+    for (const prov of providerOrder) {
+      const models = groups[prov];
+      if (!models?.length) continue;
+      const grp = document.createElement('optgroup');
+      grp.label = prov;
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        const caps = [];
+        if (m.capabilities?.image) caps.push('IMG');
+        if (m.capabilities?.reasoning) caps.push('RSN');
+        opt.textContent = `${m.name} — ${m.price}${caps.length ? ` [${caps.join(',')}]` : ''}`;
+        grp.appendChild(opt);
+      }
+      rlmSel.appendChild(grp);
+    }
+    if (FEATURES.puter_js) {
+      const grp = document.createElement('optgroup');
+      grp.label = 'Puter.js (free)';
+      for (const m of ['gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'mistral-large-latest']) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = `${m} — Free (Puter.js)`;
+        grp.appendChild(opt);
+      }
+      rlmSel.appendChild(grp);
+    }
+    for (const prov of byokProviderOrder) {
+      const models = byokGroups[prov];
+      if (!models?.length) continue;
+      const grp = document.createElement('optgroup');
+      grp.label = `${prov} (BYOK)`;
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        const caps = [];
+        if (m.capabilities?.image) caps.push('IMG');
+        if (m.capabilities?.reasoning) caps.push('RSN');
+        opt.textContent = `${m.name} — ${m.price}${caps.length ? ` [${caps.join(',')}]` : ''}`;
+        grp.appendChild(opt);
+      }
+      rlmSel.appendChild(grp);
+    }
+    if (rlmSaved && [...rlmSel.options].some(o => o.value === rlmSaved)) rlmSel.value = rlmSaved;
+  }
 
   updateModelCaps();
 }
@@ -6633,7 +6906,7 @@ function renderSessionTabs() {
   newBtn.textContent = '+ New Session';
   if (sessions.size >= 1) {
     newBtn.disabled = true;
-    newBtn.title = 'Multi-session coming soon!';
+    newBtn.title = 'Close the current session first to start a new one';
     newBtn.style.opacity = '0.4';
     newBtn.style.cursor = 'not-allowed';
   } else {
@@ -6768,6 +7041,7 @@ function closeSession(id) {
   }
   renderSessionTabs();
   saveSessionIndex();
+  updateGameListLock();
 }
 
 function updatePanelBlur() {
@@ -6778,8 +7052,8 @@ function updatePanelBlur() {
 function updateGameListLock() {
   const sidebar = document.getElementById('gameSidebar');
   if (sidebar) {
-    // Lock the sidebar only after moves have been made (stepCount > 0)
-    const shouldLock = sessionId && stepCount > 0 && currentState.state === 'NOT_FINISHED';
+    // Lock the sidebar after first move (human or agent) or autoplay started
+    const shouldLock = sessionId && (stepCount > 0 || autoPlaying) && currentState.state === 'NOT_FINISHED';
     sidebar.classList.toggle('locked', shouldLock);
   }
 }
