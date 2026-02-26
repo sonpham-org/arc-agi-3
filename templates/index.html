@@ -1111,6 +1111,7 @@ function renderScaffoldingSettings(schemaId) {
   html += `<div style="font-size:10px;color:var(--text-dim);margin-bottom:8px;">${schema.description}</div>`;
   html += '<div id="pipelineVisualizer"></div>';
   html += '</div>';
+  html += '<div id="settingsBody">';
 
   for (const section of schema.sections) {
     const openCls = section.open ? ' open' : '';
@@ -1137,6 +1138,7 @@ function renderScaffoldingSettings(schemaId) {
     }
     html += '</div>';
   }
+  html += '</div>'; // close #settingsBody
 
   container.innerHTML = html;
 
@@ -3159,15 +3161,20 @@ function lockHumanControls() {
 }
 
 function lockSettings() {
-  const body = document.getElementById('subtabSettings');
+  // Grey out settings controls but keep the scaffold diagram visible (it shows live call status)
+  const body = document.getElementById('settingsBody');
   if (body) { body.style.opacity = '0.5'; body.style.pointerEvents = 'none'; }
+  const scaffSelect = document.getElementById('scaffoldingSelect');
+  if (scaffSelect) scaffSelect.disabled = true;
   const sidebar = document.getElementById('gameSidebar');
   if (sidebar) sidebar.classList.add('locked');
 }
 
 function unlockSettings() {
-  const body = document.getElementById('subtabSettings');
+  const body = document.getElementById('settingsBody');
   if (body) { body.style.opacity = ''; body.style.pointerEvents = ''; }
+  const scaffSelect = document.getElementById('scaffoldingSelect');
+  if (scaffSelect) scaffSelect.disabled = false;
   updateGameListLock();  // re-evaluate — may stay locked if session in progress
 }
 
