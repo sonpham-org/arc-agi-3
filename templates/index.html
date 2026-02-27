@@ -4172,6 +4172,10 @@ async function askLLM(ss) {
         _clientTruncated = true;
         rawContent = rawContent.text;
       }
+      // If LLM returned empty/no content but no error was set, treat as empty response error
+      if (!rawContent && !resp) {
+        resp = { error: 'Empty response from model', model: model };
+      }
       if (rawContent) {
         resp = parseClientLLMResponse(rawContent, model);
         if (_clientTruncated) resp.truncated = true;
@@ -4821,7 +4825,13 @@ async function toggleAutoPlay() {
     // Guard: stop if session was closed
     if (!sessions.has(mySessionId)) { break; }
 
-    const resp = await askLLM(ss);
+    let resp;
+    try {
+      resp = await askLLM(ss);
+    } catch (e) {
+      console.error('[autoPlay] askLLM threw:', e);
+      resp = { error: e.message || 'Unknown error', model: getSelectedModel() };
+    }
     if (ss && resp && resp.call_duration_ms) {
       ss.callDurations.push(resp.call_duration_ms);
     }
