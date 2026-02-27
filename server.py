@@ -3729,6 +3729,7 @@ import numpy as _np
 
 _FD01_PATH = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "fd01.py"
 _CUSTOM_SCENES_FILE = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "custom_scenes.json"
+_CUSTOM_DIFFS_FILE  = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "custom_diffs.json"
 
 
 def _load_fd01_module():
@@ -3753,31 +3754,58 @@ def _write_custom_scenes(data: dict):
     _CUSTOM_SCENES_FILE.write_text(json.dumps(data))
 
 
+def _read_custom_diffs() -> dict:
+    try:
+        if _CUSTOM_DIFFS_FILE.exists():
+            return json.loads(_CUSTOM_DIFFS_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _write_custom_diffs(data: dict):
+    _CUSTOM_DIFFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CUSTOM_DIFFS_FILE.write_text(json.dumps(data))
+
+
 @app.route("/draw")
 def draw_editor():
     return render_template("draw.html", color_map=COLOR_MAP, color_names=COLOR_NAMES)
+
+
+def _builtin_diffs_to_rects(raw_diffs):
+    """Convert old (dx,dy,rc,side) tuples → {x,y,w,h,color,side} dicts."""
+    return [{"x": d[0] - 1, "y": d[1] - 1, "w": 4, "h": 4, "color": d[2], "side": d[3]}
+            for d in raw_diffs]
 
 
 @app.route("/api/draw/scene/<int:level>")
 def get_draw_scene(level):
     if level < 0 or level >= 5:
         return jsonify({"error": "Invalid level"}), 400
-    custom = _read_custom_scenes()
-    if str(level) in custom:
-        fd01 = _load_fd01_module()
-        diffs = [{"dx": d[0], "dy": d[1], "color": d[2], "side": d[3]}
-                 for d in fd01.DIFFS[level]]
-        return jsonify({"pixels": custom[str(level)],
-                        "width": 30, "height": 62,
-                        "custom": True, "diffs": diffs})
     fd01 = _load_fd01_module()
-    img = _np.zeros((fd01.IMG_H, fd01.IMG_W), dtype=_np.int16)
-    fd01.SCENES[level](img)
-    diffs = [{"dx": d[0], "dy": d[1], "color": d[2], "side": d[3]}
-             for d in fd01.DIFFS[level]]
-    return jsonify({"pixels": img.tolist(),
-                    "width": fd01.IMG_W, "height": fd01.IMG_H,
-                    "custom": False, "diffs": diffs})
+    custom_scenes = _read_custom_scenes()
+    custom_diffs  = _read_custom_diffs()
+
+    if str(level) in custom_scenes:
+        pixels = custom_scenes[str(level)]
+        is_custom_scene = True
+    else:
+        img = _np.zeros((fd01.IMG_H, fd01.IMG_W), dtype=_np.int16)
+        fd01.SCENES[level](img)
+        pixels = img.tolist()
+        is_custom_scene = False
+
+    if str(level) in custom_diffs:
+        diffs = custom_diffs[str(level)]
+        is_custom_diffs = True
+    else:
+        diffs = _builtin_diffs_to_rects(fd01.DIFFS[level])
+        is_custom_diffs = False
+
+    return jsonify({"pixels": pixels, "width": fd01.IMG_W, "height": fd01.IMG_H,
+                    "custom": is_custom_scene, "custom_diffs": is_custom_diffs,
+                    "diffs": diffs})
 
 
 @app.route("/api/draw/save", methods=["POST"])
@@ -3795,6 +3823,21 @@ def save_draw_scene():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/draw/save_diffs", methods=["POST"])
+def save_draw_diffs():
+    data = request.get_json(force=True)
+    level = data.get("level")
+    diffs = data.get("diffs")
+    if level is None or diffs is None:
+        return jsonify({"error": "level and diffs required"}), 400
+    custom = _read_custom_diffs()
+    custom[str(level)] = diffs
+    _write_custom_diffs(custom)
+    global arcade_instance
+    arcade_instance = None
+    return jsonify({"status": "ok"})
+
+
 @app.route("/api/draw/reset", methods=["POST"])
 def reset_draw_scene():
     data = request.get_json(force=True)
@@ -3804,6 +3847,9 @@ def reset_draw_scene():
     custom = _read_custom_scenes()
     custom.pop(str(level), None)
     _write_custom_scenes(custom)
+    custom_d = _read_custom_diffs()
+    custom_d.pop(str(level), None)
+    _write_custom_diffs(custom_d)
     global arcade_instance
     arcade_instance = None
     return jsonify({"status": "ok"})

@@ -21,6 +21,14 @@ When updating reasoning rendering in one place, update ALL others to match. Key 
 - Both pages must use the same grouping logic (check `llm_response.parsed` for plan leader, absorb followers by plan capacity)
 - Branched sessions must show parent reasoning up to the branch point (trace back via `parent_session_id` / `branch_at_step`)
 
+## Game Design Rules
+
+All games must be **fully deterministic** — no random elements of any kind:
+- No `random`, `np.random`, or any other RNG calls
+- Enemy movement, spawn positions, map layout, treasure placement — all fixed and hardcoded
+- Given the same sequence of player actions, the game must always produce the exact same outcome
+- Maps, levels, and all initial state are defined as constants, not generated at runtime
+
 ## Turso (Remote DB) Upload
 
 To upload local sessions to Turso, you must source `.env` first since `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are not set in the shell by default:

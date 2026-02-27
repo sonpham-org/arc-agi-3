@@ -17,10 +17,20 @@ ROCK_C     = 5    # gray rocks
 SHIP_C     = 15   # white ship hull / sail
 DECK_C     = 3    # dark deck
 TREASURE_C = 11   # bright yellow chest
-ENEMY_C    = 6    # magenta enemy ship
+ENEMY_C    = 6    # magenta enemy ship (bouncing)
+CHASER_C   = 14   # lime chasing enemy ship
+PATROL_C   = 12   # red sentinel/patrol ship
+LOS_C      = 7    # orange line-of-sight ray
+LOS_RANGE  = 8    # cells the patrol ship can see ahead
 LIFE_C     = 12   # red HUD lives
 PROGRESS_C = 11   # yellow HUD progress
-USED_PORT_C = 5   # gray — docked / exhausted port
+USED_PORT_C    = 5   # gray — docked / exhausted port
+SWITCH_C       = 8   # azure — interactive switch (state 0)
+SWITCH_ON_C    = 1   # dark-blue — switch (state 1)
+CHEST_ORANGE_C = 7   # orange locked chest (needs orange key)
+CHEST_RED_C    = 12  # red locked chest (needs red key)
+KEY_ORANGE_C   = 7   # orange key (rendered as dot)
+KEY_RED_C      = 12  # red key (rendered as dot)
 
 # ── Faction identifiers & colours ────────────────────────────────────────
 F_BRITISH = "british"
@@ -56,8 +66,8 @@ OCEAN = 0
 LAND  = 1
 ROCK  = 2
 
-# Action → direction  (standard: 1=up 2=right 3=down 4=left)
-_DIR = {1: (0, -1), 2: (1, 0), 3: (0, 1), 4: (-1, 0)}
+# Action → direction  (1=up 2=down 3=left 4=right)
+_DIR = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
 
 # Player ship pixel art (logical 2×3), -1 = transparent
 SHIP_PIX = [
@@ -138,7 +148,93 @@ _PORTS3 = [
     _port(23, 25, F_PIRATE),
 ]
 
+# ── Map 4: Stormy Waters ──────────────────────────────────────────────────
+_MAP4 = _make_map(
+    islands=[(5, 5, 2, 2), (27, 5, 2, 2), (5, 27, 2, 2), (27, 27, 2, 2), (16, 16, 2, 2)],
+    rocks=[(10, 10), (11, 10), (10, 11), (21, 10), (22, 10), (21, 21), (22, 21), (10, 21)],
+)
+_PORTS4 = [
+    _port( 5,  5, F_BRITISH),
+    _port(27,  5, F_FRANCE),
+    _port( 5, 27, F_SPAIN),
+    _port(27, 27, F_DUTCH),
+    _port(16, 16, F_PIRATE),
+]
+
+# ── Map 5: Kraken's Hunt ──────────────────────────────────────────────────
+_MAP5 = _make_map(
+    islands=[(8, 8, 3, 2), (24, 8, 2, 3), (8, 24, 2, 3), (24, 24, 3, 2), (16, 4, 2, 2), (16, 28, 2, 2)],
+    rocks=[(13, 13), (14, 13), (13, 14), (18, 13), (19, 13), (18, 18), (13, 18), (19, 18)],
+)
+_PORTS5 = [
+    _port( 8,  8, F_BRITISH),
+    _port(24,  8, F_FRANCE),
+    _port( 8, 24, F_SPAIN),
+    _port(24, 24, F_DUTCH),
+    _port(16,  4, F_PIRATE),
+]
+
+# ── Map 6: Sentinel Straits ───────────────────────────────────────────────
+# Two horizontal band islands create a clear corridor through the middle.
+_MAP6 = _make_map(
+    islands=[(16, 7, 7, 4), (16, 25, 7, 4)],
+    rocks=[(4, 15), (4, 16), (4, 17), (28, 15), (28, 16), (28, 17)],
+)
+_PORTS6 = [
+    _port(16,  7, F_BRITISH),
+    _port(10,  7, F_FRANCE),
+    _port(22,  7, F_SPAIN),
+    _port(16, 25, F_DUTCH),
+    _port(22, 25, F_PIRATE),
+]
+
+# ── Map 7: Hunter's Web ───────────────────────────────────────────────────
+# Four corner islands leave a cross-shaped open ocean in the center.
+_MAP7 = _make_map(
+    islands=[(7, 7, 4, 4), (25, 7, 4, 4), (7, 25, 4, 4), (25, 25, 4, 4)],
+    rocks=[(14, 14), (15, 14), (14, 15), (17, 17), (18, 17), (17, 18)],
+)
+_PORTS7 = [
+    _port( 7,  7, F_BRITISH),
+    _port(25,  7, F_FRANCE),
+    _port( 7, 25, F_SPAIN),
+    _port(25, 25, F_DUTCH),
+    _port(16, 16, F_PIRATE),
+]
+
+# ── Map 8: Fog of War ────────────────────────────────────────────────────
+# Central island with four small corner islands. Switch reveals hidden group.
+_MAP8 = _make_map(
+    islands=[(16, 16, 3, 3), (4, 4, 1, 1), (28, 4, 1, 1), (4, 28, 1, 1), (28, 28, 1, 1)],
+    rocks=[(10, 8), (22, 8), (10, 24), (22, 24)],
+)
+_PORTS8 = [
+    _port( 4,  4, F_BRITISH),
+    _port(28,  4, F_FRANCE),
+    _port( 4, 28, F_SPAIN),
+    _port(28, 28, F_DUTCH),
+    _port(16, 16, F_PIRATE),
+]
+
+# ── Map 9: Key & Switch ───────────────────────────────────────────────────
+# Four corner islands, central rock ring. Keys unlock coloured chests.
+_MAP9 = _make_map(
+    islands=[(8, 8, 3, 3), (24, 8, 3, 3), (8, 24, 3, 3), (24, 24, 3, 3)],
+    rocks=[(14, 14), (15, 14), (16, 14), (14, 15), (16, 15),
+           (14, 16), (15, 16), (16, 16)],
+)
+_PORTS9 = [
+    _port( 8,  8, F_BRITISH),
+    _port(24,  8, F_FRANCE),
+    _port( 8, 24, F_SPAIN),
+    _port(24, 24, F_DUTCH),
+    _port(16, 12, F_PIRATE),
+]
+
 _SHORE1, _SHORE2, _SHORE3 = _shore_mask(_MAP1), _shore_mask(_MAP2), _shore_mask(_MAP3)
+_SHORE4, _SHORE5 = _shore_mask(_MAP4), _shore_mask(_MAP5)
+_SHORE6, _SHORE7 = _shore_mask(_MAP6), _shore_mask(_MAP7)
+_SHORE8, _SHORE9 = _shore_mask(_MAP8), _shore_mask(_MAP9)
 
 _LEVELS = [
     {
@@ -147,6 +243,8 @@ _LEVELS = [
         "ship":      (2, 16),
         "treasures": [(28, 4), (28, 27), (4, 27)],
         "enemies":   [{"pos": [16, 5],  "dir": [1, 0]}],
+        "chasers":   [],
+        "patrols":   [],
         "lives":     3,
     },
     {
@@ -156,6 +254,8 @@ _LEVELS = [
         "treasures": [(28, 4), (28, 28), (4, 28), (28, 16), (16, 28)],
         "enemies":   [{"pos": [16, 10], "dir": [0, 1]},
                       {"pos": [26, 22], "dir": [-1, 0]}],
+        "chasers":   [],
+        "patrols":   [],
         "lives":     3,
     },
     {
@@ -167,7 +267,93 @@ _LEVELS = [
         "enemies":   [{"pos": [20, 8],  "dir": [1, 0]},
                       {"pos": [5,  25], "dir": [0, -1]},
                       {"pos": [26, 16], "dir": [0, 1]}],
+        "chasers":   [],
+        "patrols":   [],
         "lives":     3,
+    },
+    {
+        "name":      "Stormy Waters",
+        "map":       _MAP4, "shore": _SHORE4, "ports": _PORTS4,
+        "ship":      (2, 16),
+        "treasures": [(29, 2), (29, 29), (2, 29), (29, 16), (16, 2)],
+        "enemies":   [{"pos": [16, 10], "dir": [1, 0]}],
+        "chasers":   [{"pos": [29, 16], "budget": 0.0}],
+        "patrols":   [],
+        "lives":     3,
+    },
+    {
+        "name":      "Kraken's Hunt",
+        "map":       _MAP5, "shore": _SHORE5, "ports": _PORTS5,
+        "ship":      (2, 16),
+        "treasures": [(29, 2), (29, 29), (2, 29), (29, 16),
+                      (12, 29), (2, 2),  (12, 2)],
+        "enemies":   [{"pos": [16, 16], "dir": [1, 0]}],
+        "chasers":   [{"pos": [29, 4],  "budget": 0.0},
+                      {"pos": [29, 28], "budget": 0.0}],
+        "patrols":   [],
+        "lives":     3,
+    },
+    {
+        "name":      "Sentinel Straits",
+        "map":       _MAP6, "shore": _SHORE6, "ports": _PORTS6,
+        "ship":      (2, 16),
+        "treasures": [(29, 2), (2, 2), (2, 29), (29, 29), (16, 16)],
+        "enemies":   [{"pos": [8, 16], "dir": [1, 0]}],
+        "chasers":   [],
+        # Patrol ship centered, LoS faces left toward the player's approach
+        "patrols":   [{"pos": [16, 16], "dir": [-1, 0], "alerted": False, "budget": 0.0}],
+        "lives":     3,
+    },
+    {
+        "name":      "Hunter's Web",
+        "map":       _MAP7, "shore": _SHORE7, "ports": _PORTS7,
+        "ship":      (2, 16),
+        "treasures": [(29, 2), (28, 29), (16, 29), (29, 15),
+                      (16, 2),  (2, 2),  (16, 16)],
+        "enemies":   [{"pos": [16, 12], "dir": [1, 0]}],
+        "chasers":   [{"pos": [2, 29], "budget": 0.0}],
+        # Two patrol ships: one guards top corridor, one guards right corridor
+        "patrols":   [{"pos": [16, 2],  "dir": [0,  1], "alerted": False, "budget": 0.0},
+                      {"pos": [29, 16], "dir": [-1, 0], "alerted": False, "budget": 0.0}],
+        "lives":     3,
+    },
+    {
+        "name":         "Fog of War",
+        "map":          _MAP8, "shore": _SHORE8, "ports": _PORTS8,
+        "ship":         (2, 16),
+        # Normal chests always visible
+        "treasures":    [(8, 16), (24, 16)],
+        # Switch-A group: visible at start (state=0)
+        "switch_a":     [(29, 16), (29, 2), (16, 2)],
+        # Switch-B group: hidden at start, revealed when switch hit
+        "switch_b":     [(2, 2), (2, 28), (16, 29)],
+        "switch":       {"pos": [16, 8]},
+        "orange_chests": [],
+        "red_chests":   [],
+        "keys":         [],
+        "enemies":      [],
+        "chasers":      [],
+        "patrols":      [{"pos": [24, 24], "dir": [-1, 0], "alerted": False, "budget": 0.0}],
+        "lives":        3,
+    },
+    {
+        "name":         "Key & Switch",
+        "map":          _MAP9, "shore": _SHORE9, "ports": _PORTS9,
+        "ship":         (2, 16),
+        "treasures":    [(2, 2), (2, 29)],
+        # Switch groups
+        "switch_a":     [(2, 8), (16, 2)],
+        "switch_b":     [(2, 24), (16, 29)],
+        "switch":       {"pos": [16, 4]},
+        # Orange key unlocks orange chests; red key unlocks red chests
+        "orange_chests": [(29, 3), (29, 13)],
+        "red_chests":   [(29, 19), (29, 29)],
+        "keys":         [{"pos": [29,  8], "color": "orange"},
+                         {"pos": [29, 24], "color": "red"}],
+        "enemies":      [],
+        "chasers":      [{"pos": [29, 16], "budget": 0.0}],
+        "patrols":      [{"pos": [8, 16], "dir": [1, 0], "alerted": False, "budget": 0.0}],
+        "lives":        3,
     },
 ]
 
@@ -236,13 +422,58 @@ class PiDisplay(RenderableUserDisplay):
                 if 0 <= flag_py < 64:
                     frame[flag_py, flag_px] = color
 
-        # ── Treasures ────────────────────────────────────────────────────────
+        # ── Switch ───────────────────────────────────────────────────────────
+        if g.switch is not None:
+            sx, sy = g.switch["pos"]
+            sw_col = SWITCH_C if g.switch_state == 0 else SWITCH_ON_C
+            _fill(frame, sx, sy, sw_col)
+            frame[sy * 2 + 1, sx * 2 + 1] = 15   # white center dot
+
+        # ── Treasures (normal + visible switch group) ─────────────────────
         for tx, ty in g.treasures:
             _fill(frame, tx, ty, TREASURE_C)
+        visible_sw = g.switch_a if g.switch_state == 0 else g.switch_b
+        for tx, ty in visible_sw:
+            _fill(frame, tx, ty, TREASURE_C)
+
+        # ── Orange locked chests (orange block, dark center = lock) ───────
+        for tx, ty in g.orange_chests:
+            _fill(frame, tx, ty, CHEST_ORANGE_C)
+            frame[ty * 2 + 1, tx * 2 + 1] = 3
+
+        # ── Red locked chests (red block, dark center = lock) ─────────────
+        for tx, ty in g.red_chests:
+            _fill(frame, tx, ty, CHEST_RED_C)
+            frame[ty * 2 + 1, tx * 2 + 1] = 3
+
+        # ── Keys (small center-pixel dot) ─────────────────────────────────
+        for k in g.keys:
+            kx, ky = k["pos"]
+            kc = KEY_ORANGE_C if k["color"] == "orange" else KEY_RED_C
+            frame[ky * 2 + 1, kx * 2 + 1] = kc
 
         # ── Enemy ships ──────────────────────────────────────────────────────
         for e in g.enemies:
             _fill(frame, int(e["pos"][0]), int(e["pos"][1]), ENEMY_C)
+
+        # ── Chaser ships ─────────────────────────────────────────────────────
+        for c in g.chasers:
+            _fill(frame, int(c["pos"][0]), int(c["pos"][1]), CHASER_C)
+
+        # ── Patrol ships: LoS ray first, then ship on top ────────────────────
+        for p in g.patrols:
+            px, py = int(p["pos"][0]), int(p["pos"][1])
+            dx, dy = p["dir"]
+            if not p["alerted"]:
+                # Draw LoS ray as a center-pixel dot in each cell ahead
+                for i in range(1, LOS_RANGE + 1):
+                    lx, ly = px + dx * i, py + dy * i
+                    if lx < 0 or lx >= GL or ly < 0 or ly >= GL:
+                        break
+                    if g.game_map[ly, lx] != OCEAN:
+                        break
+                    frame[ly * 2 + 1, lx * 2 + 1] = LOS_C
+            _fill(frame, px, py, PATROL_C)
 
         # ── Player ship (blinks when invincible) ─────────────────────────────
         if not (g.invincible > 0 and g.invincible % 4 < 2):
@@ -252,17 +483,19 @@ class PiDisplay(RenderableUserDisplay):
         for i in range(g.lives):
             frame[1:3, 1 + i * 5:1 + i * 5 + 3] = LIFE_C
 
-        # ── HUD: faction legend + used indicator (bottom two rows) ────────────
-        # Active port: faction colour.  Used port: gray.
-        for i, fname in enumerate(FACTIONS_ORDERED):
-            port_used = any(p["faction"] == fname and p["used"] for p in g.ports)
-            color = USED_PORT_C if port_used else FACTION_COLOR[fname]
-            frame[62:64, 2 + i * 7:2 + i * 7 + 5] = color
+        # ── HUD: continues (azure squares, bottom-left) ───────────────────
+        for i in range(g.continues):
+            frame[61:63, 1 + i * 5:1 + i * 5 + 3] = SWITCH_C
+
 
         # ── HUD: treasure progress (top strip) ───────────────────────────────
-        total = len(_LEVELS[g.level_index]["treasures"])
-        collected = total - len(g.treasures)
-        for i in range(total):
+        d = _LEVELS[g.level_index]
+        total = (len(d["treasures"]) + len(d.get("switch_a", [])) +
+                 len(d.get("switch_b", [])) + len(d.get("orange_chests", [])) +
+                 len(d.get("red_chests", [])))
+        collected = total - (len(g.treasures) + len(g.switch_a) + len(g.switch_b) +
+                             len(g.orange_chests) + len(g.red_chests))
+        for i in range(min(total, 12)):   # cap at 12 dots to fit HUD
             frame[0:2, 24 + i * 5:24 + i * 5 + 3] = PROGRESS_C if i < collected else 1
 
         return frame
@@ -284,8 +517,22 @@ class Pi01(ARCBaseGame):
         self.ports       = []
         self.treasures   = []
         self.enemies     = []
-        self.lives       = 3
-        self.invincible  = 0
+        self.chasers        = []
+        self.patrols        = []
+        self.player_steps   = 0
+        self.switch         = None
+        self.switch_state   = 0
+        self.switch_a       = []
+        self.switch_b       = []
+        self.orange_chests  = []
+        self.red_chests     = []
+        self.keys           = []
+        self.has_orange_key = False
+        self.has_red_key    = False
+        self.on_switch      = False
+        self.lives          = 3
+        self.continues      = 3
+        self.invincible     = 0
 
         super().__init__(
             "pi01",
@@ -308,8 +555,25 @@ class Pi01(ARCBaseGame):
         self.treasures   = list(d["treasures"])
         self.enemies     = [{"pos": list(e["pos"]), "dir": list(e["dir"])}
                             for e in d["enemies"]]
-        self.lives       = d["lives"]
-        self.invincible  = 0
+        self.chasers        = [{"pos": list(c["pos"]), "budget": 0.0}
+                               for c in d.get("chasers", [])]
+        self.patrols        = [{"pos": list(p["pos"]), "dir": list(p["dir"]),
+                                "alerted": False, "budget": 0.0}
+                               for p in d.get("patrols", [])]
+        self.player_steps   = 0
+        sw                  = d.get("switch")
+        self.switch         = {"pos": list(sw["pos"])} if sw else None
+        self.switch_state   = 0
+        self.switch_a       = list(d.get("switch_a", []))
+        self.switch_b       = list(d.get("switch_b", []))
+        self.orange_chests  = list(d.get("orange_chests", []))
+        self.red_chests     = list(d.get("red_chests", []))
+        self.keys           = [dict(k) for k in d.get("keys", [])]
+        self.has_orange_key = False
+        self.has_red_key    = False
+        self.on_switch      = False
+        self.lives          = d["lives"]
+        self.invincible     = 0
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -373,8 +637,88 @@ class Pi01(ARCBaseGame):
             e["pos"] = [nx, ny]
             e["dir"] = [dx, dy]
 
+    def _move_chasers(self) -> None:
+        m = self.game_map
+        for c in self.chasers:
+            c["budget"] += 2.0 / 3.0
+            steps = int(c["budget"])
+            c["budget"] -= steps
+            for _ in range(steps):
+                cx, cy = int(c["pos"][0]), int(c["pos"][1])
+                dx = self.sx - cx
+                dy = self.sy - cy
+                # Try primary axis (whichever has more distance), then secondary
+                if abs(dx) >= abs(dy):
+                    axes = [(1 if dx > 0 else -1, 0), (0, 1 if dy > 0 else -1)]
+                else:
+                    axes = [(0, 1 if dy > 0 else -1), (1 if dx > 0 else -1, 0)]
+                for adx, ady in axes:
+                    if adx == 0 and ady == 0:
+                        continue
+                    nx, ny = cx + adx, cy + ady
+                    if 0 <= nx < GL and 0 <= ny < GL and m[ny, nx] == OCEAN:
+                        c["pos"] = [nx, ny]
+                        break
+
+    def _move_patrols(self) -> None:
+        m = self.game_map
+        for p in self.patrols:
+            px, py = int(p["pos"][0]), int(p["pos"][1])
+            dx, dy = p["dir"]
+
+            # Check line of sight if not yet alerted
+            if not p["alerted"]:
+                for i in range(1, LOS_RANGE + 1):
+                    lx, ly = px + dx * i, py + dy * i
+                    if lx < 0 or lx >= GL or ly < 0 or ly >= GL:
+                        break
+                    if m[ly, lx] != OCEAN:
+                        break
+                    if (self.sx <= lx < self.sx + SHIP_LW and
+                            self.sy <= ly < self.sy + SHIP_LH):
+                        p["alerted"] = True
+                        break
+
+            # Budget: 2 tiles/action when alerted, 1 tile/action when patrolling
+            p["budget"] += 2.0 if p["alerted"] else 1.0
+            steps = int(p["budget"])
+            p["budget"] -= steps
+
+            for _ in range(steps):
+                px, py = int(p["pos"][0]), int(p["pos"][1])
+                if p["alerted"]:
+                    # Greedy chase toward player
+                    ddx = self.sx - px
+                    ddy = self.sy - py
+                    if abs(ddx) >= abs(ddy):
+                        axes = [(1 if ddx > 0 else -1, 0), (0, 1 if ddy > 0 else -1)]
+                    else:
+                        axes = [(0, 1 if ddy > 0 else -1), (1 if ddx > 0 else -1, 0)]
+                    for adx, ady in axes:
+                        if adx == 0 and ady == 0:
+                            continue
+                        nx, ny = px + adx, py + ady
+                        if 0 <= nx < GL and 0 <= ny < GL and m[ny, nx] == OCEAN:
+                            p["pos"] = [nx, ny]
+                            p["dir"] = [adx, ady]
+                            break
+                else:
+                    # Bounce patrol
+                    nx, ny = px + dx, py + dy
+                    if nx < 0 or nx >= GL or ny < 0 or ny >= GL or m[ny, nx] != OCEAN:
+                        dx, dy = -dx, -dy
+                        nx, ny = px + dx, py + dy
+                        if nx < 0 or nx >= GL or ny < 0 or ny >= GL or m[ny, nx] != OCEAN:
+                            dx, dy = dy, dx
+                            nx, ny = px + dx, py + dy
+                            if nx < 0 or nx >= GL or ny < 0 or ny >= GL or m[ny, nx] != OCEAN:
+                                nx, ny = px, py
+                    p["pos"] = [nx, ny]
+                    p["dir"] = [dx, dy]
+
     def _enemy_collision(self) -> bool:
-        for e in self.enemies:
+        all_enemies = list(self.enemies) + list(self.chasers) + list(self.patrols)
+        for e in all_enemies:
             ex, ey = int(e["pos"][0]), int(e["pos"][1])
             if (self.sx < ex + 1 and self.sx + SHIP_LW > ex and
                     self.sy < ey + 1 and self.sy + SHIP_LH > ey):
@@ -391,30 +735,74 @@ class Pi01(ARCBaseGame):
         if not self._blocked(nx, ny):
             self.sx, self.sy = nx, ny
 
-        # Collect overlapping treasures
-        self.treasures = [
-            (tx, ty) for tx, ty in self.treasures
-            if not (self.sx <= tx < self.sx + SHIP_LW and
+        def _overlaps(tx, ty):
+            return (self.sx <= tx < self.sx + SHIP_LW and
                     self.sy <= ty < self.sy + SHIP_LH)
-        ]
+
+        # Toggle switch (only fires on entry, not while standing still on it)
+        on_sw_now = (self.switch is not None and
+                     _overlaps(self.switch["pos"][0], self.switch["pos"][1]))
+        if on_sw_now and not self.on_switch:
+            self.switch_state = 1 - self.switch_state
+        self.on_switch = on_sw_now
+
+        # Collect normal treasures
+        self.treasures = [(tx, ty) for tx, ty in self.treasures
+                          if not _overlaps(tx, ty)]
+
+        # Collect visible switch-group treasures
+        if self.switch_state == 0:
+            self.switch_a = [(tx, ty) for tx, ty in self.switch_a
+                             if not _overlaps(tx, ty)]
+        else:
+            self.switch_b = [(tx, ty) for tx, ty in self.switch_b
+                             if not _overlaps(tx, ty)]
+
+        # Collect keys
+        remaining_keys = []
+        for k in self.keys:
+            if _overlaps(k["pos"][0], k["pos"][1]):
+                if k["color"] == "orange":
+                    self.has_orange_key = True
+                else:
+                    self.has_red_key = True
+            else:
+                remaining_keys.append(k)
+        self.keys = remaining_keys
+
+        # Collect locked chests (only if holding the matching key)
+        if self.has_orange_key:
+            self.orange_chests = [(tx, ty) for tx, ty in self.orange_chests
+                                  if not _overlaps(tx, ty)]
+        if self.has_red_key:
+            self.red_chests = [(tx, ty) for tx, ty in self.red_chests
+                               if not _overlaps(tx, ty)]
 
         # Dock at adjacent ports
         self._check_ports()
 
+        self.player_steps += 1
         self._move_enemies()
+        self._move_chasers()
+        self._move_patrols()
 
         if self.invincible == 0 and self._enemy_collision():
             self.lives -= 1
             self.invincible = 12
             if self.lives <= 0:
-                self.lose()
+                if self.continues > 0:
+                    self.continues -= 1
+                    self.on_set_level(self.levels[self.level_index])
+                else:
+                    self.lose()
                 self.complete_action()
                 return
 
         if self.invincible > 0:
             self.invincible -= 1
 
-        if not self.treasures:
+        if (not self.treasures and not self.switch_a and not self.switch_b
+                and not self.orange_chests and not self.red_chests):
             self.next_level()
             self.complete_action()
             return
