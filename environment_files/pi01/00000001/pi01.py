@@ -245,6 +245,7 @@ _LEVELS = [
         "chasers":   [],
         "patrols":   [],
         "lives":     3,
+        "timer":     100,
     },
     {
         "name":      "Skull Shoals",
@@ -256,6 +257,7 @@ _LEVELS = [
         "chasers":   [],
         "patrols":   [],
         "lives":     3,
+        "timer":     130,
     },
     {
         "name":      "Dragon's Lair",
@@ -269,6 +271,7 @@ _LEVELS = [
         "chasers":   [],
         "patrols":   [],
         "lives":     3,
+        "timer":     170,
     },
     {
         "name":      "Stormy Waters",
@@ -279,6 +282,7 @@ _LEVELS = [
         "chasers":   [{"pos": [29, 16], "budget": 0.0}],
         "patrols":   [],
         "lives":     3,
+        "timer":     130,
     },
     {
         "name":      "Kraken's Hunt",
@@ -291,6 +295,7 @@ _LEVELS = [
                       {"pos": [29, 28], "budget": 0.0}],
         "patrols":   [],
         "lives":     3,
+        "timer":     170,
     },
     {
         "name":      "Sentinel Straits",
@@ -302,6 +307,7 @@ _LEVELS = [
         # Patrol ship centered, LoS faces left toward the player's approach
         "patrols":   [{"pos": [16, 16], "dir": [-1, 0], "alerted": False, "budget": 0.0}],
         "lives":     3,
+        "timer":     130,
     },
     {
         "name":      "Hunter's Web",
@@ -315,6 +321,7 @@ _LEVELS = [
         "patrols":   [{"pos": [16, 2],  "dir": [0,  1], "alerted": False, "budget": 0.0},
                       {"pos": [29, 16], "dir": [-1, 0], "alerted": False, "budget": 0.0}],
         "lives":     3,
+        "timer":     175,
     },
     {
         "name":         "Fog of War",
@@ -334,6 +341,7 @@ _LEVELS = [
         "chasers":      [],
         "patrols":      [{"pos": [24, 24], "dir": [-1, 0], "alerted": False, "budget": 0.0}],
         "lives":        3,
+        "timer":        175,
     },
     {
         "name":         "Key & Switch",
@@ -353,6 +361,7 @@ _LEVELS = [
         "chasers":      [{"pos": [29, 16], "budget": 0.0}],
         "patrols":      [{"pos": [8, 16], "dir": [1, 0], "alerted": False, "budget": 0.0}],
         "lives":        3,
+        "timer":        200,
     },
 ]
 
@@ -516,6 +525,20 @@ class PiDisplay(RenderableUserDisplay):
         for i in range(g.continues):
             frame[61:63, 1 + i * 5:1 + i * 5 + 3] = SWITCH_C
 
+        # ── HUD: timer bar (bottom-right) ─────────────────────────────────
+        if g.max_timer > 0:
+            frac = max(0.0, g.timer / g.max_timer)
+            bar_w = round(44 * frac)
+            if frac > 0.5:
+                timer_c = PROGRESS_C   # bright-yellow
+            elif frac > 0.25:
+                timer_c = 7            # orange
+            else:
+                timer_c = LIFE_C       # red
+            frame[61:63, 20:64] = 1    # dark-blue background track
+            if bar_w > 0:
+                frame[61:63, 20:20 + bar_w] = timer_c
+
 
         # ── HUD: treasure progress (top strip) ───────────────────────────────
         d = _LEVELS[g.level_index]
@@ -562,6 +585,8 @@ class Pi01(ARCBaseGame):
         self.lives          = 3
         self.continues      = 3
         self.invincible     = 0
+        self.timer          = 0
+        self.max_timer      = 0
 
         super().__init__(
             "pi01",
@@ -603,6 +628,8 @@ class Pi01(ARCBaseGame):
         self.on_switch      = False
         self.lives          = d["lives"]
         self.invincible     = 0
+        self.timer          = d["timer"]
+        self.max_timer      = d["timer"]
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -820,6 +847,25 @@ class Pi01(ARCBaseGame):
         self._check_ports()
 
         self.player_steps += 1
+
+        # ── Timer tick ────────────────────────────────────────────────────────
+        self.timer -= 1
+        if self.timer <= 0:
+            self.lives -= 1
+            if self.lives <= 0:
+                if self.continues > 0:
+                    self.continues -= 1
+                    self.on_set_level(self.levels[self.level_index])
+                    self.lives = MAX_LIVES
+                else:
+                    self.lose()
+            else:
+                saved_lives = self.lives
+                self.on_set_level(self.levels[self.level_index])
+                self.lives = saved_lives
+            self.complete_action()
+            return
+
         self._move_enemies()
         self._move_chasers()
         self._move_patrols()
