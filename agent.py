@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from collections import deque
 from datetime import datetime
@@ -20,6 +21,10 @@ from arcengine import GameAction, GameState
 load_dotenv(Path(__file__).parent / ".env")
 
 ROOT = Path(__file__).parent
+
+# Thread-safety locks for shared file writes
+_memory_lock = threading.Lock()
+_session_log_lock = threading.Lock()
 
 # ── Palette & action labels ────────────────────────────────────────────────
 
@@ -94,10 +99,11 @@ MODELS = {
         "url": "https://api.mistral.ai/v1/chat/completions",
     },
     # Gemini (google-genai SDK)
-    "gemini-2.0-flash-lite": {"provider": "gemini", "api_model": "gemini-2.0-flash-lite", "env_key": "GEMINI_API_KEY"},
     "gemini-2.0-flash":      {"provider": "gemini", "api_model": "gemini-2.0-flash",      "env_key": "GEMINI_API_KEY"},
+    "gemini-2.5-flash-lite": {"provider": "gemini", "api_model": "gemini-2.5-flash-lite",  "env_key": "GEMINI_API_KEY"},
     "gemini-2.5-flash":      {"provider": "gemini", "api_model": "gemini-2.5-flash",       "env_key": "GEMINI_API_KEY"},
     "gemini-2.5-pro":        {"provider": "gemini", "api_model": "gemini-2.5-pro",         "env_key": "GEMINI_API_KEY"},
+    "gemini-3.1-pro":        {"provider": "gemini", "api_model": "gemini-3.1-pro-preview",  "env_key": "GEMINI_API_KEY"},
     # Anthropic (direct API via httpx)
     "claude-haiku-4-5":      {"provider": "anthropic", "api_model": "claude-haiku-4-5-20251001", "env_key": "ANTHROPIC_API_KEY"},
     "claude-sonnet-4-5":     {"provider": "anthropic", "api_model": "claude-sonnet-4-5",         "env_key": "ANTHROPIC_API_KEY"},
@@ -114,12 +120,17 @@ MODELS = {
         "provider": "huggingface",
         "api_model": "meta-llama/Llama-3.3-70B-Instruct",
         "env_key": "HUGGINGFACE_API_KEY",
-        "url": "https://api-inference.huggingface.co/v1/chat/completions",
+        "url": "https://router.huggingface.co/v1/chat/completions",
     },
     # Ollama (local)
     "ollama/llama3.3": {
         "provider": "ollama",
         "api_model": "llama3.3",
+        "url": "http://localhost:11434/v1/chat/completions",
+    },
+    "ollama/llama3.1": {
+        "provider": "ollama",
+        "api_model": "llama3.1",
         "url": "http://localhost:11434/v1/chat/completions",
     },
 }
@@ -212,7 +223,12 @@ def save_hard_memory(cfg: dict, content: str) -> None:
 
 
 def append_memory_bullet(cfg: dict, game_id: str, bullet: str) -> None:
-    """Append a bullet under the game's section in MEMORY.md."""
+    """Append a bullet under the game's section in MEMORY.md (thread-safe)."""
+    with _memory_lock:
+        _append_memory_bullet_unsafe(cfg, game_id, bullet)
+
+
+def _append_memory_bullet_unsafe(cfg: dict, game_id: str, bullet: str) -> None:
     content = load_hard_memory(cfg)
     bullet = bullet.strip().lstrip("-").strip()
     section_header = f"## {game_id}"
@@ -233,16 +249,17 @@ def append_memory_bullet(cfg: dict, game_id: str, bullet: str) -> None:
 
 
 def log_session(cfg: dict, record: dict) -> None:
-    p = _sessions_path(cfg)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    sessions = []
-    if p.exists():
-        try:
-            sessions = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, ValueError):
-            sessions = []
-    sessions.append(record)
-    p.write_text(json.dumps(sessions, indent=2), encoding="utf-8")
+    with _session_log_lock:
+        p = _sessions_path(cfg)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        sessions = []
+        if p.exists():
+            try:
+                sessions = json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, ValueError):
+                sessions = []
+        sessions.append(record)
+        p.write_text(json.dumps(sessions, indent=2), encoding="utf-8")
 
 
 def relevant_memory_section(hard_memory: str, game_id: str, max_chars: int) -> str:
@@ -387,9 +404,12 @@ def compute_region_map(grid: list) -> str:
 
 def _call_openai_compatible(url: str, api_key: str, model: str, messages: list,
                              temperature: float, max_tokens: int) -> str:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     resp = httpx.post(
         url,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers=headers,
         json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
         timeout=90.0,
     )
@@ -725,7 +745,8 @@ def _fallback_action(available: list[int]) -> int:
 # GAME LOOP
 # ═══════════════════════════════════════════════════════════════════════════
 
-def play_game(arcade, game_id: str, cfg: dict, max_steps: int = 200) -> str:
+def play_game(arcade, game_id: str, cfg: dict, max_steps: int = 200,
+              session_id: str | None = None, step_callback=None) -> str:
     print(f"\n{'='*65}")
     print(f"  PLAYING: {game_id}")
     print(f"  Executor: {effective_model(cfg, 'executor')}")
@@ -845,14 +866,30 @@ def play_game(arcade, game_id: str, cfg: dict, max_steps: int = 200) -> str:
             break
 
         new_levels = frame.levels_completed if frame else levels_done
+        new_grid = frame.frame[-1].tolist() if frame.frame else grid
+        state_val = frame.state.value if frame and hasattr(frame.state, "value") else "?"
         history.append({
             "step": step_num,
             "action": action_id,
             "data": action_data,
-            "state": frame.state.value if frame and hasattr(frame.state, "value") else "?",
+            "state": state_val,
             "levels": new_levels,
             "observation": observation,
         })
+
+        # Invoke step callback (used by batch_runner for DB persistence)
+        if step_callback:
+            llm_resp = {"observation": observation, "reasoning": reasoning,
+                        "action": action_id, "data": action_data} if parsed else None
+            try:
+                step_callback(
+                    session_id=session_id, step_num=step_num,
+                    action=action_id, data=action_data,
+                    grid=new_grid, llm_response=llm_resp,
+                    state=state_val, levels=new_levels,
+                )
+            except Exception as cb_err:
+                print(f"  [callback error] {cb_err}")
 
     # Timed out
     final_state = frame.state.value if frame and hasattr(frame.state, "value") else "TIMEOUT"

@@ -177,6 +177,26 @@
     border-top: 1px solid var(--border); margin-top: 4px;
     font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
   }
+  .timeline-block.clickable { cursor: pointer; }
+  .timeline-block.clickable:hover { opacity: 0.8; }
+  .tl-detail {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; margin-bottom: 4px; font-size: 11px; line-height: 1.5;
+    display: none; color: var(--text-dim);
+  }
+  .tl-detail.open { display: block; }
+  .tl-detail .tl-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; font-size: 10px; }
+  .tl-detail .tl-meta span { white-space: nowrap; }
+  .tl-detail .tl-preview { white-space: pre-wrap; word-break: break-word; font-family: 'Courier New', monospace;
+    font-size: 10px; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.15);
+    border-radius: 3px; padding: 6px; margin-top: 4px; }
+  .tl-detail summary { cursor: pointer; font-size: 10px; color: var(--accent); margin-top: 4px; }
+  .tl-cost { color: var(--green); }
+  .tl-tokens { opacity: 0.8; }
+  .tl-expand-arrow { font-size: 8px; margin-left: 4px; transition: transform 0.15s; }
+  .timeline-block.expanded .tl-expand-arrow { transform: rotate(90deg); }
+  .timeline-block.rlm_main { background: #3fb95022; color: var(--green); border-left: 3px solid var(--green); }
+  .timeline-block.rlm_sub  { background: #3fb95011; color: var(--green); border-left: 3px solid var(--green); opacity: 0.7; margin-left: 16px; width: calc(100% - 16px); }
 
   /* ── Level-up marker ─────────────────────────────────────────────── */
   .level-marker { text-align: center; padding: 6px 0; margin: 4px 0; font-size: 11px; font-weight: 600; color: var(--green); }
@@ -298,6 +318,7 @@ const SESSION = {{ session | tojson }};
 const STEPS = {{ steps | tojson }};
 const BRANCH_AT_STEP = {{ branch_at_step | default(0) }};
 const TIMELINE_DATA = {{ timeline | tojson if timeline else '[]' }};
+const CALL_LOG = {{ call_log | tojson if call_log else '[]' }};
 
 const canvas = document.getElementById('replayCanvas');
 const ctx = canvas.getContext('2d');
@@ -330,13 +351,86 @@ function switchTab(tab) {
 }
 
 // ── Timeline rendering for share page ─────────────────────────────────
+function _stlCssClass(ev) {
+  const t = ev.call_type || ev.type || 'reasoning';
+  if (t === 'executor') return 'reasoning';
+  if (t === 'rlm_main' || t === 'rlm_sub') return t;
+  return t;
+}
+
+function _stlLabel(ev) {
+  if (ev.call_type === 'executor' || ev.type === 'reasoning') return ev.model || 'Reasoning';
+  if (ev.call_type === 'compact' || ev.type === 'compact') return 'Compact';
+  if (ev.call_type === 'interrupt' || ev.type === 'interrupt') return 'Interrupt';
+  if (ev.call_type === 'rlm_main') return 'RLM ' + (ev.model || '');
+  if (ev.call_type === 'rlm_sub') return 'RLM Sub';
+  const t = ev.call_type || ev.type || 'reasoning';
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+function _stlFormatCost(c) { return c > 0 ? '$' + c.toFixed(4) : ''; }
+
+function _stlBuildDetail(ev, idx) {
+  const inTok = ev.input_tokens || 0;
+  const outTok = ev.output_tokens || 0;
+  const totalTok = inTok + outTok;
+  const cost = ev.cost || 0;
+  const promptLen = ev.prompt_length || 0;
+  let html = `<div class="tl-detail" id="stlDetail${idx}">`;
+  html += `<div class="tl-meta">`;
+  if (totalTok > 0) html += `<span class="tl-tokens">${inTok.toLocaleString()} in + ${outTok.toLocaleString()} out = ${totalTok.toLocaleString()} tok</span>`;
+  if (cost > 0) html += `<span class="tl-cost">${_stlFormatCost(cost)}</span>`;
+  if (promptLen > 0) html += `<span>Prompt: ${(promptLen/1000).toFixed(1)}K chars</span>`;
+  if (ev.thinking_level) html += `<span>Think: ${esc(ev.thinking_level)}</span>`;
+  if (ev.cache_active) html += `<span>Cached</span>`;
+  if (ev.error) html += `<span style="color:var(--red)">Error: ${esc(ev.error)}</span>`;
+  html += `</div>`;
+  const respPreview = ev.response_preview || '';
+  if (respPreview) {
+    html += `<details><summary>Response preview</summary><div class="tl-preview">${esc(respPreview.slice(0, 1000))}</div></details>`;
+  }
+  const promptPreview = ev.prompt_preview || '';
+  if (promptPreview) {
+    html += `<details><summary>Prompt preview</summary><div class="tl-preview">${esc(promptPreview.slice(0, 500))}</div></details>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function _stlToggleDetail(idx) {
+  const detail = document.getElementById('stlDetail' + idx);
+  const block = detail?.previousElementSibling;
+  if (detail) {
+    detail.classList.toggle('open');
+    block?.classList.toggle('expanded');
+  }
+}
+
 function renderShareTimeline() {
   const container = document.getElementById('timelineContent');
   if (!container) return;
-  // Prefer server-provided timeline data (includes compact/interrupt),
-  // fall back to reconstructing from step groups (reasoning only)
+
+  // If we have a call log from the DB, use it as the primary source
+  let callLogEvents = [];
+  if (CALL_LOG && CALL_LOG.length) {
+    // Group call log entries by a pseudo-turn (executor calls increment turn)
+    let turnNum = 0;
+    for (const c of CALL_LOG) {
+      if (c.call_type === 'executor' || c.call_type === 'rlm_main') turnNum++;
+      callLogEvents.push({
+        ...c,
+        type: c.call_type === 'executor' ? 'reasoning' : c.call_type,
+        duration: c.duration_ms || 0,
+        turn: turnNum || 1,
+      });
+    }
+  }
+
+  // Prefer call log, then timeline data, then reconstruction from steps
   let events = [];
-  if (TIMELINE_DATA && TIMELINE_DATA.length) {
+  if (callLogEvents.length) {
+    events = callLogEvents;
+  } else if (TIMELINE_DATA && TIMELINE_DATA.length) {
     events = TIMELINE_DATA;
   } else {
     let turnNum = 0;
@@ -359,6 +453,7 @@ function renderShareTimeline() {
     return;
   }
   let html = '';
+  let evIdx = 0;
   // Top-to-bottom for replay (ascending turn order)
   const turns = {};
   for (const ev of events) {
@@ -371,10 +466,9 @@ function renderShareTimeline() {
     for (const ev of turns[turn]) {
       const h = Math.max(28, Math.min(120, ev.duration / 50));
       const dur = (ev.duration / 1000).toFixed(1) + 's';
-      const evType = ev.type || 'reasoning';
-      const label = evType === 'reasoning'
-        ? (ev.model || 'Reasoning')
-        : evType.charAt(0).toUpperCase() + evType.slice(1);
+      const label = _stlLabel(ev);
+      const cssClass = _stlCssClass(ev);
+      const hasDetail = ev.input_tokens || ev.response_preview || ev.prompt_preview || ev.error;
       let stepsHtml = '';
       if (ev.actions && ev.actions.length) {
         const stepParts = ev.actions.map((a, i) => {
@@ -384,10 +478,17 @@ function renderShareTimeline() {
         });
         stepsHtml = `<span class="tl-steps">${stepParts.join(' ')}</span>`;
       }
-      const colorClass = evType === 'compact' ? 'compact' : evType === 'interrupt' ? 'interrupt' : 'reasoning';
-      html += `<div class="timeline-block ${colorClass}" style="height:${h}px">
-        <span class="tl-label">${esc(label)}${stepsHtml}</span><span class="tl-dur">${dur}</span>
+      const costStr = _stlFormatCost(ev.cost || 0);
+      const costHtml = costStr ? `<span class="tl-cost" style="margin-left:6px;font-size:10px;">${costStr}</span>` : '';
+      const arrowHtml = hasDetail ? '<span class="tl-expand-arrow">&#9654;</span>' : '';
+      const clickAttr = hasDetail ? `onclick="_stlToggleDetail(${evIdx})" class="timeline-block ${cssClass} clickable"` : `class="timeline-block ${cssClass}"`;
+      html += `<div ${clickAttr} style="height:${h}px">
+        <span class="tl-label">${esc(label)}${stepsHtml}${costHtml}${arrowHtml}</span><span class="tl-dur">${dur}</span>
       </div>`;
+      if (hasDetail) {
+        html += _stlBuildDetail(ev, evIdx);
+      }
+      evIdx++;
     }
   }
   container.innerHTML = html;
