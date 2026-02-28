@@ -2967,7 +2967,7 @@ function updateCompactByokPrompt() {
 
   // Check if compact model needs a key
   const freeProviders2 = ['puter', 'copilot', 'ollama', 'local'];
-  const compactNeedsKey = MODE === 'prod' ? !freeProviders2.includes(info.provider) : !info.available;
+  const compactNeedsKey = !freeProviders2.includes(info.provider);
   if (compactNeedsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
     const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
@@ -3025,7 +3025,7 @@ function updateInterruptByokPrompt() {
   }
 
   const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = MODE === 'prod' ? !freeProviders.includes(info.provider) : !info.available;
+  const needsKey = !freeProviders.includes(info.provider);
   if (needsKey) {
     const reasoningInfo = getModelInfo(getSelectedModel());
     const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
@@ -3076,7 +3076,7 @@ function updateScaffoldByok(selectId, promptId, keyInputId, hintId) {
   const info = getModelInfo(val);
   if (!info) { prompt.style.display = 'none'; _updateScaffoldKeysHint(hintId); return; }
   const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = MODE === 'prod' ? !freeProviders.includes(info.provider) : !info.available;
+  const needsKey = !freeProviders.includes(info.provider);
   if (needsKey) {
     const label = PROVIDER_LABELS[info.provider] || info.provider;
     keyInput.placeholder = `Paste API key for ${label} here...`;
