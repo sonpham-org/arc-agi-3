@@ -6127,6 +6127,7 @@ function compressRowJS(row) {
   return parts.join(' ');
 }
 
+{% raw %}
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT-SIDE RLM SCAFFOLDING
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6143,7 +6144,7 @@ The REPL environment is initialized with:
 Write code in \`\`\`repl blocks (not \`\`\`python). Variables persist across iterations AND across turns \u2014 any variables you create will still be available in the next turn's REPL. Use this to build up game knowledge (e.g. storing discovered rules, mapping actions).
 
 When you have determined the best action, call FINAL() with a JSON object:
-  FINAL({{"action": <int>, "reasoning": "...", "observation": "..."}})
+  FINAL({"action": <int>, "reasoning": "...", "observation": "..."})
 
 {plan_instructions}Or use FINAL_VAR(variable_name) to return a variable containing the JSON.
 
@@ -6198,7 +6199,7 @@ function _extractJsonFromText(text) {
           if (parsed.action !== undefined || parsed.plan) return parsed;
         } catch {}
         break;
-      }}
+      }
     }
   }
   return null;
@@ -6525,19 +6526,19 @@ and analysis tools to inspect the current grid.
 Each turn, respond with EXACTLY one JSON object (no markdown, no extra text):
 
 Option 1 — Simulate actions before committing:
-{{"type": "simulate", "actions": [{{"action": <int>, "data": {{}}}}], "question": "<what you want to know>"}}
+{"type": "simulate", "actions": [{"action": <int>, "data": {}}], "question": "<what you want to know>"}
 
 Option 2 — Analyze the current grid:
-{{"type": "analyze", "tool": "<region_map|histogram|change_map>"}}
+{"type": "analyze", "tool": "<region_map|histogram|change_map>"}
 
 Option 3 — Commit a plan to execute:
-{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": 1, "data": {{}}, "expected": "move up toward goal"}}, {{"action": 1, "data": {{}}, "expected": "continue up"}}, {{"action": 2, "data": {{}}, "expected": "move right to corridor"}}, {{"action": 2, "data": {{}}, "expected": "move right past obstacle"}}, {{"action": 4, "data": {{}}, "expected": "move down to target"}}]}}
+{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{"action": 1, "data": {}, "expected": "move up toward goal"}, {"action": 1, "data": {}, "expected": "continue up"}, {"action": 2, "data": {}, "expected": "move right to corridor"}, {"action": 2, "data": {}, "expected": "move right past obstacle"}, {"action": 4, "data": {}, "expected": "move down to target"}]}
 
 Rules:
 - Simulate to test ideas before committing. The World Model predicts outcomes.
 - Early in the game, explore systematically (try each action direction).
 - IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
-- For ACTION6, set "data" to {{"x": <0-63>, "y": <0-63>}}.
+- For ACTION6, set "data" to {"x": <0-63>, "y": <0-63>}.
 - Always commit a plan before your turns run out.`;
 
 const TS_PLANNER_SYSTEM_BODY_NO_WM = `You are the PLANNER — you decide what actions to take in the game.
@@ -6546,15 +6547,15 @@ You have analysis tools to inspect the current grid.
 Each turn, respond with EXACTLY one JSON object (no markdown, no extra text):
 
 Option 1 — Analyze the current grid:
-{{"type": "analyze", "tool": "<region_map|histogram|change_map>"}}
+{"type": "analyze", "tool": "<region_map|histogram|change_map>"}
 
 Option 2 — Commit a plan to execute:
-{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": 1, "data": {{}}, "expected": "move up toward goal"}}, {{"action": 1, "data": {{}}, "expected": "continue up"}}, {{"action": 2, "data": {{}}, "expected": "move right to corridor"}}, {{"action": 2, "data": {{}}, "expected": "move right past obstacle"}}, {{"action": 4, "data": {{}}, "expected": "move down to target"}}]}}
+{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{"action": 1, "data": {}, "expected": "move up toward goal"}, {"action": 1, "data": {}, "expected": "continue up"}, {"action": 2, "data": {}, "expected": "move right to corridor"}, {"action": 2, "data": {}, "expected": "move right past obstacle"}, {"action": 4, "data": {}, "expected": "move down to target"}]}
 
 Rules:
 - Early in the game, explore systematically (try each action direction).
 - IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
-- For ACTION6, set "data" to {{"x": <0-63>, "y": <0-63>}}.
+- For ACTION6, set "data" to {"x": <0-63>, "y": <0-63>}.
 - Always commit a plan before your turns run out.`;
 
 const TS_PLANNER_CONTEXT = `## CURRENT STATE
@@ -6635,7 +6636,7 @@ State: {state}
 {cooldown_line}
 
 Respond with EXACTLY this JSON (nothing else):
-{{"verdict": "CONTINUE" or "REPLAN", "reason": "<brief explanation>", "discovery": "<any new rule discovered, or null>"}}
+{"verdict": "CONTINUE" or "REPLAN", "reason": "<brief explanation>", "discovery": "<any new rule discovered, or null>"}
 
 Rules:
 - CONTINUE = result matches expectations, is acceptable progress, or the deviation is minor
@@ -6644,6 +6645,7 @@ Rules:
 - REPLAN has a cooldown: only 1 replan per {replan_cooldown} plans. If on cooldown, you MUST return CONTINUE. Use discovery to note observations instead.
 - Keep reason under 80 chars
 - discovery: if you noticed something new about the game mechanics, describe it (≤ 120 chars). Otherwise null.`;
+{% endraw %}
 
 function _tsTemplateFill(template, vars) {
   return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] !== undefined ? vars[key] : '');
