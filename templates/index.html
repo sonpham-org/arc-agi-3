@@ -25,7 +25,13 @@
     --green: #1a7f37; --red: #cf222e; --yellow: #9a6700; --purple: #8250df;
     --dim: #656d76;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Custom scrollbar — dark/light theme aware */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   input[type=number] { -moz-appearance: textfield; }
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   #compactContextPct { position: relative; }
@@ -1142,7 +1148,16 @@ const SCAFFOLDING_SCHEMAS = {
       {
         id: 'sf_rlm_secKeys', label: 'Model Keys', open: true,
         customHtml: function() {
-          return '<div style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">RLM keys: configure via Model Keys in Linear scaffolding.</div>';
+          let h = '<div id="sf_rlm_keysHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
+          h += '<div id="sf_rlm_rootByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Root model key</div>';
+          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_rlm_rootByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          h += '<div id="sf_rlm_subByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Sub model key</div>';
+          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_rlm_subByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          return h;
         }
       }
     ]
@@ -1238,7 +1253,20 @@ const SCAFFOLDING_SCHEMAS = {
       {
         id: 'sf_ts_secKeys', label: 'Model Keys', open: true,
         customHtml: function() {
-          return '<div style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">3-System keys: configure via Model Keys in Linear scaffolding.</div>';
+          let h = '<div id="sf_ts_keysHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
+          h += '<div id="sf_ts_plannerByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Planner model key</div>';
+          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_ts_plannerByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          h += '<div id="sf_ts_monitorByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Monitor model key</div>';
+          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_ts_monitorByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          h += '<div id="sf_ts_wmByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
+          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">World model key</div>';
+          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_ts_wmByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
+          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          return h;
         }
       }
     ]
@@ -1599,6 +1627,15 @@ function attachSettingsListeners() {
     interruptSel.addEventListener('change', function() {
       updateInterruptByokPrompt();
     });
+  }
+
+  // RLM / Three-System model select changes — update BYOK key prompts
+  for (const selId of [
+    'sf_rlm_modelSelect', 'sf_rlm_subModelSelect',
+    'sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect'
+  ]) {
+    const el = document.getElementById(selId);
+    if (el) el.addEventListener('change', updateAllScaffoldByok);
   }
 
   // toolsMode radio — Pyodide download prompt
@@ -2912,6 +2949,51 @@ document.addEventListener('input', (e) => {
 });
 
 function updateModelEta() { /* removed — countdown/ETA disabled */ }
+
+// ── Generic BYOK key management for non-Linear scaffolds ──
+function updateScaffoldByok(selectId, promptId, keyInputId, hintId) {
+  const prompt = document.getElementById(promptId);
+  const keyInput = document.getElementById(keyInputId);
+  if (!prompt || !keyInput) return;
+  const val = document.getElementById(selectId)?.value;
+  if (!val) { prompt.style.display = 'none'; _updateScaffoldKeysHint(hintId); return; }
+  const info = getModelInfo(val);
+  if (!info) { prompt.style.display = 'none'; _updateScaffoldKeysHint(hintId); return; }
+  const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
+  const needsKey = MODE === 'prod' ? !freeProviders.includes(info.provider) : !info.available;
+  if (needsKey) {
+    const label = PROVIDER_LABELS[info.provider] || info.provider;
+    keyInput.placeholder = `Paste API key for ${label} here...`;
+    keyInput.value = localStorage.getItem(`byok_key_${info.provider}`) || '';
+    keyInput.dataset.provider = info.provider;
+    prompt.style.display = 'block';
+  } else {
+    prompt.style.display = 'none';
+  }
+  _updateScaffoldKeysHint(hintId);
+}
+function _updateScaffoldKeysHint(hintId) {
+  const hint = document.getElementById(hintId);
+  if (!hint) return;
+  const container = hint.parentElement;
+  const anyVisible = Array.from(container.querySelectorAll('.scaffold-byok')).some(el => el.style.display !== 'none');
+  hint.style.display = anyVisible ? 'none' : '';
+}
+function updateAllScaffoldByok() {
+  // RLM
+  updateScaffoldByok('sf_rlm_modelSelect', 'sf_rlm_rootByokPrompt', 'sf_rlm_rootByokKey', 'sf_rlm_keysHint');
+  updateScaffoldByok('sf_rlm_subModelSelect', 'sf_rlm_subByokPrompt', 'sf_rlm_subByokKey', 'sf_rlm_keysHint');
+  // Three-System
+  updateScaffoldByok('sf_ts_plannerModelSelect', 'sf_ts_plannerByokPrompt', 'sf_ts_plannerByokKey', 'sf_ts_keysHint');
+  updateScaffoldByok('sf_ts_monitorModelSelect', 'sf_ts_monitorByokPrompt', 'sf_ts_monitorByokKey', 'sf_ts_keysHint');
+  updateScaffoldByok('sf_ts_wmModelSelect', 'sf_ts_wmByokPrompt', 'sf_ts_wmByokKey', 'sf_ts_keysHint');
+}
+// Auto-save scaffold BYOK keys on input
+document.addEventListener('input', (e) => {
+  if (!e.target.classList.contains('scaffold-byok-key')) return;
+  const provider = e.target.dataset.provider;
+  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RENDERING
@@ -5542,8 +5624,46 @@ async function loadModels() {
     rlmSel.innerHTML = '<option value="">Select a model...</option>';
     _populateSubModelSelect(rlmSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, rlmSaved);
   }
+  // Restore RLM model selections from saved settings
+  try {
+    const rlmRaw = localStorage.getItem('arc_scaffolding_rlm');
+    if (rlmRaw) {
+      const rlmS = JSON.parse(rlmRaw);
+      const rlmMap = { sf_rlm_modelSelect: rlmS.model, sf_rlm_subModelSelect: rlmS.sub_model };
+      for (const [id, val] of Object.entries(rlmMap)) {
+        const el = document.getElementById(id);
+        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
+      }
+    }
+  } catch {}
+
+  // Populate Three-System model selects if they exist
+  for (const tsSelId of ['sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect']) {
+    const tsSel = document.getElementById(tsSelId);
+    if (!tsSel) continue;
+    const tsSaved = tsSel.value;
+    tsSel.innerHTML = '<option value="">Select a model...</option>';
+    _populateSubModelSelect(tsSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, tsSaved);
+  }
+  // Restore Three-System model selections from saved settings
+  try {
+    const tsRaw = localStorage.getItem('arc_scaffolding_three_system');
+    if (tsRaw) {
+      const tsS = JSON.parse(tsRaw);
+      const tsMap = {
+        sf_ts_plannerModelSelect: tsS.planner_model,
+        sf_ts_monitorModelSelect: tsS.monitor_model,
+        sf_ts_wmModelSelect: tsS.wm_model,
+      };
+      for (const [id, val] of Object.entries(tsMap)) {
+        const el = document.getElementById(id);
+        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
+      }
+    }
+  } catch {}
 
   updateModelCaps();
+  updateAllScaffoldByok();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
