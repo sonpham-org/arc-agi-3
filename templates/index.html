@@ -2906,23 +2906,27 @@ function updateModelCaps() {
   const caps = info?.capabilities || {};
   const el = document.getElementById('modelCaps');
 
-  const badges = [];
-  if (caps.image) badges.push('<span class="opt-badge badge-img">IMAGE</span>');
-  else badges.push('<span class="opt-badge badge-off">no image</span>');
-  if (caps.reasoning) badges.push('<span class="opt-badge badge-reason">REASONING</span>');
-  if (caps.tools) badges.push('<span class="opt-badge badge-tools">TOOLS</span>');
-  el.innerHTML = badges.join(' ');
+  if (el) {
+    const badges = [];
+    if (caps.image) badges.push('<span class="opt-badge badge-img">IMAGE</span>');
+    else badges.push('<span class="opt-badge badge-off">no image</span>');
+    if (caps.reasoning) badges.push('<span class="opt-badge badge-reason">REASONING</span>');
+    if (caps.tools) badges.push('<span class="opt-badge badge-tools">TOOLS</span>');
+    el.innerHTML = badges.join(' ');
+  }
 
   // Disable image toggle if model doesn't support it
   const imgToggle = document.getElementById('inputImage');
   const imgRow = document.getElementById('imageRow');
-  if (!caps.image) {
-    imgToggle.checked = false;
-    imgToggle.disabled = true;
-    imgRow.classList.add('disabled');
-  } else {
-    imgToggle.disabled = false;
-    imgRow.classList.remove('disabled');
+  if (imgToggle && imgRow) {
+    if (!caps.image) {
+      imgToggle.checked = false;
+      imgToggle.disabled = true;
+      imgRow.classList.add('disabled');
+    } else {
+      imgToggle.disabled = false;
+      imgRow.classList.remove('disabled');
+    }
   }
 }
 
