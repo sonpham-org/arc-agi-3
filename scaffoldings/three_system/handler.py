@@ -309,9 +309,9 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
     max_plan = int(settings.get("max_plan_length", 15))
     min_plan = int(settings.get("min_plan_length", 3))
     wm_update_every = int(settings.get("wm_update_every", 5))
-    logger.info(f"[ts_planner] min_plan={min_plan}, max_plan={max_plan}, max_turns={max_turns}, wm_enabled={wm_enabled}")
     wm_model = settings.get("wm_model")  # empty/None = WM disabled (two_system mode)
     wm_enabled = bool(wm_model)
+    logger.info(f"[ts_planner] min_plan={min_plan}, max_plan={max_plan}, max_turns={max_turns}, wm_enabled={wm_enabled}")
     scaffolding_type = settings.get("scaffolding", "three_system")
 
     # Injected deps for sub-functions
