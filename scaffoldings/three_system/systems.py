@@ -139,6 +139,7 @@ class GameContext:
     plans_since_replan: int = 99  # start high so first replan is allowed
 
     # Per-turn accumulators (reset each turn)
+    current_turn_num: int = 0
     turn_input_tokens: int = 0
     turn_output_tokens: int = 0
     turn_duration_ms: int = 0
@@ -187,6 +188,7 @@ class PlannerSystem:
                 _log_llm_call(
                     ctx.session_id, "planner", model_key,
                     step_num=ctx.step_num,
+                    turn_num=ctx.current_turn_num,
                     prompt_preview=prompt[:500],
                     prompt_length=len(prompt),
                     response_preview=(raw or "")[:1000],
@@ -401,6 +403,7 @@ class MonitorSystem:
             _log_llm_call(
                 ctx.session_id, "monitor", model_key,
                 step_num=ctx.step_num,
+                turn_num=ctx.current_turn_num,
                 prompt_preview=prompt[:500],
                 prompt_length=len(prompt),
                 response_preview=(raw or "")[:1000],
@@ -476,6 +479,7 @@ class WorldModelSystem:
                 _log_llm_call(
                     ctx.session_id, "world_model", model_key,
                     step_num=ctx.step_num,
+                    turn_num=ctx.current_turn_num,
                     prompt_preview=prompt[:500],
                     prompt_length=len(prompt),
                     response_preview=(raw or "")[:1000],
@@ -573,6 +577,7 @@ If uncertain, say "uncertain — <best guess>". Keep each prediction under 100 c
             _log_llm_call(
                 ctx.session_id, "simulate", model_key,
                 step_num=ctx.step_num,
+                turn_num=ctx.current_turn_num,
                 prompt_preview=prompt[:500],
                 prompt_length=len(prompt),
                 response_preview=(raw or "")[:1000],

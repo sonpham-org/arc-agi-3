@@ -95,6 +95,7 @@ def play_game_scaffold(arcade, game_id: str, cfg: dict, max_steps: int = 200,
 
         # ── PLANNER: generate plan ──────────────────────────────────────
         turn_num += 1
+        ctx.current_turn_num = turn_num
         turn_start_time = time.time()
         step_start = ctx.step_num + 1
         # Reset per-turn accumulators

@@ -107,6 +107,11 @@ def _init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls(session_id)")
     except sqlite3.OperationalError:
         pass
+    # Schema migration: add turn_num to llm_calls
+    try:
+        conn.execute("ALTER TABLE llm_calls ADD COLUMN turn_num INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     # Session turns table (planning cycles)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS session_turns (
@@ -137,6 +142,17 @@ def _init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session_turns_session ON session_turns(session_id)")
     except sqlite3.OperationalError:
         pass
+    # Sync tracking table (local only — tracks what's been uploaded to Turso)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_sync (
+            session_id TEXT PRIMARY KEY,
+            last_step_num INTEGER DEFAULT 0,
+            last_turn_num INTEGER DEFAULT 0,
+            last_llm_call_id INTEGER DEFAULT 0,
+            last_synced_at REAL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
     # Batch tables
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS batch_runs (
@@ -347,6 +363,11 @@ def _init_turso_db():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls(session_id)")
         except Exception:
             pass
+        # Schema migration: add turn_num to llm_calls
+        try:
+            conn.execute("ALTER TABLE llm_calls ADD COLUMN turn_num INTEGER")
+        except Exception:
+            pass  # column already exists
         # Session turns table (planning cycles)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS session_turns (
@@ -465,13 +486,13 @@ def _turso_import_session(payload):
         for call in payload.get("llm_calls", []):
             conn.execute(
                 """INSERT OR IGNORE INTO llm_calls
-                   (session_id, call_type, step_num, parent_call_id, model,
+                   (session_id, call_type, step_num, turn_num, parent_call_id, model,
                     prompt_preview, prompt_length, response_preview, response_json,
                     input_tokens, output_tokens, cost, duration_ms,
                     thinking_level, tools_active, cache_active, error, attempt, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (sess["id"], call.get("call_type", ""), call.get("step_num"),
-                 call.get("parent_call_id"), call.get("model", ""),
+                 call.get("turn_num"), call.get("parent_call_id"), call.get("model", ""),
                  call.get("prompt_preview"), call.get("prompt_length", 0),
                  call.get("response_preview"), call.get("response_json"),
                  call.get("input_tokens", 0), call.get("output_tokens", 0),
@@ -508,6 +529,109 @@ def _turso_import_session(payload):
     except Exception as e:
         log.warning(f"Turso import failed: {e}")
         return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INCREMENTAL TURSO SYNC
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _get_sync_state(session_id: str) -> dict:
+    """Get the sync watermarks for a session. Returns dict with last_step_num, last_turn_num, last_llm_call_id."""
+    try:
+        conn = _get_db()
+        row = conn.execute(
+            "SELECT * FROM session_sync WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        conn.close()
+        if row:
+            return dict(row)
+        return {"session_id": session_id, "last_step_num": 0, "last_turn_num": 0, "last_llm_call_id": 0}
+    except Exception as e:
+        log.warning(f"_get_sync_state failed: {e}")
+        return {"session_id": session_id, "last_step_num": 0, "last_turn_num": 0, "last_llm_call_id": 0}
+
+
+def _update_sync_state(session_id: str, last_step_num: int, last_turn_num: int, last_llm_call_id: int):
+    """Update the sync watermarks after a successful upload."""
+    try:
+        conn = _get_db()
+        conn.execute(
+            """INSERT INTO session_sync (session_id, last_step_num, last_turn_num, last_llm_call_id, last_synced_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET
+                 last_step_num = excluded.last_step_num,
+                 last_turn_num = excluded.last_turn_num,
+                 last_llm_call_id = excluded.last_llm_call_id,
+                 last_synced_at = excluded.last_synced_at""",
+            (session_id, last_step_num, last_turn_num, last_llm_call_id, time.time()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"_update_sync_state failed: {e}")
+
+
+def _turso_sync_session(session_id: str) -> dict:
+    """Incrementally sync a session to Turso. Only uploads rows newer than last sync.
+
+    Returns {"ok": bool, "steps": N, "turns": N, "calls": N} with counts of newly uploaded rows.
+    """
+    sync = _get_sync_state(session_id)
+    result = {"ok": False, "steps": 0, "turns": 0, "calls": 0}
+
+    try:
+        conn = _get_db()
+        # Always upsert session header (lightweight, has latest result/steps/levels)
+        sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not sess_row:
+            conn.close()
+            log.warning(f"_turso_sync_session: session {session_id} not found locally")
+            return result
+        sess = dict(sess_row)
+
+        # Fetch only new rows since last sync
+        new_steps = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? AND step_num > ? ORDER BY step_num",
+            (session_id, sync["last_step_num"]),
+        ).fetchall()
+
+        new_turns = conn.execute(
+            "SELECT * FROM session_turns WHERE session_id = ? AND turn_num > ? ORDER BY turn_num",
+            (session_id, sync["last_turn_num"]),
+        ).fetchall()
+
+        new_calls = conn.execute(
+            "SELECT * FROM llm_calls WHERE session_id = ? AND id > ? ORDER BY id",
+            (session_id, sync["last_llm_call_id"]),
+        ).fetchall()
+
+        conn.close()
+    except Exception as e:
+        log.warning(f"_turso_sync_session local read failed: {e}")
+        return result
+
+    # Build incremental payload
+    payload = {
+        "session": sess,
+        "steps": [dict(s) for s in new_steps],
+        "llm_calls": [dict(c) for c in new_calls],
+        "session_turns": [dict(t) for t in new_turns],
+    }
+
+    if not _turso_import_session(payload):
+        return result
+
+    # Update watermarks
+    new_last_step = new_steps[-1]["step_num"] if new_steps else sync["last_step_num"]
+    new_last_turn = new_turns[-1]["turn_num"] if new_turns else sync["last_turn_num"]
+    new_last_call = new_calls[-1]["id"] if new_calls else sync["last_llm_call_id"]
+    _update_sync_state(session_id, new_last_step, new_last_turn, new_last_call)
+
+    result["ok"] = True
+    result["steps"] = len(new_steps)
+    result["turns"] = len(new_turns)
+    result["calls"] = len(new_calls)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -717,6 +841,7 @@ def _turso_count_recent_magic_links(email: str, window: float = 900) -> int:
 
 def _log_llm_call(session_id: str, call_type: str, model: str, *,
                    step_num: int | None = None,
+                   turn_num: int | None = None,
                    parent_call_id: int | None = None,
                    prompt_preview: str | None = None,
                    prompt_length: int = 0,
@@ -736,13 +861,13 @@ def _log_llm_call(session_id: str, call_type: str, model: str, *,
         conn = _get_db()
         cur = conn.execute(
             "INSERT INTO llm_calls "
-            "(session_id, call_type, step_num, parent_call_id, model, "
+            "(session_id, call_type, step_num, turn_num, parent_call_id, model, "
             " prompt_preview, prompt_length, response_preview, response_json, "
             " input_tokens, output_tokens, cost, duration_ms, "
             " thinking_level, tools_active, cache_active, error, attempt, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                session_id, call_type, step_num, parent_call_id, model,
+                session_id, call_type, step_num, turn_num, parent_call_id, model,
                 prompt_preview[:500] if prompt_preview else None,
                 prompt_length,
                 response_preview[:1000] if response_preview else None,

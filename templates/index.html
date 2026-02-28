@@ -4691,7 +4691,16 @@ async function askLLM(ss) {
         } : { model: model }),
       };
       if (inputSettings.image) payload.image_b64 = getCanvasScreenshotB64();
+      // DEBUG: log settings being sent to server
+      console.log('[DEBUG askLLM] sending settings:', JSON.stringify(payload.settings, null, 2));
       resp = await fetchJSON('/api/llm/ask', payload, _abortCtrl.signal);
+      // DEBUG: log full response for three_system
+      if (resp && (resp.scaffolding === 'three_system' || resp.scaffolding === 'two_system')) {
+        console.log('[DEBUG askLLM] three_system response:', JSON.stringify(resp, null, 2).slice(0, 3000));
+        console.log('[DEBUG askLLM] parsed plan:', resp.parsed?.plan);
+        console.log('[DEBUG askLLM] three_system data:', resp.three_system);
+        console.log('[DEBUG askLLM] planner_log:', resp.three_system?.planner_log);
+      }
       // Stash three_system/two_system settings on response for monitor calls during plan execution
       if (resp && (resp.scaffolding === 'three_system' || resp.scaffolding === 'two_system')) {
         resp._tsSettings = payload.settings || {};
@@ -5010,6 +5019,13 @@ async function askLLM(ss) {
       }
     } else if ((resp.scaffolding === 'three_system' || resp.scaffolding === 'two_system') && resp.three_system) {
       // ── Three-system scaffolding: show planner REPL + WM details ──
+      console.log('[DEBUG reasoning] rendering three_system entry:', {
+        scaffolding: resp.scaffolding,
+        parsed: resp.parsed,
+        three_system: resp.three_system,
+        raw_length: resp.raw?.length,
+        thinking: resp.thinking,
+      });
       const ts = resp.three_system;
       const durationHtml = resp.call_duration_ms
         ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(resp.call_duration_ms / 1000).toFixed(1)}s</span>` : '';

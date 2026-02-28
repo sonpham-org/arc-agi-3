@@ -24,7 +24,7 @@ from agent import (
 from scaffoldings.three_system.game_loop import play_game_scaffold
 from db import (
     _get_db, _db_insert_session, _db_insert_step, _db_update_session,
-    _compress_grid, _turso_import_session,
+    _compress_grid, _turso_import_session, _turso_sync_session,
     _get_session_calls, _get_session_turns,
 )
 
@@ -437,38 +437,22 @@ def run_batch(
 
 
 def _upload_batch_to_turso(results: list[dict]):
-    """Upload sessions with >5 steps to Turso."""
+    """Upload sessions with >5 steps to Turso (incremental sync)."""
     uploaded = 0
     for r in results:
         if r.get("steps", 0) < 5 or not r.get("session_id"):
             continue
         try:
-            conn = _get_db()
-            sess_row = conn.execute(
-                "SELECT * FROM sessions WHERE id = ?", (r["session_id"],)
-            ).fetchone()
-            step_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-                (r["session_id"],),
-            ).fetchall()
-            conn.close()
-
-            if not sess_row:
-                continue
-
-            payload = {
-                "session": dict(sess_row),
-                "steps": [dict(s) for s in step_rows],
-                "llm_calls": _get_session_calls(r["session_id"]),
-                "session_turns": _get_session_turns(r["session_id"]),
-            }
-            if _turso_import_session(payload):
+            sync_result = _turso_sync_session(r["session_id"])
+            if sync_result["ok"]:
                 uploaded += 1
+                detail = f"{sync_result['steps']}s/{sync_result['turns']}t/{sync_result['calls']}c"
+                print(f"  [turso] synced {r['session_id'][:16]}… ({detail})")
         except Exception as e:
             print(f"  [turso] upload failed for {r['session_id']}: {e}")
 
     if uploaded:
-        print(f"  [turso] Uploaded {uploaded} sessions")
+        print(f"  [turso] Synced {uploaded} sessions")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -516,20 +500,12 @@ def main():
             else:
                 print(f"Session '{sid}' not found in local DB.")
             sys.exit(1)
-        step_rows = conn.execute(
-            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num", (sid,)
-        ).fetchall()
         conn.close()
-        payload = {
-            "session": dict(sess_row),
-            "steps": [dict(s) for s in step_rows],
-            "llm_calls": _get_session_calls(sid),
-            "session_turns": _get_session_turns(sid),
-        }
-        print(f"Uploading session {sid} ({sess_row['steps']} steps, {sess_row['result']})...")
-        ok = _turso_import_session(payload)
-        if ok:
-            print(f"Done! View at: https://arc3.sonpham.net/share/{sid}")
+        print(f"Syncing session {sid} ({sess_row['steps']} steps, {sess_row['result']})...")
+        sync_result = _turso_sync_session(sid)
+        if sync_result["ok"]:
+            detail = f"{sync_result['steps']} steps, {sync_result['turns']} turns, {sync_result['calls']} calls"
+            print(f"Done! Synced {detail}. View at: https://arc3.sonpham.net/share/{sid}")
         else:
             print("Upload failed. Check TURSO_DATABASE_URL and TURSO_AUTH_TOKEN env vars.")
         sys.exit(0)

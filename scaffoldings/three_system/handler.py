@@ -88,7 +88,9 @@ def ts_run_wm_update(ss: dict, context: dict, settings: dict, session_id: str,
         aname = action_names.get(o.get("action", 0), "?")
         obs_lines.append(f"Step {o['step']}: {aname} -> levels={o.get('levels', '?')}, state={o.get('state', '?')}")
         cm = o.get("change_map_text", "")
-        if cm:
+        if isinstance(cm, dict):
+            cm = cm.get("change_map_text", "") or ""
+        if cm and isinstance(cm, str):
             cmap_lines = cm.strip().split("\n")[:4]
             obs_lines.append("  " + "\n  ".join(cmap_lines))
     obs_text = "\n".join(obs_lines) if obs_lines else "(no new observations)"
@@ -318,6 +320,15 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
     logger.info(f"[ts_planner] min_plan={min_plan}, max_plan={max_plan}, max_turns={max_turns}, wm_enabled={wm_enabled}")
     scaffolding_type = settings.get("scaffolding", "three_system")
 
+    # DEBUG: dump all settings received from frontend
+    print(f"\n{'='*60}")
+    print(f"[DEBUG ts_planner] SETTINGS RECEIVED:")
+    for k, v in sorted(settings.items()):
+        print(f"  {k} = {v!r}")
+    print(f"[DEBUG ts_planner] RESOLVED: model={planner_model}, thinking={planner_thinking}, max_tokens={planner_max_tokens}")
+    print(f"[DEBUG ts_planner] PLAN: min={min_plan}, max={max_plan}, max_turns={max_turns}, wm_enabled={wm_enabled}")
+    print(f"{'='*60}")
+
     # Injected deps for sub-functions
     deps = dict(
         route_model_call=route_model_call, log_llm_call=log_llm_call,
@@ -447,6 +458,8 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
         )
 
         parsed = extract_json(raw)
+        print(f"\n[DEBUG ts_planner] Turn {turn}: raw length={len(raw)}, raw[:500]={raw[:500]!r}")
+        print(f"[DEBUG ts_planner] Turn {turn}: parsed={parsed}")
         if not parsed or "type" not in parsed:
             logger.warning(f"[ts_planner] Turn {turn}: unparseable response (parsed={parsed is not None}, keys={list(parsed.keys()) if parsed else []}). Raw[:300]: {(raw or '')[:300]}")
             planner_log.append({"turn": turn, "type": "error", "error": "unparseable", "duration_ms": dur_ms, "raw": raw})
@@ -501,6 +514,15 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
             observation = parsed.get("observation", "")
             reasoning = parsed.get("reasoning", "")
 
+            print(f"\n[DEBUG ts_planner] COMMIT received:")
+            print(f"  goal={goal!r}")
+            print(f"  observation={observation[:200]!r}")
+            print(f"  reasoning={reasoning[:200]!r}")
+            print(f"  plan length={len(plan)}")
+            for i, step in enumerate(plan[:20]):
+                print(f"  plan[{i}]: {step}")
+            print(f"  available_actions={context['available_actions']}")
+
             valid_plan = []
             avail = set(context["available_actions"])
             for step in plan[:max_plan]:
@@ -511,7 +533,10 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
                         "data": step.get("data", {}),
                         "expected": step.get("expected", ""),
                     })
+                else:
+                    print(f"  [DEBUG] FILTERED OUT action={action} (avail={avail})")
 
+            print(f"  [DEBUG] valid_plan={len(valid_plan)} actions: {[s['action'] for s in valid_plan]}")
             logger.info(f"[ts_planner] LLM committed {len(plan)} raw actions, {len(valid_plan)} valid (min_plan={min_plan})")
 
             # Reject short plans — force the LLM to think harder (unless last turn)
@@ -552,6 +577,11 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
             ss["plans_since_replan"] = ss.get("plans_since_replan", 0) + 1
             total_dur = int((time.time() - t0_total) * 1000)
             logger.info(f"[ts_planner] RETURNING plan with {len(valid_plan)} steps: {[s['action'] for s in valid_plan]}")
+            print(f"\n[DEBUG ts_planner] RETURNING: {len(valid_plan)} steps, planner_log has {len(planner_log)} entries")
+            print(f"  plan actions: {[s['action'] for s in valid_plan]}")
+            print(f"  observation: {observation[:100]!r}")
+            print(f"  reasoning: {reasoning[:100]!r}")
+            print(f"  thinking: None (three_system always returns None)")
             return {
                 "raw": raw,
                 "thinking": None,

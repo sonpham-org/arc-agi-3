@@ -945,6 +945,7 @@ def play_game(arcade, game_id: str, cfg: dict, max_steps: int = 200,
             _log_llm_call(
                 session_id, "executor", model_key,
                 step_num=step_num + 1,
+                turn_num=step_num + 1,
                 prompt_preview=prompt[:500],
                 prompt_length=len(prompt),
                 response_preview=(raw or "")[:1000],
