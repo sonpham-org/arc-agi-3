@@ -21,6 +21,7 @@ from agent import (
     MODELS, DEFAULT_MODEL, call_model_with_retry,
     load_config, effective_model, play_game,
 )
+from scaffoldings.three_system.game_loop import play_game_scaffold
 from db import (
     _get_db, _db_insert_session, _db_insert_step, _db_update_session,
     _compress_grid, _turso_import_session,
@@ -187,8 +188,12 @@ def run_single_game(arcade, game_id: str, cfg: dict, max_steps: int,
     steps = 0
     levels = 0
 
+    # Select game loop based on scaffolding mode
+    scfg = cfg.get("scaffolding", {})
+    game_fn = play_game_scaffold if scfg.get("mode") == "three_system" else play_game
+
     try:
-        result = play_game(
+        result = game_fn(
             arcade, game_id, cfg, max_steps,
             session_id=session_id,
             step_callback=make_step_callback(),

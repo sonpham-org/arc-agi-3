@@ -97,6 +97,10 @@ TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 UMAMI_URL = os.environ.get("UMAMI_URL", "")          # e.g. https://umami.example.com
 UMAMI_WEBSITE_ID = os.environ.get("UMAMI_WEBSITE_ID", "")
 
+# Magic link email — Resend (free tier: 100 emails/day)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("RESEND_FROM", "noreply@arc3.sonpham.net")
+
 BOT_UA_PATTERNS = [
     "bot", "crawler", "spider", "scraper", "wget", "curl", "python-requests",
     "httpx", "aiohttp", "go-http-client", "java/", "libwww", "headlesschrome",
@@ -198,6 +202,30 @@ def turnstile_required(f):
             return jsonify({"error": "Human verification required", "need_turnstile": True}), 403
         return f(*args, **kwargs)
     return decorated
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────
+
+_auth_cache: dict[str, tuple[dict, float]] = {}  # token → (user_dict, cache_expiry)
+_AUTH_CACHE_TTL = 300  # 5 minutes
+
+
+def get_current_user() -> dict | None:
+    """Get the currently authenticated user from the arc_auth cookie, or None."""
+    token = request.cookies.get("arc_auth")
+    if not token:
+        return None
+    now = time.time()
+    cached = _auth_cache.get(token)
+    if cached and cached[1] > now:
+        return cached[0]
+    user = _turso_verify_auth_token(token)
+    if user:
+        _auth_cache[token] = (user, now + _AUTH_CACHE_TTL)
+    else:
+        _auth_cache.pop(token, None)
+    return user
+
 
 # ── Global state ───────────────────────────────────────────────────────────
 
@@ -351,6 +379,11 @@ from db import (
     TURSO_DATABASE_URL, TURSO_AUTH_TOKEN,
     _get_turso_db, _turso_dict_fetchone, _turso_dict_fetchall,
     _init_turso_db, _turso_import_session,
+    _turso_find_or_create_user, _turso_create_auth_token,
+    _turso_verify_auth_token, _turso_create_magic_link,
+    _turso_verify_magic_link, _turso_delete_auth_token,
+    _turso_claim_sessions, _turso_get_user_sessions,
+    _turso_count_recent_magic_links, AUTH_TOKEN_TTL,
 )
 
 
@@ -916,396 +949,43 @@ def _cleanup_tool_session(session_id: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RLM (RECURSIVE LANGUAGE MODEL) SCAFFOLDING
+# SCAFFOLDING — imported from scaffoldings/ package
 # ═══════════════════════════════════════════════════════════════════════════
 
-_RLM_SYSTEM_PROMPT = """\
-You are tasked with answering a query about a game environment. You can access, transform, \
-and analyze the game context interactively in a REPL environment that can recursively query \
-sub-LLMs. You will be queried iteratively until you provide a final answer.
-
-The REPL environment is initialized with:
-1. A `context` variable (dict) containing the full game state: grid, history, change_map, \
-available_actions, levels_completed, win_levels, game_id, compact_context.
-2. `llm_query(prompt) -> str` — fast single LLM call for analysis/reasoning.
-3. `llm_query_batched(prompts) -> list[str]` — concurrent batch of llm_query calls.
-4. `SHOW_VARS()` — lists all variables you've created in the REPL.
-5. `print()` to view REPL output.
-
-Write code in ```repl blocks (not ```python). Variables persist across iterations.
-
-When you have determined the best action, call FINAL() with a JSON object:
-  FINAL({"action": <int>, "reasoning": "...", "observation": "..."})
-
-For multi-step plans:
-  FINAL({"plan": [{"action": <int>, "observation": "..."}, ...], "reasoning": "..."})
-
-Or use FINAL_VAR(variable_name) to return a variable containing the JSON.
-
-IMPORTANT: The action must be one of the available_actions integers. \
-Do NOT provide a final answer until you have analyzed the game state."""
-
-_RLM_USER_PROMPT_FIRST = """\
-Your game context is stored in the `context` variable (dict). It contains:
-- context['grid']: 2D list of color values (the current game board)
-- context['available_actions']: list of valid action integers
-- context['history']: recent move history
-- context['change_map']: cells that changed since last action
-- context['levels_completed']: current progress
-- context['win_levels']: target levels to win
-- context['compact_context']: summarized game knowledge (if available)
-
-Think step-by-step about what to do using the REPL environment to analyze the game state \
-and determine the best action. Start by examining the context."""
-
-_RLM_USER_PROMPT_CONTINUE = """\
-Continue using the REPL environment to analyze the game context and determine your next action. \
-Your next action:"""
-
-# RLM REPL sessions — separate from tool sessions, include llm_query etc.
-_RLM_REPL_CODE_PATTERN = re.compile(r"```repl\s*\n(.*?)\n```", re.DOTALL)
-_RLM_FINAL_PATTERN = re.compile(r"^\s*FINAL\((.+)\)\s*$", re.MULTILINE | re.DOTALL)
-_RLM_FINAL_VAR_PATTERN = re.compile(r"^\s*FINAL_VAR\((\w+)\)", re.MULTILINE)
-
-
-def _create_rlm_repl(session_id: str, context: dict, model_key: str,
-                      thinking_level: str, max_tokens: int,
-                      sub_model_key: str | None = None,
-                      sub_thinking_level: str = "low",
-                      sub_max_tokens: int = 8192,
-                      max_depth: int = 1, current_depth: int = 0) -> dict:
-    """Create an RLM REPL environment with llm_query/rlm_query injected."""
-    import numpy as np
-    import collections
-    import itertools
-
-    # Build safe builtins (same as tool sessions)
-    if isinstance(__builtins__, dict):
-        safe_builtins = dict(__builtins__)
-    else:
-        safe_builtins = {k: getattr(__builtins__, k) for k in dir(__builtins__)
-                         if not k.startswith('_')}
-        safe_builtins['__import__'] = __builtins__.__import__
-    safe_builtins['open'] = None
-    safe_builtins['eval'] = None
-    safe_builtins['exec'] = None
-    safe_builtins['compile'] = None
-    safe_builtins['breakpoint'] = None
-    safe_builtins['exit'] = None
-    safe_builtins['quit'] = None
-    safe_builtins['__import__'] = _safe_import
-
-    ns = {
-        '__builtins__': safe_builtins,
-        'np': np,
-        'numpy': np,
-        'collections': collections,
-        'itertools': itertools,
-        'Counter': collections.Counter,
-        'defaultdict': collections.defaultdict,
-        'context': context,
-    }
-
-    # Track final answer
-    repl_state = {
-        'namespace': ns,
-        'final_answer': None,
-        'sub_call_count': 0,
-        'max_sub_calls': 50,  # safety limit
-        'session_id': session_id,
-        'parent_call_id': None,  # set by _handle_rlm_scaffolding per iteration
-    }
-
-    # ── llm_query: single LLM call (no REPL, no recursion) ──
-    def llm_query(prompt: str) -> str:
-        if repl_state['sub_call_count'] >= repl_state['max_sub_calls']:
-            return "[ERROR] Maximum sub-LLM call limit reached."
-        repl_state['sub_call_count'] += 1
-        _model = sub_model_key or model_key
-        try:
-            t0 = time.time()
-            result = _route_model_call(
-                _model, prompt, None,
-                thinking_level=sub_thinking_level,
-                max_tokens=sub_max_tokens,
-            )
-            dur = int((time.time() - t0) * 1000)
-            text = result.get("text", "") if isinstance(result, dict) else str(result)
-            _log_llm_call(
-                repl_state['session_id'], "rlm_sub", _model,
-                parent_call_id=repl_state.get('parent_call_id'),
-                prompt_preview=prompt[:500], prompt_length=len(prompt),
-                response_preview=text[:1000] if text else None,
-                duration_ms=dur,
-            )
-            return text
-        except Exception as e:
-            return f"[LLM ERROR] {e}"
-
-    # ── llm_query_batched: concurrent batch ──
-    def llm_query_batched(prompts: list) -> list:
-        import concurrent.futures
-        results = [None] * len(prompts)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(prompts), 4)) as ex:
-            futures = {ex.submit(llm_query, p): i for i, p in enumerate(prompts)}
-            for f in concurrent.futures.as_completed(futures):
-                results[futures[f]] = f.result()
-        return results
-
-    # ── SHOW_VARS ──
-    def show_vars() -> str:
-        user_vars = {k: type(v).__name__ for k, v in ns.items()
-                     if not k.startswith('_') and k not in (
-                         'np', 'numpy', 'collections', 'itertools',
-                         'Counter', 'defaultdict', 'context',
-                         'llm_query', 'llm_query_batched', 'SHOW_VARS',
-                         'FINAL', 'FINAL_VAR')}
-        lines = [f"  {k}: {t}" for k, t in sorted(user_vars.items())]
-        result = "User variables:\n" + ("\n".join(lines) if lines else "  (none)")
-        return result
-
-    # ── FINAL_VAR ──
-    def final_var(var_name: str):
-        val = ns.get(var_name)
-        if val is None:
-            return f"[ERROR] Variable '{var_name}' not found. Use SHOW_VARS() to see available variables."
-        repl_state['final_answer'] = str(val) if not isinstance(val, str) else val
-        return repl_state['final_answer']
-
-    ns['llm_query'] = llm_query
-    ns['llm_query_batched'] = llm_query_batched
-    ns['SHOW_VARS'] = show_vars
-    ns['FINAL_VAR'] = final_var
-    # FINAL is parsed from text, not a callable — the LM writes FINAL(...) in prose
-
-    return repl_state
-
-
-def _rlm_execute_code(repl_state: dict, code: str, timeout: float = 10.0,
-                      max_output: int = 20_000) -> str:
-    """Execute code in the RLM REPL, capturing output."""
-    ns = repl_state['namespace']
-    output_buf = io.StringIO()
-    error = [None]
-
-    def _run():
-        import builtins
-        def captured_print(*args, **kwargs):
-            kwargs['file'] = output_buf
-            builtins.print(*args, **kwargs)
-        if isinstance(ns['__builtins__'], dict):
-            ns['__builtins__']['print'] = captured_print
-        try:
-            exec(code, ns)
-        except Exception as e:
-            error[0] = f"{type(e).__name__}: {e}"
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-
-    if t.is_alive():
-        return "[TIMEOUT] Code execution exceeded time limit."
-
-    output = output_buf.getvalue()
-    if error[0]:
-        output = (output + "\n" + error[0]).strip()
-
-    # Truncate
-    if len(output) > max_output:
-        truncated = len(output) - max_output
-        output = output[:max_output] + f"\n... [{truncated} chars truncated]"
-
-    return output or "(no output)"
-
-
-def _rlm_find_final(text: str, repl_state: dict) -> str | None:
-    """Check for FINAL() or FINAL_VAR() in LLM response text (outside code blocks)."""
-    # Strip code blocks before checking
-    stripped = _RLM_REPL_CODE_PATTERN.sub("", text)
-
-    # FINAL_VAR first
-    m = _RLM_FINAL_VAR_PATTERN.search(stripped)
-    if m:
-        var_name = m.group(1).strip()
-        val = repl_state['namespace'].get(var_name)
-        if val is not None:
-            return str(val) if not isinstance(val, str) else val
-
-    # FINAL(...)
-    m = _RLM_FINAL_PATTERN.search(stripped)
-    if m:
-        return m.group(1).strip()
-
-    # Check if FINAL_VAR was called inside code (sets repl_state['final_answer'])
-    if repl_state.get('final_answer'):
-        return repl_state['final_answer']
-
-    return None
+from scaffoldings.rlm.handler import handle_rlm_scaffolding as _handle_rlm_scaffolding_impl
+from scaffoldings.three_system.handler import (
+    handle_three_system_scaffolding as _handle_three_system_scaffolding_impl,
+    ts_get_state as _ts_get_state,
+)
+from scaffoldings.three_system.prompts import MONITOR_PROMPT_TEMPLATE as _TS_MONITOR_PROMPT
 
 
 def _handle_rlm_scaffolding(payload: dict, settings: dict) -> dict:
-    """Run the full RLM iteration loop and return a parsed response dict.
-
-    Returns the same format as _parse_llm_response for compatibility.
-    """
-    model_key = settings.get("model") or "gemini-2.5-flash"
-    input_settings = settings.get("input", {"diff": True, "full_grid": True})
-    thinking_level = settings.get("thinking_level", "low")
-    max_tokens = min(int(settings.get("max_tokens", 16384)), 65536)
-    sub_model_key = settings.get("sub_model") or None
-    sub_thinking_level = settings.get("sub_thinking_level", "low")
-    sub_max_tokens = min(int(settings.get("sub_max_tokens", 8192)), 65536)
-    max_depth = int(settings.get("max_depth", 1))
-    max_iterations = int(settings.get("max_iterations", 10))
-    output_truncation = int(settings.get("output_truncation", 5000))
-    session_id = payload.get("session_id", "anonymous")
-
-    # Build the context dict for the REPL
-    context = {
-        "grid": payload.get("grid", []),
-        "available_actions": payload.get("available_actions", []),
-        "history": payload.get("history", []),
-        "change_map": payload.get("change_map", {}),
-        "levels_completed": payload.get("levels_completed", 0),
-        "win_levels": payload.get("win_levels", 0),
-        "game_id": payload.get("game_id", "unknown"),
-        "state": payload.get("state", ""),
-        "compact_context": payload.get("compact_context", ""),
-    }
-
-    # Create REPL
-    repl = _create_rlm_repl(
-        session_id, context, model_key,
-        thinking_level=thinking_level, max_tokens=max_tokens,
-        sub_model_key=sub_model_key,
-        sub_thinking_level=sub_thinking_level,
-        sub_max_tokens=sub_max_tokens,
-        max_depth=max_depth,
+    return _handle_rlm_scaffolding_impl(
+        payload, settings,
+        route_model_call=_route_model_call,
+        log_llm_call=_log_llm_call,
+        extract_json=_extract_json,
+        safe_import=_safe_import,
     )
 
-    # Build conversation history for the iteration loop
-    messages = [
-        {"role": "system", "content": _RLM_SYSTEM_PROMPT},
-        {"role": "user", "content": _RLM_USER_PROMPT_FIRST},
-    ]
 
-    iterations_log = []  # track each iteration for the client
-    final_answer = None
-
-    for iteration in range(max_iterations):
-        # Build prompt from message history
-        prompt = "\n\n".join(
-            f"{'[SYSTEM]' if m['role'] == 'system' else '[USER]' if m['role'] == 'user' else '[ASSISTANT]'}: {m['content']}"
-            for m in messages
-        )
-
-        # Call the main model
-        try:
-            t0 = time.time()
-            response = _route_model_call(
-                model_key, prompt, None,
-                thinking_level=thinking_level,
-                max_tokens=max_tokens,
-            )
-            rlm_dur = int((time.time() - t0) * 1000)
-            if isinstance(response, dict):
-                response_text = response.get("text", "")
-            else:
-                response_text = str(response)
-            # Log main RLM iteration call and set parent_call_id for sub-calls
-            rlm_call_id = _log_llm_call(
-                session_id, "rlm_main", model_key,
-                prompt_preview=prompt[:500], prompt_length=len(prompt),
-                response_preview=response_text[:1000],
-                duration_ms=rlm_dur,
-                thinking_level=thinking_level,
-            )
-            repl['parent_call_id'] = rlm_call_id
-        except Exception as e:
-            app.logger.error(f"RLM iteration {iteration} LLM call failed: {e}")
-            _log_llm_call(
-                session_id, "rlm_main", model_key,
-                prompt_preview=prompt[:500], prompt_length=len(prompt),
-                error=str(e),
-            )
-            iterations_log.append({
-                "iteration": iteration,
-                "error": str(e),
-            })
-            break
-
-        # Extract and execute code blocks
-        code_blocks = _RLM_REPL_CODE_PATTERN.findall(response_text)
-        repl_outputs = []
-        for code in code_blocks:
-            output = _rlm_execute_code(repl, code, max_output=output_truncation)
-            repl_outputs.append(output)
-
-        # Log this iteration
-        iter_log = {
-            "iteration": iteration,
-            "response": response_text[:2000],  # truncate for client
-            "code_blocks": len(code_blocks),
-            "repl_outputs": [o[:1000] for o in repl_outputs],  # truncate each
-            "sub_calls": repl['sub_call_count'],
-        }
-        iterations_log.append(iter_log)
-
-        # Check for final answer
-        final_answer = _rlm_find_final(response_text, repl)
-        if final_answer:
-            break
-
-        # Append to conversation
-        messages.append({"role": "assistant", "content": response_text})
-
-        # Build REPL output feedback
-        if repl_outputs:
-            repl_feedback = "\n\n".join(
-                f"[REPL output {i+1}]:\n{out}" for i, out in enumerate(repl_outputs)
-            )
-            messages.append({"role": "user", "content": repl_feedback + "\n\n" + _RLM_USER_PROMPT_CONTINUE})
-        else:
-            messages.append({"role": "user", "content": _RLM_USER_PROMPT_CONTINUE})
-
-    # Parse the final answer into the standard response format
-    if final_answer:
-        # Try to parse as JSON action
-        parsed = _extract_json(final_answer)
-        if not parsed:
-            # Try wrapping in braces
-            try:
-                parsed = json.loads(final_answer)
-            except (json.JSONDecodeError, TypeError):
-                parsed = None
-    else:
-        # No FINAL — try to parse last response for action
-        parsed = None
-        if iterations_log:
-            last_resp = iterations_log[-1].get("response", "")
-            parsed = _extract_json(last_resp)
-
-    total_sub_calls = repl['sub_call_count']
-    total_iterations = len(iterations_log)
-
-    result = {
-        "raw": final_answer or (iterations_log[-1].get("response", "") if iterations_log else ""),
-        "thinking": None,
-        "parsed": parsed,
-        "model": model_key,
-        "scaffolding": "rlm",
-        "rlm": {
-            "iterations": total_iterations,
-            "sub_calls": total_sub_calls,
-            "max_iterations": max_iterations,
-            "final_answer": final_answer,
-            "log": iterations_log,
-        },
-    }
-    return result
+def _handle_three_system_scaffolding(payload: dict, settings: dict) -> dict:
+    return _handle_three_system_scaffolding_impl(
+        payload, settings,
+        route_model_call=_route_model_call,
+        log_llm_call=_log_llm_call,
+        extract_json=_extract_json,
+        action_names=ACTION_NAMES,
+        compress_row=compress_row,
+        compute_change_map=compute_change_map,
+        compute_color_histogram=compute_color_histogram,
+        compute_region_map=compute_region_map,
+        arc_agi3_description=ARC_AGI3_DESCRIPTION,
+    )
 
 
+_SCAFFOLDING_PLACEHOLDER = True  # inline code moved to scaffoldings/ package
 # ═══════════════════════════════════════════════════════════════════════════
 # GEMINI CONTEXT CACHING
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2103,6 +1783,137 @@ def turnstile_verify():
     return resp
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# AUTH — Magic link email login
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _send_magic_email(email: str, code: str) -> bool:
+    """Send a magic link email via Resend API. Returns True on success."""
+    if not RESEND_API_KEY:
+        app.logger.warning("RESEND_API_KEY not set — cannot send magic link email")
+        return False
+    base_url = request.host_url.rstrip("/")
+    link = f"{base_url}/api/auth/verify?code={code}"
+    try:
+        resp = _httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                     "Content-Type": "application/json"},
+            json={
+                "from": RESEND_FROM,
+                "to": [email],
+                "subject": "Your ARC-AGI-3 login link",
+                "html": (
+                    f"<p>Click the link below to log in to ARC-AGI-3:</p>"
+                    f'<p><a href="{link}">{link}</a></p>'
+                    f"<p>This link expires in 15 minutes and can only be used once.</p>"
+                    f"<p>If you didn't request this, you can safely ignore this email.</p>"
+                ),
+            },
+            timeout=10.0,
+        )
+        if resp.status_code >= 400:
+            app.logger.warning(f"Resend API error: {resp.status_code} {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        app.logger.warning(f"Failed to send magic link email: {e}")
+        return False
+
+
+@app.route("/api/auth/magic-link", methods=["POST"])
+@bot_protection
+def auth_magic_link():
+    """Send a magic link email. Rate limited to 3 per email per 15 min."""
+    payload = request.get_json(force=True)
+    email = (payload.get("email") or "").lower().strip()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Valid email required"}), 400
+    # Rate limit: max 3 magic links per email per 15 minutes
+    recent = _turso_count_recent_magic_links(email)
+    if recent >= 3:
+        return jsonify({"error": "Too many requests. Please wait a few minutes."}), 429
+    code = _turso_create_magic_link(email)
+    if not code:
+        return jsonify({"error": "Service unavailable"}), 503
+    sent = _send_magic_email(email, code)
+    if not sent:
+        # In staging/dev mode, log the code for manual testing
+        if get_mode() == "staging":
+            app.logger.info(f"[DEV] Magic link code for {email}: {code}")
+            return jsonify({"status": "ok", "dev_code": code})
+        return jsonify({"error": "Failed to send email"}), 500
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/auth/verify")
+@bot_protection
+def auth_verify():
+    """Verify a magic link code and log the user in."""
+    code = request.args.get("code", "")
+    if not code:
+        return "Missing code", 400
+    email = _turso_verify_magic_link(code)
+    if not email:
+        return "Invalid or expired link. Please request a new one.", 400
+    user = _turso_find_or_create_user(email)
+    if not user:
+        return "Service unavailable", 503
+    token = _turso_create_auth_token(user["id"])
+    if not token:
+        return "Service unavailable", 503
+    resp = make_response("")
+    resp.headers["Location"] = "/?logged_in=1"
+    resp.status_code = 302
+    resp.set_cookie("arc_auth", token,
+                     max_age=AUTH_TOKEN_TTL, httponly=True,
+                     samesite="Lax", secure=request.is_secure)
+    return resp
+
+
+@app.route("/api/auth/status")
+@bot_protection
+def auth_status():
+    """Return current auth state."""
+    user = get_current_user()
+    if user:
+        return jsonify({"authenticated": True, "user": {
+            "id": user["id"], "email": user["email"],
+            "display_name": user.get("display_name"),
+        }})
+    return jsonify({"authenticated": False, "user": None})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@bot_protection
+def auth_logout():
+    """Delete auth token and clear cookie."""
+    token = request.cookies.get("arc_auth")
+    if token:
+        _turso_delete_auth_token(token)
+        _auth_cache.pop(token, None)
+    resp = make_response(jsonify({"status": "ok"}))
+    resp.delete_cookie("arc_auth")
+    return resp
+
+
+@app.route("/api/auth/claim-sessions", methods=["POST"])
+@bot_protection
+def auth_claim_sessions():
+    """Associate anonymous sessions with the current user."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    payload = request.get_json(force=True)
+    session_ids = payload.get("session_ids", [])
+    if not session_ids or not isinstance(session_ids, list):
+        return jsonify({"error": "session_ids array required"}), 400
+    # Limit to 100 at a time
+    session_ids = session_ids[:100]
+    claimed = _turso_claim_sessions(user["id"], session_ids)
+    return jsonify({"status": "ok", "claimed": claimed})
+
+
 @app.route("/api/games")
 @bot_protection
 @turnstile_required
@@ -2592,6 +2403,17 @@ def llm_ask():
             _db_update_session(session_id, model=model_key)
         return jsonify(result)
 
+    # ── Three-system scaffolding: Planner/Monitor/World Model ──
+    if scaffolding_type == "three_system":
+        session_id = payload.get("session_id")
+        result = _handle_three_system_scaffolding(payload, settings)
+        if session_id and feature_enabled("session_db"):
+            with session_lock:
+                session_last_llm[session_id] = result
+            model_key = settings.get("planner_model") or settings.get("model") or "gemini-2.5-flash"
+            _db_update_session(session_id, model=model_key)
+        return jsonify(result)
+
     model_key = settings.get("model") or payload.get("model", "gemini-2.5-flash")
 
     input_settings = settings.get("input", {"diff": True, "full_grid": True})
@@ -2764,6 +2586,133 @@ def tools_execute():
     prev_grid = payload.get("prev_grid")
     output = _execute_python(session_id, code, grid, prev_grid)
     return jsonify({"output": output})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THREE-SYSTEM: Monitor endpoint (called per-step by the client)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/llm/monitor", methods=["POST"])
+def api_llm_monitor():
+    """Check a single step result via the Monitor system.
+
+    POST body: {session_id, step_num, action, expected, change_summary,
+                game_id, levels_completed, win_levels, state,
+                settings: {monitor_model, monitor_thinking_level, monitor_max_tokens}}
+    Returns: {verdict, reason, discovery, duration_ms}
+    """
+    if not feature_enabled("llm"):
+        return jsonify({"error": "LLM disabled"}), 403
+
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id", "anonymous")
+    settings = payload.get("settings", {})
+
+    monitor_model = settings.get("monitor_model") or settings.get("model") or "gemini-2.5-flash"
+    monitor_thinking = settings.get("monitor_thinking_level", "off")
+    monitor_max_tokens = min(int(settings.get("monitor_max_tokens", 4096)), 16384)
+
+    action_id = int(payload.get("action", 0))
+    action_name = ACTION_NAMES.get(action_id, f"ACTION{action_id}")
+    expected = payload.get("expected", "")
+    change_summary = payload.get("change_summary", "no changes")
+
+    # Level change detection
+    levels = payload.get("levels_completed", 0)
+    prev_levels = payload.get("prev_levels", 0)
+    level_change = "LEVEL UP!" if levels > prev_levels else "same level"
+
+    prompt = _TS_MONITOR_PROMPT.format(
+        game_id=payload.get("game_id", "?"),
+        step_num=payload.get("step_num", 0),
+        levels_done=levels,
+        win_levels=payload.get("win_levels", 0),
+        action_name=action_name,
+        expected=expected,
+        change_summary=change_summary,
+        level_change=level_change,
+        state=payload.get("state", "NOT_FINISHED"),
+    )
+
+    t0 = time.time()
+    try:
+        response = _route_model_call(
+            monitor_model, prompt, None,
+            thinking_level=monitor_thinking,
+            max_tokens=monitor_max_tokens,
+        )
+        dur_ms = int((time.time() - t0) * 1000)
+        raw = response.get("text", "") if isinstance(response, dict) else str(response)
+    except Exception as e:
+        app.logger.error(f"[ts_monitor] failed: {e}")
+        return jsonify({"verdict": "CONTINUE", "reason": "monitor error", "discovery": None, "duration_ms": 0})
+
+    _log_llm_call(
+        session_id, "ts_monitor", monitor_model,
+        step_num=payload.get("step_num"),
+        prompt_preview=prompt[:500], prompt_length=len(prompt),
+        response_preview=raw[:500], duration_ms=dur_ms,
+        thinking_level=monitor_thinking,
+    )
+
+    parsed = _extract_json(raw)
+    if not parsed:
+        return jsonify({"verdict": "CONTINUE", "reason": "monitor parse error", "discovery": None, "duration_ms": dur_ms})
+
+    verdict = parsed.get("verdict", "CONTINUE").upper()
+    if verdict not in ("CONTINUE", "REPLAN"):
+        verdict = "CONTINUE"
+
+    # Store discovery in WM observations if present
+    discovery = parsed.get("discovery")
+    if discovery:
+        ss = _ts_get_state(session_id)
+        ss["observations"].append({
+            "step": payload.get("step_num", 0),
+            "action": action_id,
+            "levels": levels,
+            "state": payload.get("state", "NOT_FINISHED"),
+            "change_map_text": change_summary,
+            "discovery": discovery,
+        })
+
+    return jsonify({
+        "verdict": verdict,
+        "reason": parsed.get("reason", ""),
+        "discovery": discovery,
+        "duration_ms": dur_ms,
+    })
+
+
+@app.route("/api/three_system/observe", methods=["POST"])
+def api_three_system_observe():
+    """Record a step observation for the World Model.
+
+    POST body: {session_id, step_num, action, grid, prev_grid, levels_completed, state}
+    The client calls this after each step execution so the WM accumulates observations.
+    """
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id", "anonymous")
+    ss = _ts_get_state(session_id)
+
+    grid = payload.get("grid", [])
+    prev_grid = payload.get("prev_grid", [])
+    cm_text = ""
+    if prev_grid and grid:
+        cm_text = compute_change_map(prev_grid, grid) or ""
+
+    obs = {
+        "step": payload.get("step_num", 0),
+        "action": int(payload.get("action", 0)),
+        "grid": grid,
+        "levels": payload.get("levels_completed", 0),
+        "state": payload.get("state", "NOT_FINISHED"),
+        "change_map_text": cm_text,
+    }
+    ss["observations"].append(obs)
+    ss["snapshots"].append(obs)
+
+    return jsonify({"ok": True, "observations_buffered": len(ss["observations"])})
 
 
 @app.route("/api/llm/test", methods=["POST"])
@@ -3105,21 +3054,27 @@ def import_session():
     try:
         prompts_json = json.dumps(sess.get("prompts")) if sess.get("prompts") else None
         timeline_json = json.dumps(sess.get("timeline")) if sess.get("timeline") else None
+        # Tag with authenticated user if present
+        user = get_current_user()
+        user_id = sess.get("user_id") or (user["id"] if user else None)
+        if user_id:
+            sess["user_id"] = user_id
         conn = _get_db()
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json, user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
-                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json)""",
+                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json),
+                 user_id = COALESCE(excluded.user_id, sessions.user_id)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json),
+             sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
         )
         for s in steps:
             grid_snapshot = None
@@ -3375,6 +3330,12 @@ def list_sessions():
                 turso_conn.close()
             except Exception as e:
                 app.logger.warning(f"Turso list_sessions failed: {e}")
+        # If authenticated, also include user's sessions from Turso (cross-device)
+        user = get_current_user()
+        if user:
+            for d in _turso_get_user_sessions(user["id"]):
+                if d["id"] not in sessions_by_id:
+                    sessions_by_id[d["id"]] = d
         # Sort by created_at desc
         merged = sorted(sessions_by_id.values(), key=lambda s: s.get("created_at", 0), reverse=True)
         return jsonify({"sessions": merged[:100]})
