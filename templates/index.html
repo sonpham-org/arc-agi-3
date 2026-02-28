@@ -5341,7 +5341,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
     lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${_cur.currentState.win_levels} \u2192 ${levelsAfter}/${_cur.currentState.win_levels})</div>`;
     const content = document.getElementById('reasoningContent');
     content.appendChild(lvlEntry);
-    if (document.getElementById('compactOnLevel').checked) {
+    if (document.getElementById('compactOnLevel')?.checked) {
       _cur._cachedCompactSummary = '';
       if (!_ss) _cachedCompactSummary = '';
       const summary = await buildCompactContext(_ss);
@@ -5413,7 +5413,7 @@ async function executeOneAction(resp) {
     lvlEntry.className = 'reasoning-entry';
     lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${data.win_levels} \u2192 ${levelsAfter}/${data.win_levels})</div>`;
     content.appendChild(lvlEntry);
-    if (document.getElementById('compactOnLevel').checked) {
+    if (document.getElementById('compactOnLevel')?.checked) {
       _cachedCompactSummary = '';
       const summary = await buildCompactContext();
       if (summary) {
@@ -5558,6 +5558,7 @@ async function toggleAutoPlay() {
   }
   renderSessionTabs();
 
+  try {
   while (ss ? ss.autoPlaying : autoPlaying) {
     // Check game state from ss if available
     const gameState = ss ? ss.currentState.state : currentState.state;
@@ -5601,7 +5602,15 @@ async function toggleAutoPlay() {
 
     const entry = (activeSessionId === mySessionId) ? getLastReasoningEntry() : null;
     const expected = resp.parsed.expected || null;
-    const result = await executePlan(plan, resp, entry, expected, ss);
+    let result;
+    try {
+      result = await executePlan(plan, resp, entry, expected, ss);
+    } catch (planErr) {
+      console.error('[autoPlay] executePlan threw:', planErr);
+      // Continue the loop — the plan failed but game may still be playable
+      await new Promise(r => setTimeout(r, 200));
+      continue;
+    }
     if (!result || result.interrupted) {
       await new Promise(r => setTimeout(r, 200));
     }
@@ -5617,6 +5626,9 @@ async function toggleAutoPlay() {
     if (stillPlaying && stillGoing) {
       await new Promise(r => setTimeout(r, 200));
     }
+  }
+  } catch (loopErr) {
+    console.error('[autoPlay] loop crashed:', loopErr);
   }
   autoPlaying = false;
   if (ss) { ss.autoPlaying = false; }
