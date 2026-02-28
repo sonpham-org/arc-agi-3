@@ -2885,9 +2885,9 @@ function updateByokPrompt() {
     updateKeysEmptyHint();
     return;
   }
-  // In online mode, all providers except puter/copilot/ollama/local need BYOK keys
+  // All providers except puter/copilot/ollama/local need BYOK keys (all LLM calls are client-side)
   const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = MODE === 'prod' ? !freeProviders.includes(info.provider) : !info.available;
+  const needsKey = !freeProviders.includes(info.provider);
   if (needsKey) {
     const label = PROVIDER_LABELS[info.provider] || info.provider;
     keyInput.placeholder = `Paste API key for ${label} here...`;
