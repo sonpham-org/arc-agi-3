@@ -2072,7 +2072,8 @@ function restoreSessionFromState(s) {
     waitEl.className = 'reasoning-entry llm-waiting';
     waitEl.innerHTML = `<div class="step-label" style="color:var(--dim);"><span class="spinner" style="margin-right:6px;"></span>Waiting for model response... <span class="wait-timer">${elapsed}s</span></div>`;
     if (rc.querySelector('.empty-state')) rc.innerHTML = '';
-    rc.insertBefore(waitEl, rc.firstChild);
+    rc.appendChild(waitEl);
+    scrollReasoningToBottom();
     // Live-update the timer until the LLM call completes
     const _restoreWaitStart = s.waitStartTime;
     const _restoreWaitInterval = setInterval(() => {
@@ -2836,6 +2837,12 @@ function getSelectedModel() {
   if (activeScaffoldingType === 'rlm') {
     return document.getElementById('sf_rlm_modelSelect')?.value || '';
   }
+  if (activeScaffoldingType === 'three_system') {
+    return document.getElementById('sf_ts_plannerModelSelect')?.value || '';
+  }
+  if (activeScaffoldingType === 'two_system') {
+    return document.getElementById('sf_2s_plannerModelSelect')?.value || '';
+  }
   return document.getElementById('modelSelect')?.value || '';
 }
 
@@ -3547,8 +3554,9 @@ function logHumanAction(actionId, actionData, changeMap, turnId) {
     <button class="branch-btn" onclick="branchFromStep(${stepCount})" title="Branch from step ${stepCount}">&#8627; branch</button>
     <div class="step-label" style="color:var(--yellow);">Step ${stepCount} — Human</div>
     <div class="action-rec" style="color:var(--yellow);">\u2192 Action ${actionId} (${ACTION_NAMES[actionId] || '?'})${coordStr}${ci}</div>`;
-  content.insertBefore(entry, content.firstChild);
+  content.appendChild(entry);
   annotateCoordRefs(entry);
+  scrollReasoningToBottom();
 }
 
 async function doAction(actionId, isClick) {
@@ -3983,7 +3991,8 @@ async function manualCompact() {
       const entry = document.createElement('div');
       entry.className = 'reasoning-entry';
       entry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context compacted at step ${stepCount} (${llmCallCount} calls)</div>`;
-      content.insertBefore(entry, content.firstChild);
+      content.appendChild(entry);
+      scrollReasoningToBottom();
     }
   } finally {
     btn.disabled = false;
@@ -4349,6 +4358,121 @@ function renderToolCallsHtml(toolCalls) {
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+function esc(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+function scrollReasoningToBottom() {
+  const el = document.getElementById('reasoningContent');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+function getLastReasoningEntry() {
+  const el = document.getElementById('reasoningContent');
+  if (!el) return null;
+  const entries = el.querySelectorAll('.reasoning-entry');
+  return entries.length ? entries[entries.length - 1] : null;
+}
+
+// ── Shared reasoning group renderer (identical copy in share.html) ────
+function buildReasoningGroupHTML(g, gi, options) {
+  const showBranchBtn = options.showBranchBtn || false;
+  const isRestored = options.isRestored || false;
+  const isParent = options.isParent || false;
+  const levelBefore = options.levelBefore || 0;
+  const levelAfter = options.levelAfter || 0;
+  const defaultModel = options.defaultModel || 'LLM';
+  const isReplay = options.isReplay || false;
+  const stepNums = g.steps.map(function(s) { return s.step_num; }).join(',');
+  const levelChanged = levelAfter > levelBefore;
+  const levelBadgeStyle = levelChanged ? 'background:#3fb95033;color:var(--green);' : 'background:var(--bg);color:var(--text-dim);';
+  const levelBadge = '<span class="tools-badge" style="' + levelBadgeStyle + '">L' + levelAfter + '</span>';
+  const tag = isRestored ? ' <span style="font-size:10px;color:var(--text-dim);">[restored]</span>'
+    : isParent ? ' <span style="font-size:10px;color:var(--purple);">[parent]</span>' : '';
+  const entryStyle = (isRestored || isParent) ? ' style="opacity:0.7;"' : '';
+
+  // Cell changes: sum across all steps in group
+  var cellChanges = 0;
+  for (var si = 0; si < g.steps.length; si++) {
+    if (g.steps[si].change_map && g.steps[si].change_map.change_count) cellChanges += g.steps[si].change_map.change_count;
+  }
+
+  if (g.type === 'llm' && g.llm && g.llm.parsed) {
+    var llm = g.llm;
+    var p = llm.parsed;
+    var firstStep = g.steps[0].step_num;
+    var lastStep = g.steps[g.steps.length - 1].step_num;
+    var stepLabel = g.steps.length > 1 ? 'Steps ' + firstStep + '\u2013' + lastStep : 'Step ' + firstStep;
+    var durationHtml = llm.call_duration_ms
+      ? '<span style="font-size:10px;color:var(--dim);margin-left:6px;">' + (llm.call_duration_ms / 1000).toFixed(1) + 's</span>' : '';
+
+    // Badges
+    var toolsBadge = llm.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
+    var thinkLevel = llm.thinking_level || '';
+    var thinkBadge = (thinkLevel && thinkLevel !== 'off' && thinkLevel !== 'none')
+      ? '<span class="tools-badge" style="background:#58a6ff22;color:var(--accent);">' + thinkLevel.toUpperCase() + '</span>' : '';
+    var cacheBadge = llm.cache_active ? '<span class="tools-badge" style="background:#e3b34133;color:var(--yellow);">CACHED</span>' : '';
+    var planSteps = (p.plan && Array.isArray(p.plan)) ? p.plan : [{ action: p.action, data: p.data || {} }];
+    var planBadge = planSteps.length > 1 ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
+
+    // Tokens
+    var tokensHtml = '';
+    var inputTok = (llm.usage && (llm.usage.input_tokens || llm.usage.prompt_tokens)) || 0;
+    var outputTok = (llm.usage && (llm.usage.output_tokens || llm.usage.completion_tokens)) || 0;
+    var totalTok = inputTok + outputTok;
+    if (totalTok) {
+      var costStr = '';
+      if (typeof TOKEN_PRICES !== 'undefined' && TOKEN_PRICES[llm.model || '']) {
+        var prices = TOKEN_PRICES[llm.model || ''];
+        var cost = (inputTok * prices[0] + outputTok * prices[1]) / 1000000;
+        costStr = ' \u00b7 $' + cost.toFixed(4);
+      }
+      tokensHtml = '<div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;">' + inputTok.toLocaleString() + ' in + ' + outputTok.toLocaleString() + ' out = ' + totalTok.toLocaleString() + ' tok' + costStr + '</div>';
+    }
+
+    var cellHtml = cellChanges > 0 ? '<div style="font-size:11px;color:var(--yellow);">' + cellChanges + ' cells changed</div>' : '';
+
+    // Content
+    var thinkHtml = llm.thinking
+      ? '<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">' + esc(llm.thinking) + '</div></details>' : '';
+    var analysisHtml = p.analysis
+      ? '<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">' + esc(p.analysis) + '</div></details>' : '';
+    var toolCallsHtml = renderToolCallsHtml(llm.tool_calls || p.tool_calls || []);
+
+    var planHtml = planSteps.map(function(ps, i) {
+      var aName = ACTION_NAMES[ps.action] || ('ACTION' + ps.action);
+      var dataStr = (ps.data && ps.data.x !== undefined) ? ' (' + ps.data.x + ',' + ps.data.y + ')' : '';
+      var done = !isReplay && i < g.steps.length;
+      var cls = done ? 'plan-step done' : 'plan-step';
+      var btnStyle = done ? ' style="background:var(--green);color:#000;border-color:var(--green);"' : '';
+      return '<div class="' + cls + '" data-plan-idx="' + i + '">' + (i + 1) + '. <span class="action-btn"' + btnStyle + '>' + aName + '</span>' + dataStr + '</div>';
+    }).join('');
+
+    var branchBtn = showBranchBtn
+      ? '<button class="branch-btn" onclick="branchFromStep(' + lastStep + ')" title="Branch from step ' + lastStep + '">&#8627; branch</button>' : '';
+
+    return '<div class="reasoning-entry" data-group="' + gi + '" data-step-nums="' + stepNums + '"' + entryStyle + '>'
+      + branchBtn
+      + '<div class="step-label">' + stepLabel + ' \u2014 ' + (llm.model || defaultModel) + durationHtml + thinkBadge + toolsBadge + cacheBadge + planBadge + levelBadge + tag + '</div>'
+      + tokensHtml + cellHtml
+      + (p.observation ? '<div class="observation"><strong>Obs:</strong> ' + esc(p.observation) + '</div>' : '')
+      + (p.reasoning ? '<div style="margin-top:4px;"><strong>Reasoning:</strong> ' + esc(p.reasoning) + '</div>' : '')
+      + analysisHtml + toolCallsHtml
+      + '<div class="plan-progress">' + planHtml + '</div>'
+      + thinkHtml
+      + '</div>';
+  } else {
+    // Human action
+    var s = g.steps[0];
+    var aName = ACTION_NAMES[s.action] || ('ACTION' + s.action);
+    var coordStr = (s.data && s.data.x !== undefined) ? ' (' + s.data.x + ',' + s.data.y + ')' : '';
+    var cellHtml2 = cellChanges > 0 ? ' | ' + cellChanges + ' cells changed' : '';
+    var branchBtn2 = showBranchBtn
+      ? '<button class="branch-btn" onclick="branchFromStep(' + s.step_num + ')" title="Branch from step ' + s.step_num + '">&#8627; branch</button>' : '';
+
+    return '<div class="reasoning-entry human" data-group="' + gi + '" data-step-nums="' + stepNums + '"' + entryStyle + '>'
+      + branchBtn2
+      + '<div class="step-label" style="color:var(--yellow);">Step ' + s.step_num + ' \u2014 Human' + levelBadge + tag + '</div>'
+      + '<div class="action-rec" style="color:var(--yellow);">\u2192 ' + aName + coordStr + cellHtml2 + '</div>'
+      + '</div>';
+  }
+}
 
 async function askLLM(ss) {
   // ss = SessionState to operate on (optional, falls back to globals for backward compat)
@@ -4386,7 +4510,8 @@ async function askLLM(ss) {
   if (isActive()) {
     const _reasoningContent = document.getElementById('reasoningContent');
     if (_reasoningContent.querySelector('.empty-state')) _reasoningContent.innerHTML = '';
-    _reasoningContent.insertBefore(_waitEl, _reasoningContent.firstChild);
+    _reasoningContent.appendChild(_waitEl);
+    scrollReasoningToBottom();
     switchTopTab('agent');
     switchSubTab('reasoning');
   }
@@ -4435,7 +4560,8 @@ async function askLLM(ss) {
       cEntry.className = 'reasoning-entry';
       const trigger = callTrigger ? `after ${_cur.llmCallCount} calls` : `tokens exceeded ${maxHistTokens}`;
       cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">&#128220; Auto-compacted at step ${_cur.stepCount} (${trigger})</div>`;
-      content.insertBefore(cEntry, content.firstChild);
+      content.appendChild(cEntry);
+      scrollReasoningToBottom();
     }
 
     // When compact context exists, only send history AFTER the compaction point
@@ -4937,8 +5063,9 @@ async function askLLM(ss) {
     if (isActive()) {
       const content = document.getElementById('reasoningContent');
       if (content.querySelector('.empty-state')) content.innerHTML = '';
-      content.insertBefore(entry, content.firstChild);
+      content.appendChild(entry);
       annotateCoordRefs(entry);
+      scrollReasoningToBottom();
       switchTopTab('agent');
       switchSubTab('reasoning');
     }
@@ -5111,7 +5238,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
               const intEntry = document.createElement('div');
               intEntry.className = 'reasoning-entry';
               intEntry.innerHTML = `<div class="step-label" style="color:var(--yellow);">Monitor: REPLAN at step ${i + 1}/${plan.length} — ${esc(monData.reason || '')}</div>`;
-              content.insertBefore(intEntry, content.firstChild);
+              content.appendChild(intEntry);
             }
             break;
           }
@@ -5153,7 +5280,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
           const intEntry = document.createElement('div');
           intEntry.className = 'reasoning-entry';
           intEntry.innerHTML = `<div class="step-label" style="color:var(--yellow);">⚡ Plan interrupted at step ${i + 1}/${plan.length}: expected "${expected}" not met</div>`;
-          content.insertBefore(intEntry, content.firstChild);
+          content.appendChild(intEntry);
         }
         break;
       }
@@ -5175,7 +5302,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
     lvlEntry.className = 'reasoning-entry';
     lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${_cur.currentState.win_levels} \u2192 ${levelsAfter}/${_cur.currentState.win_levels})</div>`;
     const content = document.getElementById('reasoningContent');
-    content.insertBefore(lvlEntry, content.firstChild);
+    content.appendChild(lvlEntry);
     if (document.getElementById('compactOnLevel').checked) {
       _cur._cachedCompactSummary = '';
       if (!_ss) _cachedCompactSummary = '';
@@ -5191,7 +5318,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
         const cEntry = document.createElement('div');
         cEntry.className = 'reasoning-entry';
         cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context auto-compacted on level ${levelsAfter}</div>`;
-        content.insertBefore(cEntry, content.firstChild);
+        content.appendChild(cEntry);
       }
     }
   }
@@ -5247,7 +5374,7 @@ async function executeOneAction(resp) {
     const lvlEntry = document.createElement('div');
     lvlEntry.className = 'reasoning-entry';
     lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${levelsBefore} completed! (${levelsBefore}/${data.win_levels} \u2192 ${levelsAfter}/${data.win_levels})</div>`;
-    content.insertBefore(lvlEntry, content.firstChild);
+    content.appendChild(lvlEntry);
     if (document.getElementById('compactOnLevel').checked) {
       _cachedCompactSummary = '';
       const summary = await buildCompactContext();
@@ -5260,7 +5387,7 @@ async function executeOneAction(resp) {
         const cEntry = document.createElement('div');
         cEntry.className = 'reasoning-entry';
         cEntry.innerHTML = `<div class="step-label" style="color:var(--purple);">Context auto-compacted on level ${levelsAfter}</div>`;
-        content.insertBefore(cEntry, content.firstChild);
+        content.appendChild(cEntry);
       }
     }
   }
@@ -5291,7 +5418,7 @@ async function stepOnce() {
       : null;
   if (!plan) return;
 
-  const entry = document.querySelector('#reasoningContent .reasoning-entry');
+  const entry = getLastReasoningEntry();
   const expected = resp.parsed.expected || null;
   return await executePlan(plan, resp, entry, expected, ss);
 }
@@ -5325,7 +5452,7 @@ async function truncAutoRetry(btn, maxRetries) {
           ? [{ action: p.action, data: p.data || {} }]
           : null;
       if (plan) {
-        const entry = document.querySelector('#reasoningContent .reasoning-entry');
+        const entry = getLastReasoningEntry();
         const expected = p.expected || null;
         await executePlan(plan, resp, entry, expected, ss);
       }
@@ -5415,7 +5542,7 @@ async function toggleAutoPlay() {
     if (ss ? !ss.autoPlaying : !autoPlaying) {
       // Paused — discard the reasoning entry and undo the call count (only if active)
       if (activeSessionId === mySessionId) {
-        const discarded = document.querySelector('#reasoningContent .reasoning-entry');
+        const discarded = getLastReasoningEntry();
         if (discarded && resp && !resp.error) { discarded.remove(); }
       }
       if (ss) ss.llmCallCount--;
@@ -5434,7 +5561,7 @@ async function toggleAutoPlay() {
         : null;
     if (!plan) { if (ss) ss.autoPlaying = false; else autoPlaying = false; break; }
 
-    const entry = (activeSessionId === mySessionId) ? document.querySelector('#reasoningContent .reasoning-entry') : null;
+    const entry = (activeSessionId === mySessionId) ? getLastReasoningEntry() : null;
     const expected = resp.parsed.expected || null;
     const result = await executePlan(plan, resp, entry, expected, ss);
     if (!result || result.interrupted) {
@@ -5522,7 +5649,7 @@ async function undoStep() {
     document.querySelectorAll(`.reasoning-entry[data-turn-id="${targetTurnId}"]`).forEach(el => el.remove());
   } else {
     // Fallback: remove the topmost reasoning entry
-    const topEntry = document.querySelector('#reasoningContent .reasoning-entry');
+    const topEntry = getLastReasoningEntry();
     if (topEntry) topEntry.remove();
   }
 
@@ -6451,9 +6578,9 @@ function showReplayStep(stepIdx) {
       btn.style.borderColor = '';
     });
     // Find and highlight the active entry + plan step
-    const entries = content.querySelectorAll('.reasoning-entry[data-step-num]');
+    const entries = content.querySelectorAll('.reasoning-entry[data-step-nums]');
     entries.forEach(e => {
-      const stepNums = (e.dataset.stepNum || '').split(',').map(Number);
+      const stepNums = (e.dataset.stepNums || '').split(',').map(Number);
       const idx = stepNums.indexOf(step.step_num);
       if (idx !== -1) {
         e.style.outline = '2px solid var(--accent)';
@@ -6898,7 +7025,6 @@ function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
       planCapacity = planSize - 1;
       groups.push(currentGroup);
     } else if (currentGroup && currentGroup.type === 'llm' && planCapacity > 0) {
-      // Plan follower: no LLM response of its own, belongs to current plan group
       currentGroup.steps.push(s);
       planCapacity--;
     } else {
@@ -6908,119 +7034,58 @@ function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
     }
   }
 
-  // Compute per-group level info: level at end of each group
+  // Compute per-group level info
+  let prevGroupLevel = 0;
   for (const g of groups) {
     const lastS = g.steps[g.steps.length - 1];
     g.levelsAfter = lastS.levels_completed || 0;
-  }
-  // Level at start of first group
-  let prevGroupLevel = 0;
-  for (const g of groups) {
     g.levelsBefore = prevGroupLevel;
     prevGroupLevel = g.levelsAfter;
   }
 
-  // Render groups (most recent first), inserting level-up markers
-  for (let gi = groups.length - 1; gi >= 0; gi--) {
+  // Render groups chronologically (oldest first)
+  for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];
 
-    // Insert level-up marker if this group caused a level change
-    if (g.levelsAfter > g.levelsBefore) {
+    // Level-up marker before this group if previous group caused a level change
+    if (gi > 0 && groups[gi - 1].levelsAfter > groups[gi - 1].levelsBefore) {
+      const pg = groups[gi - 1];
       const lvlEntry = document.createElement('div');
       lvlEntry.className = 'reasoning-entry';
       lvlEntry.style.opacity = '0.7';
-      const winLevels = steps[steps.length - 1]?.levels_completed !== undefined ? '' : '';
-      lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${g.levelsBefore} completed! (${g.levelsBefore} \u2192 ${g.levelsAfter})</div>`;
+      lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${pg.levelsBefore} completed! (${pg.levelsBefore} \u2192 ${pg.levelsAfter})</div>`;
       content.appendChild(lvlEntry);
     }
 
-    const entry = document.createElement('div');
-    entry.className = 'reasoning-entry';
-    entry.style.opacity = '0.7';
-    // Tag with step numbers for scrubber highlighting
-    entry.dataset.stepNum = g.steps.map(s => s.step_num).join(',');
-
-    // Level badge
-    const levelChanged = g.levelsAfter > g.levelsBefore;
-    const levelBadgeStyle = levelChanged ? 'background:#3fb95033;color:var(--green);' : 'background:var(--bg);color:var(--text-dim);';
-    const levelBadge = `<span class="tools-badge" style="${levelBadgeStyle}">L${g.levelsAfter}</span>`;
-
-    if (g.type === 'llm' && g.llm && g.llm.parsed) {
-      const llm = g.llm;
-      const p = llm.parsed;
-      const firstStep = g.steps[0].step_num;
-      const lastStep = g.steps[g.steps.length - 1].step_num;
-
-      const toolsBadge = llm.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
-      const thinkLevel = llm.thinking_level || '';
-      const thinkBadge = thinkLevel && thinkLevel !== 'off'
-        ? `<span class="tools-badge" style="background:#58a6ff22;color:var(--accent);">${thinkLevel.toUpperCase()}</span>` : '';
-      const cacheBadge = llm.cache_active ? '<span class="tools-badge" style="background:#e3b34133;color:var(--yellow);">CACHED</span>' : '';
-
-      let tokensHtml = '';
-      const inputTok = llm.usage?.input_tokens || llm.usage?.prompt_tokens || 0;
-      const outputTok = llm.usage?.output_tokens || llm.usage?.completion_tokens || 0;
-      const totalTok = inputTok + outputTok;
-      if (totalTok) {
-        const prices = TOKEN_PRICES[llm.model || ''] || null;
-        let costStr = '';
-        if (prices) {
-          const cost = (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
-          costStr = ` \u00b7 $${cost.toFixed(4)}`;
-        }
-        tokensHtml = `<div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;">${inputTok.toLocaleString()} in + ${outputTok.toLocaleString()} out = ${totalTok.toLocaleString()} tok${costStr}</div>`;
-      }
-
-      const thinkHtml = llm.thinking
-        ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${llm.thinking}</div></details>` : '';
-      const analysisHtml = p.analysis
-        ? `<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">${p.analysis}</div></details>` : '';
-      const toolCallsHtml = renderToolCallsHtml(llm.tool_calls || p.tool_calls || []);
-
-      const firstCm = g.steps[0].change_map;
-      const ci = firstCm?.change_count > 0
-        ? `<div style="font-size:11px;color:var(--yellow);">${firstCm.change_count} cells changed</div>` : '';
-
-      const planSteps = (p.plan && Array.isArray(p.plan))
-        ? p.plan
-        : [{ action: p.action, data: p.data || {} }];
-      const planHtml = planSteps.map((ps, i) => {
-        const aName = ACTION_NAMES[ps.action] || `ACTION${ps.action}`;
-        const dataStr = ps.data?.x !== undefined ? ` (${ps.data.x},${ps.data.y})` : '';
-        const done = !isReplay && i < g.steps.length;
-        const cls = done ? 'plan-step done' : 'plan-step';
-        const btnStyle = done ? 'style="background:var(--green);color:#000;border-color:var(--green);"' : '';
-        return `<div class="${cls}">${i + 1}. <span class="action-btn" ${btnStyle}>${aName}</span>${dataStr}</div>`;
-      }).join('');
-
-      const planBadge = planSteps.length > 1 ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
-      const stepLabel = g.steps.length > 1
-        ? `Steps ${firstStep}-${lastStep}`
-        : `Step ${firstStep}`;
-      const durationHtml = llm.call_duration_ms
-        ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(llm.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
-
-      entry.innerHTML = `
-        <button class="branch-btn" onclick="branchFromStep(${lastStep})" title="Branch from step ${lastStep}">&#8627; branch</button>
-        <div class="step-label">${stepLabel} — ${llm.model || '?'}${durationHtml}${thinkBadge}${toolsBadge}${cacheBadge}${planBadge}${levelBadge} <span style="font-size:10px;color:var(--text-dim);">[restored]</span></div>
-        ${tokensHtml}${ci}
-        <div class="observation"><strong>Obs:</strong> ${p.observation || '\u2014'}</div>
-        <div style="margin-top:4px;"><strong>Reasoning:</strong> ${p.reasoning || '\u2014'}</div>
-        ${analysisHtml}${toolCallsHtml}
-        <div class="plan-progress">${planHtml}</div>
-        ${thinkHtml}`;
-    } else {
-      const s = g.steps[0];
-      const aName = ACTION_NAMES[s.action] || `ACTION${s.action}`;
-      const ci = s.change_map?.change_count > 0 ? ` | ${s.change_map.change_count} cells changed` : '';
-      entry.innerHTML = `
-        <button class="branch-btn" onclick="branchFromStep(${s.step_num})" title="Branch from step ${s.step_num}">&#8627; branch</button>
-        <div class="step-label" style="color:var(--yellow);">Step ${s.step_num} — Human${levelBadge} <span style="font-size:10px;color:var(--text-dim);">[restored]</span></div>
-        <div class="action-rec" style="color:var(--yellow);">\u2192 Action ${s.action} (${aName})${ci}</div>`;
-    }
+    const html = buildReasoningGroupHTML(g, gi, {
+      showBranchBtn: true,
+      isRestored: true,
+      isParent: false,
+      levelBefore: g.levelsBefore,
+      levelAfter: g.levelsAfter,
+      defaultModel: '?',
+      isReplay: isReplay,
+    });
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    const entry = wrapper.firstElementChild;
     content.appendChild(entry);
     annotateCoordRefs(entry);
   }
+
+  // Final level-up marker if last group caused a level change
+  if (groups.length > 0) {
+    const last = groups[groups.length - 1];
+    if (last.levelsAfter > last.levelsBefore) {
+      const lvlEntry = document.createElement('div');
+      lvlEntry.className = 'reasoning-entry';
+      lvlEntry.style.opacity = '0.7';
+      lvlEntry.innerHTML = `<div class="step-label" style="color:var(--green);">\u2b50 Level ${last.levelsBefore} completed! (${last.levelsBefore} \u2192 ${last.levelsAfter})</div>`;
+      content.appendChild(lvlEntry);
+    }
+  }
+
+  scrollReasoningToBottom();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
