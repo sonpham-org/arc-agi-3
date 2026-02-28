@@ -85,6 +85,8 @@
   .reasoning-entry .action-rec { color: var(--green); font-weight: 600; margin-top: 4px; }
   .reasoning-entry.human .step-label { color: var(--yellow); }
   .reasoning-entry.human .action-rec { color: var(--yellow); }
+  .reasoning-entry .tools-badge { font-size: 10px; background: #3fb95033; color: var(--green);
+    padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
   .reasoning-entry.current { background: var(--surface2); margin: -4px -8px; padding: 8px; border-radius: 6px;
     border: 1px solid var(--accent); border-bottom: 1px solid var(--accent); }
   .plan-step { padding: 2px 4px; color: var(--text-dim); border-radius: 3px; font-size: 11px; }
@@ -717,12 +719,115 @@ const groupLevels = [];
   }
 }
 
+// ── Shared reasoning group renderer (identical copy in index.html) ────
+function buildReasoningGroupHTML(g, gi, options) {
+  const showBranchBtn = options.showBranchBtn || false;
+  const isRestored = options.isRestored || false;
+  const isParent = options.isParent || false;
+  const levelBefore = options.levelBefore || 0;
+  const levelAfter = options.levelAfter || 0;
+  const defaultModel = options.defaultModel || 'LLM';
+  const isReplay = options.isReplay || false;
+  const stepNums = g.steps.map(function(s) { return s.step_num; }).join(',');
+  const levelChanged = levelAfter > levelBefore;
+  const levelBadgeStyle = levelChanged ? 'background:#3fb95033;color:var(--green);' : 'background:var(--bg);color:var(--text-dim);';
+  const levelBadge = '<span class="tools-badge" style="' + levelBadgeStyle + '">L' + levelAfter + '</span>';
+  const tag = isRestored ? ' <span style="font-size:10px;color:var(--text-dim);">[restored]</span>'
+    : isParent ? ' <span style="font-size:10px;color:var(--purple);">[parent]</span>' : '';
+  const entryStyle = (isRestored || isParent) ? ' style="opacity:0.7;"' : '';
+
+  // Cell changes: sum across all steps in group
+  var cellChanges = 0;
+  for (var si = 0; si < g.steps.length; si++) {
+    if (g.steps[si].change_map && g.steps[si].change_map.change_count) cellChanges += g.steps[si].change_map.change_count;
+  }
+
+  if (g.type === 'llm' && g.llm && g.llm.parsed) {
+    var llm = g.llm;
+    var p = llm.parsed;
+    var firstStep = g.steps[0].step_num;
+    var lastStep = g.steps[g.steps.length - 1].step_num;
+    var stepLabel = g.steps.length > 1 ? 'Steps ' + firstStep + '\u2013' + lastStep : 'Step ' + firstStep;
+    var durationHtml = llm.call_duration_ms
+      ? '<span style="font-size:10px;color:var(--dim);margin-left:6px;">' + (llm.call_duration_ms / 1000).toFixed(1) + 's</span>' : '';
+
+    // Badges
+    var toolsBadge = llm.tools_active ? '<span class="tools-badge">TOOLS</span>' : '';
+    var thinkLevel = llm.thinking_level || '';
+    var thinkBadge = (thinkLevel && thinkLevel !== 'off' && thinkLevel !== 'none')
+      ? '<span class="tools-badge" style="background:#58a6ff22;color:var(--accent);">' + thinkLevel.toUpperCase() + '</span>' : '';
+    var cacheBadge = llm.cache_active ? '<span class="tools-badge" style="background:#e3b34133;color:var(--yellow);">CACHED</span>' : '';
+    var planSteps = (p.plan && Array.isArray(p.plan)) ? p.plan : [{ action: p.action, data: p.data || {} }];
+    var planBadge = planSteps.length > 1 ? '<span class="tools-badge" style="background:#58a6ff33;color:var(--accent);">PLAN</span>' : '';
+
+    // Tokens
+    var tokensHtml = '';
+    var inputTok = (llm.usage && (llm.usage.input_tokens || llm.usage.prompt_tokens)) || 0;
+    var outputTok = (llm.usage && (llm.usage.output_tokens || llm.usage.completion_tokens)) || 0;
+    var totalTok = inputTok + outputTok;
+    if (totalTok) {
+      var costStr = '';
+      if (typeof TOKEN_PRICES !== 'undefined' && TOKEN_PRICES[llm.model || '']) {
+        var prices = TOKEN_PRICES[llm.model || ''];
+        var cost = (inputTok * prices[0] + outputTok * prices[1]) / 1000000;
+        costStr = ' \u00b7 $' + cost.toFixed(4);
+      }
+      tokensHtml = '<div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;">' + inputTok.toLocaleString() + ' in + ' + outputTok.toLocaleString() + ' out = ' + totalTok.toLocaleString() + ' tok' + costStr + '</div>';
+    }
+
+    var cellHtml = cellChanges > 0 ? '<div style="font-size:11px;color:var(--yellow);">' + cellChanges + ' cells changed</div>' : '';
+
+    // Content
+    var thinkHtml = llm.thinking
+      ? '<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">' + esc(llm.thinking) + '</div></details>' : '';
+    var analysisHtml = p.analysis
+      ? '<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">' + esc(p.analysis) + '</div></details>' : '';
+    var toolCallsHtml = renderToolCallsHtml(llm.tool_calls || p.tool_calls || []);
+
+    var planHtml = planSteps.map(function(ps, i) {
+      var aName = ACTION_NAMES[ps.action] || ('ACTION' + ps.action);
+      var dataStr = (ps.data && ps.data.x !== undefined) ? ' (' + ps.data.x + ',' + ps.data.y + ')' : '';
+      var done = !isReplay && i < g.steps.length;
+      var cls = done ? 'plan-step done' : 'plan-step';
+      var btnStyle = done ? ' style="background:var(--green);color:#000;border-color:var(--green);"' : '';
+      return '<div class="' + cls + '" data-plan-idx="' + i + '">' + (i + 1) + '. <span class="action-btn"' + btnStyle + '>' + aName + '</span>' + dataStr + '</div>';
+    }).join('');
+
+    var branchBtn = showBranchBtn
+      ? '<button class="branch-btn" onclick="branchFromStep(' + lastStep + ')" title="Branch from step ' + lastStep + '">&#8627; branch</button>' : '';
+
+    return '<div class="reasoning-entry" data-group="' + gi + '" data-step-nums="' + stepNums + '"' + entryStyle + '>'
+      + branchBtn
+      + '<div class="step-label">' + stepLabel + ' \u2014 ' + (llm.model || defaultModel) + durationHtml + thinkBadge + toolsBadge + cacheBadge + planBadge + levelBadge + tag + '</div>'
+      + tokensHtml + cellHtml
+      + (p.observation ? '<div class="observation"><strong>Obs:</strong> ' + esc(p.observation) + '</div>' : '')
+      + (p.reasoning ? '<div style="margin-top:4px;"><strong>Reasoning:</strong> ' + esc(p.reasoning) + '</div>' : '')
+      + analysisHtml + toolCallsHtml
+      + '<div class="plan-progress">' + planHtml + '</div>'
+      + thinkHtml
+      + '</div>';
+  } else {
+    // Human action
+    var s = g.steps[0];
+    var aName = ACTION_NAMES[s.action] || ('ACTION' + s.action);
+    var coordStr = (s.data && s.data.x !== undefined) ? ' (' + s.data.x + ',' + s.data.y + ')' : '';
+    var cellHtml2 = cellChanges > 0 ? ' | ' + cellChanges + ' cells changed' : '';
+    var branchBtn2 = showBranchBtn
+      ? '<button class="branch-btn" onclick="branchFromStep(' + s.step_num + ')" title="Branch from step ' + s.step_num + '">&#8627; branch</button>' : '';
+
+    return '<div class="reasoning-entry human" data-group="' + gi + '" data-step-nums="' + stepNums + '"' + entryStyle + '>'
+      + branchBtn2
+      + '<div class="step-label" style="color:var(--yellow);">Step ' + s.step_num + ' \u2014 Human' + levelBadge + tag + '</div>'
+      + '<div class="action-rec" style="color:var(--yellow);">\u2192 ' + aName + coordStr + cellHtml2 + '</div>'
+      + '</div>';
+  }
+}
+
 function buildAllReasoningEntries() {
   let html = '';
   let branchMarkerInserted = !BRANCH_AT_STEP;
   for (let gi = 0; gi < stepGroups.length; gi++) {
     const g = stepGroups[gi];
-    const stepNums = g.steps.map(s => s.step_num).join(',');
 
     if (!branchMarkerInserted && g.steps.some(s => !s.from_parent)) {
       branchMarkerInserted = true;
@@ -737,70 +842,15 @@ function buildAllReasoningEntries() {
     }
 
     const isParent = g.steps[0].from_parent;
-
-    if (g.type === 'llm' && g.llm && g.llm.parsed) {
-      const llm = g.llm;
-      const p = llm.parsed;
-      const firstStep = g.steps[0].step_num;
-      const lastStep = g.steps[g.steps.length - 1].step_num;
-      const stepLabel = g.steps.length > 1 ? `Steps ${firstStep}\u2013${lastStep}` : `Step ${firstStep}`;
-      const durationHtml = llm.call_duration_ms
-        ? `<span style="font-size:10px;color:var(--text-dim);margin-left:6px;">${(llm.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
-
-      // Badges
-      let badges = '';
-      if (llm.tools_active) badges += '<span style="font-size:9px;background:var(--purple);color:#000;padding:1px 4px;border-radius:3px;margin-left:4px;">TOOLS</span>';
-      if (llm.thinking_level && llm.thinking_level !== 'off' && llm.thinking_level !== 'none')
-        badges += `<span style="font-size:9px;background:var(--accent);color:#000;padding:1px 4px;border-radius:3px;margin-left:4px;">THINK</span>`;
-      const planLen = (p.plan && Array.isArray(p.plan)) ? p.plan.length : 0;
-      if (planLen > 1) badges += `<span style="font-size:9px;background:var(--green);color:#000;padding:1px 4px;border-radius:3px;margin-left:4px;">PLAN\u00d7${planLen}</span>`;
-
-      const planSteps = (p.plan && Array.isArray(p.plan))
-        ? p.plan : [{ action: p.action, data: p.data || {} }];
-      const planHtml = planSteps.map((ps, i) => {
-        const aName = ACTION_NAMES[ps.action] || `ACTION${ps.action}`;
-        const dStr = ps.data?.x !== undefined ? ` (${ps.data.x},${ps.data.y})` : '';
-        return `<div class="plan-step" data-plan-idx="${i}">${i + 1}. <span class="action-btn">${aName}</span>${dStr}</div>`;
-      }).join('');
-
-      const obs = p.observation || '';
-      const reasoning = p.reasoning || '';
-      const analysis = p.analysis || '';
-
-      const tokenHtml = renderTokenLine(llm.usage, llm.model);
-      const thinkHtml = llm.thinking
-        ? `<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--text-dim);font-size:10px;">Thinking...</summary><div style="color:var(--text-dim);font-size:11px;margin-top:4px;white-space:pre-wrap;">${esc(llm.thinking)}</div></details>` : '';
-      const analysisHtml = analysis
-        ? `<details class="analysis-wrap"><summary>Analysis</summary><div class="analysis-content">${esc(analysis)}</div></details>` : '';
-      const toolCallsHtml = renderToolCallsHtml(llm.tool_calls || p.tool_calls || []);
-
-      // Cell changes for this group
-      let cellChanges = 0;
-      for (const s of g.steps) {
-        if (s.change_map && s.change_map.change_count) cellChanges += s.change_map.change_count;
-      }
-      const cellHtml = cellChanges > 0 ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px;">${cellChanges} cells</span>` : '';
-
-      html += `<div class="reasoning-entry" data-group="${gi}" data-step-nums="${stepNums}">
-        <div class="step-label">${stepLabel} \u2014 ${llm.model || SESSION.model || 'LLM'}${durationHtml}${badges}${cellHtml}${isParent ? ' <span style="font-size:10px;color:var(--purple);">[parent]</span>' : ''}</div>
-        ${tokenHtml}
-        ${obs ? `<div class="observation"><strong>Obs:</strong> ${esc(obs)}</div>` : ''}
-        ${reasoning ? `<div style="margin-top:4px;"><strong>Reasoning:</strong> ${esc(reasoning)}</div>` : ''}
-        ${thinkHtml}
-        ${analysisHtml}
-        ${toolCallsHtml}
-        <div class="plan-progress">${planHtml}</div>
-      </div>`;
-    } else {
-      const s = g.steps[0];
-      const aName = ACTION_NAMES[s.action] || `ACTION${s.action}`;
-      const coordStr = s.data?.x !== undefined ? ` (${s.data.x},${s.data.y})` : '';
-      const cellHtml = (s.change_map && s.change_map.change_count) ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px;">${s.change_map.change_count} cells</span>` : '';
-      html += `<div class="reasoning-entry human" data-group="${gi}" data-step-nums="${stepNums}">
-        <div class="step-label" style="color:var(--yellow);">Step ${s.step_num} \u2014 Human${cellHtml}${isParent ? ' <span style="font-size:10px;color:var(--purple);">[parent]</span>' : ''}</div>
-        <div class="action-rec">\u2192 ${aName}${coordStr}</div>
-      </div>`;
-    }
+    html += buildReasoningGroupHTML(g, gi, {
+      showBranchBtn: false,
+      isRestored: false,
+      isParent: !!isParent,
+      levelBefore: groupLevels[gi].before,
+      levelAfter: groupLevels[gi].after,
+      defaultModel: SESSION.model || 'LLM',
+      isReplay: true,
+    });
   }
   // Final level-up
   if (stepGroups.length > 0 && groupLevels[stepGroups.length - 1].levelUp) {
