@@ -24,12 +24,12 @@ Option 2 — Analyze the current grid:
 {{"type": "analyze", "tool": "<region_map|histogram|change_map>"}}
 
 Option 3 — Commit a plan to execute:
-{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": <int>, "data": {{}}, "expected": "<what should happen>"}}]}}
+{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": 1, "data": {{}}, "expected": "move up toward goal"}}, {{"action": 1, "data": {{}}, "expected": "continue up"}}, {{"action": 2, "data": {{}}, "expected": "move right to corridor"}}, {{"action": 2, "data": {{}}, "expected": "move right past obstacle"}}, {{"action": 4, "data": {{}}, "expected": "move down to target"}}]}}
 
 Rules:
 - Simulate to test ideas before committing. The World Model predicts outcomes.
 - Early in the game, explore systematically (try each action direction).
-- Plans should be 3-15 actions long.
+- IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
 - For ACTION6, set "data" to {{"x": <0-63>, "y": <0-63>}}.
 - Always commit a plan before your turns run out."""
 
@@ -44,11 +44,11 @@ Option 1 — Analyze the current grid:
 {{"type": "analyze", "tool": "<region_map|histogram|change_map>"}}
 
 Option 2 — Commit a plan to execute:
-{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": <int>, "data": {{}}, "expected": "<what should happen>"}}]}}
+{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": 1, "data": {{}}, "expected": "move up toward goal"}}, {{"action": 1, "data": {{}}, "expected": "continue up"}}, {{"action": 2, "data": {{}}, "expected": "move right to corridor"}}, {{"action": 2, "data": {{}}, "expected": "move right past obstacle"}}, {{"action": 4, "data": {{}}, "expected": "move down to target"}}]}}
 
 Rules:
 - Early in the game, explore systematically (try each action direction).
-- Plans should be 3-15 actions long.
+- IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
 - For ACTION6, set "data" to {{"x": <0-63>, "y": <0-63>}}.
 - Always commit a plan before your turns run out."""
 

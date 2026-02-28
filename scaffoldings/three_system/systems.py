@@ -134,7 +134,9 @@ class GameContext:
 
 
 # Build the full planner system prompt with ARC_AGI3_DESCRIPTION for CLI path
-_PLANNER_SYSTEM_PROMPT = ARC_AGI3_DESCRIPTION + "\n\n" + PLANNER_SYSTEM_PROMPT_BODY
+# Note: PLANNER_SYSTEM_PROMPT_BODY has {min_plan_length}/{max_plan_length} placeholders
+# that get formatted at call time in _build_prompt()
+_PLANNER_SYSTEM_PROMPT_TEMPLATE = ARC_AGI3_DESCRIPTION + "\n\n" + PLANNER_SYSTEM_PROMPT_BODY
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -268,7 +270,12 @@ class PlannerSystem:
         if conversation:
             context += "\n\n## PLANNER CONVERSATION\n" + "\n\n".join(conversation)
 
-        return _PLANNER_SYSTEM_PROMPT + "\n\n" + context
+        scfg = ctx.cfg.get("scaffolding", {})
+        system_prompt = _PLANNER_SYSTEM_PROMPT_TEMPLATE.format(
+            min_plan_length=scfg.get("min_plan_length", 3),
+            max_plan_length=scfg.get("max_plan_length", 15),
+        )
+        return system_prompt + "\n\n" + context
 
     def _run_analysis(self, ctx: GameContext, tool: str) -> str:
         if tool == "region_map":

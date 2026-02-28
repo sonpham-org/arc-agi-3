@@ -306,6 +306,7 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
     planner_max_tokens = min(int(settings.get("planner_max_tokens") or settings.get("max_tokens", 16384)), 65536)
     max_turns = int(settings.get("planner_max_turns", 10))
     max_plan = int(settings.get("max_plan_length", 15))
+    min_plan = int(settings.get("min_plan_length", 3))
     wm_update_every = int(settings.get("wm_update_every", 5))
     wm_model = settings.get("wm_model")  # empty/None = WM disabled (two_system mode)
     wm_enabled = bool(wm_model)
@@ -340,10 +341,11 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
 
     # ── 2. Planner REPL ──
     # Build the full planner system prompt with ARC_AGI3_DESCRIPTION
+    plan_len_vars = {"min_plan_length": min_plan, "max_plan_length": max_plan}
     if wm_enabled:
-        planner_system_prompt = arc_agi3_description + "\n\n" + PLANNER_SYSTEM_PROMPT_BODY
+        planner_system_prompt = arc_agi3_description + "\n\n" + PLANNER_SYSTEM_PROMPT_BODY.format(**plan_len_vars)
     else:
-        planner_system_prompt = arc_agi3_description + "\n\n" + PLANNER_SYSTEM_PROMPT_BODY_NO_WM
+        planner_system_prompt = arc_agi3_description + "\n\n" + PLANNER_SYSTEM_PROMPT_BODY_NO_WM.format(**plan_len_vars)
 
     action_desc = ", ".join(
         f"{a}={action_names.get(a, f'ACTION{a}')}" for a in context["available_actions"]
@@ -500,10 +502,12 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
                         "expected": step.get("expected", ""),
                     })
 
-            if len(valid_plan) < 3:
+            if len(valid_plan) < min_plan:
                 exploratory = [a for a in context["available_actions"] if a != 0]
-                for a in exploratory[:6 - len(valid_plan)]:
-                    valid_plan.append({"action": a, "data": {}, "expected": "explore"})
+                idx = 0
+                while len(valid_plan) < min_plan and exploratory:
+                    valid_plan.append({"action": exploratory[idx % len(exploratory)], "data": {}, "expected": "explore"})
+                    idx += 1
 
             planner_log.append({"turn": turn, "type": "commit", "plan_length": len(valid_plan), "duration_ms": dur_ms})
 

@@ -1247,6 +1247,7 @@ const SCAFFOLDING_SCHEMAS = {
             { type: 'number-input', id: 'sf_ts_plannerMaxTurns', label: 'Planner max turns', default: 10, min: 1, max: 15, width: '55px' },
             { type: 'number-input', id: 'sf_ts_wmMaxTurns', label: 'WM max turns', default: 5, min: 1, max: 10, width: '55px' },
             { type: 'number-input', id: 'sf_ts_wmUpdateEvery', label: 'WM update every N steps', default: 5, min: 1, max: 20, width: '55px' },
+            { type: 'number-input', id: 'sf_ts_minPlanLength', label: 'Min plan length', default: 3, min: 1, max: 15, width: '55px' },
             { type: 'number-input', id: 'sf_ts_maxPlanLength', label: 'Max plan length', default: 15, min: 3, max: 30, width: '55px' },
           ]
         }]
@@ -1335,6 +1336,7 @@ const SCAFFOLDING_SCHEMAS = {
           subHeader: 'Tuning',
           fields: [
             { type: 'number-input', id: 'sf_2s_plannerMaxTurns', label: 'Planner max turns', default: 10, min: 1, max: 15, width: '55px' },
+            { type: 'number-input', id: 'sf_2s_minPlanLength', label: 'Min plan length', default: 3, min: 1, max: 15, width: '55px' },
             { type: 'number-input', id: 'sf_2s_maxPlanLength', label: 'Max plan length', default: 15, min: 3, max: 30, width: '55px' },
           ]
         }]
@@ -1638,6 +1640,7 @@ function loadScaffoldingFromStorage(schemaId) {
       _setVal('sf_ts_plannerMaxTurns', s.planner_max_turns || 10);
       _setVal('sf_ts_wmMaxTurns', s.wm_max_turns || 5);
       _setVal('sf_ts_wmUpdateEvery', s.wm_update_every || 5);
+      _setVal('sf_ts_minPlanLength', s.min_plan_length || 3);
       _setVal('sf_ts_maxPlanLength', s.max_plan_length || 15);
     } else if (schemaId === 'two_system') {
       _setChecked('sf_2s_inputGrid', s.input?.full_grid ?? true);
@@ -1649,6 +1652,7 @@ function loadScaffoldingFromStorage(schemaId) {
       _setRadio('sf_2s_monitorThinking', s.monitor_thinking_level || 'off');
       _setVal('sf_2s_monitorMaxTokens', s.monitor_max_tokens || 4096);
       _setVal('sf_2s_plannerMaxTurns', s.planner_max_turns || 10);
+      _setVal('sf_2s_minPlanLength', s.min_plan_length || 3);
       _setVal('sf_2s_maxPlanLength', s.max_plan_length || 15);
     }
     updatePipelineOpacity();
@@ -4095,6 +4099,7 @@ function getScaffoldingSettings() {
     s.planner_max_turns = parseInt(document.getElementById('sf_ts_plannerMaxTurns')?.value) || 10;
     s.wm_max_turns = parseInt(document.getElementById('sf_ts_wmMaxTurns')?.value) || 5;
     s.wm_update_every = parseInt(document.getElementById('sf_ts_wmUpdateEvery')?.value) || 5;
+    s.min_plan_length = parseInt(document.getElementById('sf_ts_minPlanLength')?.value) || 3;
     s.max_plan_length = parseInt(document.getElementById('sf_ts_maxPlanLength')?.value) || 15;
     // Also set model to planner_model for DB tracking
     s.model = s.planner_model;
@@ -4112,6 +4117,7 @@ function getScaffoldingSettings() {
     s.monitor_thinking_level = document.querySelector('input[name="sf_2s_monitorThinking"]:checked')?.value || 'off';
     s.monitor_max_tokens = parseInt(document.getElementById('sf_2s_monitorMaxTokens')?.value) || 4096;
     s.planner_max_turns = parseInt(document.getElementById('sf_2s_plannerMaxTurns')?.value) || 10;
+    s.min_plan_length = parseInt(document.getElementById('sf_2s_minPlanLength')?.value) || 3;
     s.max_plan_length = parseInt(document.getElementById('sf_2s_maxPlanLength')?.value) || 15;
     s.model = s.planner_model;
   }
