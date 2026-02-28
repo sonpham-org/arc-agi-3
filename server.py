@@ -1290,7 +1290,7 @@ def _extract_json(text: str) -> dict | None:
                 if depth == 0:
                     try:
                         obj = json.loads(cleaned[i : j + 1])
-                        if "action" in obj or "plan" in obj:
+                        if "action" in obj or "plan" in obj or "type" in obj or "verdict" in obj:
                             return obj
                     except json.JSONDecodeError:
                         pass
