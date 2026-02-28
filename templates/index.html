@@ -5392,8 +5392,10 @@ async function executePlan(plan, resp, entry, expected, ss) {
             }),
           });
           const monData = await monResp.json();
-          // Show monitor verdict inline on plan step
-          if (isActive() && planSteps[i]) {
+          // Show monitor verdict inline on plan step (skip if monitor returned error)
+          if (monData.error) {
+            console.warn('[3sys] monitor error:', monData.error);
+          } else if (isActive() && planSteps[i]) {
             const monDur = monData.duration_ms ? `${(monData.duration_ms/1000).toFixed(1)}s` : '';
             const monColor = monData.verdict === 'REPLAN' ? 'var(--yellow)' : 'var(--dim)';
             const monLabel = document.createElement('div');
@@ -5777,7 +5779,32 @@ async function resetSession() {
   if (!currentState.game_id) return;
   if (!confirm('Reset this game? Current progress will be saved as a session.')) return;
   if (autoPlaying) toggleAutoPlay();
-  await startGame(currentState.game_id);
+  const gameId = currentState.game_id;
+
+  // Reset current session state so startGame doesn't block
+  const cur = getActiveSession();
+  if (cur) {
+    cur.stepCount = 0;
+    cur.moveHistory = [];
+    cur.undoStack = [];
+    cur.llmCallCount = 0;
+    cur.turnCounter = 0;
+    cur.sessionStepsBuffer = [];
+    cur._cachedCompactSummary = '';
+    cur._compactSummaryAtCall = 0;
+    cur._compactSummaryAtStep = 0;
+  }
+  // Also reset globals
+  stepCount = 0;
+  moveHistory = [];
+  undoStack = [];
+  llmCallCount = 0;
+  turnCounter = 0;
+
+  // Clear reasoning panel
+  document.getElementById('reasoningContent').innerHTML = '';
+
+  await startGame(gameId);
 }
 
 async function undoStep() {

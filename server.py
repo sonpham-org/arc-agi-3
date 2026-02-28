@@ -2601,8 +2601,8 @@ def api_llm_monitor():
                 settings: {monitor_model, monitor_thinking_level, monitor_max_tokens}}
     Returns: {verdict, reason, discovery, duration_ms}
     """
-    if not feature_enabled("llm"):
-        return jsonify({"error": "LLM disabled"}), 403
+    if not feature_enabled("server_llm"):
+        return jsonify({"error": "Server LLM disabled"}), 403
 
     payload = request.get_json(force=True)
     session_id = payload.get("session_id", "anonymous")
