@@ -2,150 +2,39 @@
 
 Note: ARC_AGI3_DESCRIPTION is NOT imported here to avoid circular imports.
 Callers must prepend it to PLANNER_SYSTEM_PROMPT_BODY when building prompts.
-Both server.py and agent.py define their own slightly different versions.
+All prompts are loaded from prompts/three_system/*.txt files.
 """
+
+from pathlib import Path
+
+_PROMPT_DIR = Path(__file__).parent.parent.parent / "prompts" / "three_system"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PLANNER PROMPTS
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Prepend ARC_AGI3_DESCRIPTION + "\n\n" to this when building the full prompt
-PLANNER_SYSTEM_PROMPT_BODY = """\
-You are the PLANNER — you decide what actions to take in the game.
-You have access to a World Model that can predict outcomes of actions,
-and analysis tools to inspect the current grid.
-
-Each turn, respond with EXACTLY one JSON object (no markdown, no extra text):
-
-Option 1 — Simulate actions before committing:
-{{"type": "simulate", "actions": [{{"action": <int>, "data": {{}}}}], "question": "<what you want to know>"}}
-
-Option 2 — Analyze the current grid:
-{{"type": "analyze", "tool": "<region_map|histogram|change_map>"}}
-
-Option 3 — Commit a plan to execute:
-{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": 1, "data": {{}}, "expected": "move up toward goal"}}, {{"action": 1, "data": {{}}, "expected": "continue up"}}, {{"action": 2, "data": {{}}, "expected": "move right to corridor"}}, {{"action": 2, "data": {{}}, "expected": "move right past obstacle"}}, {{"action": 4, "data": {{}}, "expected": "move down to target"}}]}}
-
-Rules:
-- Simulate to test ideas before committing. The World Model predicts outcomes.
-- Early in the game, explore systematically (try each action direction).
-- IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
-- For ACTION6, set "data" to {{"x": <0-63>, "y": <0-63>}}.
-- Always commit a plan before your turns run out."""
+PLANNER_SYSTEM_PROMPT_BODY = (_PROMPT_DIR / "planner_system.txt").read_text()
 
 # Variant without World Model (for 2-System scaffolding)
-PLANNER_SYSTEM_PROMPT_BODY_NO_WM = """\
-You are the PLANNER — you decide what actions to take in the game.
-You have analysis tools to inspect the current grid.
+PLANNER_SYSTEM_PROMPT_BODY_NO_WM = (_PROMPT_DIR / "planner_system_no_wm.txt").read_text()
 
-Each turn, respond with EXACTLY one JSON object (no markdown, no extra text):
+PLANNER_CONTEXT_TEMPLATE_NO_WM = (_PROMPT_DIR / "planner_context_no_wm.txt").read_text()
 
-Option 1 — Analyze the current grid:
-{{"type": "analyze", "tool": "<region_map|histogram|change_map>"}}
-
-Option 2 — Commit a plan to execute:
-{{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{{"action": 1, "data": {{}}, "expected": "move up toward goal"}}, {{"action": 1, "data": {{}}, "expected": "continue up"}}, {{"action": 2, "data": {{}}, "expected": "move right to corridor"}}, {{"action": 2, "data": {{}}, "expected": "move right past obstacle"}}, {{"action": 4, "data": {{}}, "expected": "move down to target"}}]}}
-
-Rules:
-- Early in the game, explore systematically (try each action direction).
-- IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
-- For ACTION6, set "data" to {{"x": <0-63>, "y": <0-63>}}.
-- Always commit a plan before your turns run out."""
-
-PLANNER_CONTEXT_TEMPLATE_NO_WM = """## CURRENT STATE
-Game: {game_id} | State: {state} | Levels: {levels_done}/{win_levels} | Step: {step_num}
-Available actions: {action_desc}
-
-{memory_block}
-{history_block}
-{change_map_block}
-{grid_block}
-
-## YOUR TASK
-Plan your next sequence of actions. You can analyze the grid for more info,
-or commit a plan when ready.
-Turn {turn_num}/{max_turns} — commit before running out of turns."""
-
-PLANNER_CONTEXT_TEMPLATE = """## CURRENT STATE
-Game: {game_id} | State: {state} | Levels: {levels_done}/{win_levels} | Step: {step_num}
-Available actions: {action_desc}
-
-{memory_block}
-{history_block}
-{change_map_block}
-{grid_block}
-
-## WORLD MODEL RULES (v{rules_version})
-{rules_doc}
-
-## YOUR TASK
-Plan your next sequence of actions. You can simulate actions to test ideas,
-analyze the grid for more info, or commit a plan when ready.
-Turn {turn_num}/{max_turns} — commit before running out of turns."""
+PLANNER_CONTEXT_TEMPLATE = (_PROMPT_DIR / "planner_context.txt").read_text()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # WORLD MODEL PROMPTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-WORLD_MODEL_SYSTEM_PROMPT = """You are a WORLD MODEL — you build an understanding of how this game works.
+WORLD_MODEL_SYSTEM_PROMPT = (_PROMPT_DIR / "wm_system.txt").read_text()
 
-You receive observations from executed steps (grids, change maps, color histograms)
-and must discover the rules: what each action does, what entities exist, what the goal is.
-
-Each turn, respond with EXACTLY one JSON object:
-
-Option 1 — Query historical data:
-{"type": "query", "tool": "change_map" | "histogram" | "grid", "step": <int> or "step_range": [<start>, <end>]}
-
-Option 2 — Commit your rules document:
-{"type": "commit", "rules_document": "<markdown rules>", "confidence": <0.0-1.0>}
-
-Your rules document should cover:
-- What each action does (ACTION1=UP, etc.)
-- Entity identification (player color, wall color, items, enemies)
-- Goal hypothesis (what wins the level)
-- Movement rules (what blocks movement, what happens on collision)
-- Any special mechanics discovered
-
-Commit when you have enough observations to update your understanding."""
-
-WORLD_MODEL_CONTEXT_TEMPLATE = """## GAME: {game_id} | Step: {step_num} | Levels: {levels_done}/{win_levels}
-
-## CURRENT RULES (v{rules_version})
-{rules_doc}
-
-## NEW OBSERVATIONS (steps {obs_start}-{obs_end})
-{observations_text}
-
-## YOUR TASK
-Analyze the new observations and update your rules document.
-You can query historical step data for more detail, or commit updated rules.
-Turn {turn_num}/{max_turns}"""
+WORLD_MODEL_CONTEXT_TEMPLATE = (_PROMPT_DIR / "wm_context.txt").read_text()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # MONITOR PROMPTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-MONITOR_PROMPT_TEMPLATE = """You are a MONITOR checking if a game action produced the expected result.
-
-Game: {game_id} | Step: {step_num} | Levels: {levels_done}/{win_levels}
-Action taken: {action_name}
-Expected outcome: "{expected}"
-
-Changes observed: {change_summary}
-Level change: {level_change}
-State: {state}
-{cooldown_line}
-
-Respond with EXACTLY this JSON (nothing else):
-{{"verdict": "CONTINUE" or "REPLAN", "reason": "<brief explanation>", "discovery": "<any new rule discovered, or null>"}}
-
-Rules:
-- CONTINUE = result matches expectations, is acceptable progress, or the deviation is minor
-- REPLAN = ONLY for serious, plan-breaking surprises: player is stuck/dead, completely wrong direction, dangerous enemy encountered, or a critical new discovery that changes the entire strategy
-- Default to CONTINUE. Game rules are consistent — small deviations are normal and don't warrant replanning.
-- REPLAN has a cooldown: only 1 replan per {replan_cooldown} plans. If on cooldown, you MUST return CONTINUE. Use discovery to note observations instead.
-- Keep reason under 80 chars
-- discovery: if you noticed something new about the game mechanics, describe it (≤ 120 chars). Otherwise null."""
+MONITOR_PROMPT_TEMPLATE = (_PROMPT_DIR / "monitor.txt").read_text()

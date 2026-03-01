@@ -5850,19 +5850,17 @@ async function loadModels() {
 // CLIENT-SIDE PROMPT BUILDING (for Puter.js / BYOK — online mode)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const ARC_DESCRIPTION = `ARC-AGI-3 is an interactive reasoning benchmark. Each game is a 64x64 pixel grid with 16 colors (0-15). You must discover the rules and goals by experimenting.
-Action mappings:
-- ACTION1 = UP, ACTION2 = DOWN, ACTION3 = LEFT, ACTION4 = RIGHT (directional movement)
-- ACTION5 = context-dependent (cycle, toggle, interact — varies by game)
-- ACTION6 = CLICK at (x, y) — for selecting, placing, or interacting with specific cells
-- ACTION7 = context-dependent (secondary interact, rotate, swap — varies by game)
-- ACTION0 = RESET — restarts the current level. Use only as a last resort.
-Key facts:
-- States: NOT_FINISHED (playing), WIN (all levels done), GAME_OVER (failed).
-- Large uniform regions = background/walls. Small shapes = player/items.
-- Edge bars = health/energy/progress meters.`;
+// ── Prompt templates loaded from server (prompts/*.txt) ──
+window.PROMPTS = {{ prompts | tojson }};
 
-const COLOR_PALETTE = '0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black 6=Magenta 7=LightMagenta 8=Red 9=Blue 10=LightBlue 11=Yellow 12=Orange 13=Maroon 14=Green 15=Purple';
+function getPrompt(key) {
+  const [section, name] = key.split('.');
+  return localStorage.getItem('arc_prompt_' + section + '_' + name)
+      || window.PROMPTS[section][name];
+}
+
+const ARC_DESCRIPTION = getPrompt('shared.arc_description');
+const COLOR_PALETTE = getPrompt('shared.color_palette');
 
 function compressRowJS(row) {
   if (!row || !row.length) return '';
@@ -5881,49 +5879,25 @@ function compressRowJS(row) {
 // CLIENT-SIDE RLM SCAFFOLDING
 // ═══════════════════════════════════════════════════════════════════════════
 
-const _RLM_SYSTEM_PROMPT_TEMPLATE = `You are tasked with answering a query about a game environment. You can access, transform, and analyze the game context interactively in a REPL environment. You will be queried iteratively until you provide a final answer.
-
-The REPL environment is initialized with:
-1. A \`context\` variable (dict) containing the full game state: grid, history, change_map, available_actions, levels_completed, win_levels, game_id, compact_context.
-2. \`llm_query(prompt) -> str\` \u2014 fast single LLM call for analysis/reasoning.
-3. \`llm_query_batched(prompts) -> list[str]\` \u2014 concurrent batch of llm_query calls.
-4. \`SHOW_VARS()\` \u2014 lists all variables you've created in the REPL.
-5. \`print()\` to view REPL output.
-
-Write code in \`\`\`repl blocks (not \`\`\`python). Variables persist across iterations AND across turns \u2014 any variables you create will still be available in the next turn's REPL. Use this to build up game knowledge (e.g. storing discovered rules, mapping actions).
-
-{final_format}
-
-Or use FINAL_VAR(variable_name) to return a variable containing the JSON.
-
-IMPORTANT: The action must be one of the available_actions integers. Do NOT provide a final answer until you have analyzed the game state.`;
+const _RLM_SYSTEM_PROMPT_TEMPLATE = getPrompt('rlm.system_prompt');
 
 function buildRlmSystemPrompt(planHorizon) {
-  let finalFormat;
+  let planInstructions;
   if (planHorizon > 1) {
-    finalFormat = `When you have determined the best actions, call FINAL() with a multi-step plan (${planHorizon} steps):
-  FINAL({"plan": [{"action": <int>, "observation": "what you expect to happen"}, {"action": <int>, "observation": "..."}, ...], "reasoning": "why this sequence"})
-
-IMPORTANT: You MUST plan ${planHorizon} steps ahead. Do NOT return a single action — always return a "plan" array with multiple steps. Think about what sequence of moves will make progress toward the goal.`;
+    planInstructions = `For multi-step plans (up to ${planHorizon} steps ahead):\n` +
+      `  FINAL({"plan": [{"action": <int>, "observation": "..."}, ...], "reasoning": "..."})\n` +
+      `Plan up to ${planHorizon} steps ahead if the next moves are obvious.\n\n`;
   } else {
-    finalFormat = `When you have determined the best action, call FINAL() with a JSON object:
-  FINAL({"action": <int>, "reasoning": "...", "observation": "..."})`;
+    planInstructions = '';
   }
-  return _RLM_SYSTEM_PROMPT_TEMPLATE.replace('{final_format}', finalFormat);
+  return _RLM_SYSTEM_PROMPT_TEMPLATE
+    .replace('{plan_instructions}', planInstructions)
+    .replace(/\{\{/g, '{').replace(/\}\}/g, '}');
 }
 
-const RLM_USER_FIRST = `Your game context is stored in the \`context\` variable (dict). It contains:
-- context['grid']: 2D list of color values (the current game board)
-- context['available_actions']: list of valid action integers
-- context['history']: recent move history
-- context['change_map']: cells that changed since last action
-- context['levels_completed']: current progress
-- context['win_levels']: target levels to win
-- context['compact_context']: summarized game knowledge (if available)
+const RLM_USER_FIRST = getPrompt('rlm.user_first');
 
-Think step-by-step about what to do using the REPL environment to analyze the game state and determine the best action. Start by examining the context.`;
-
-const RLM_USER_CONTINUE = `Continue using the REPL environment to analyze the game context and determine your next action. Your next action:`;
+const RLM_USER_CONTINUE = getPrompt('rlm.user_continue');
 
 function _rlmFindFinal(text) {
   // Strip code blocks before checking for FINAL
@@ -6309,138 +6283,20 @@ if 'SHOW_VARS' not in dir():
 // CLIENT-SIDE THREE-SYSTEM / TWO-SYSTEM SCAFFOLDING
 // ═══════════════════════════════════════════════════════════════════════════
 
-// -- Prompt templates (ported from scaffoldings/three_system/prompts.py) --
+// -- Prompt templates (loaded from prompts/three_system/*.txt via window.PROMPTS) --
 
-const TS_PLANNER_SYSTEM_BODY = `You are the PLANNER — you decide what actions to take in the game.
-You have access to a World Model that can predict outcomes of actions,
-and analysis tools to inspect the current grid.
-
-Each turn, respond with EXACTLY one JSON object (no markdown, no extra text):
-
-Option 1 — Simulate actions before committing:
-{"type": "simulate", "actions": [{"action": <int>, "data": {}}], "question": "<what you want to know>"}
-
-Option 2 — Analyze the current grid:
-{"type": "analyze", "tool": "<region_map|histogram|change_map>"}
-
-Option 3 — Commit a plan to execute:
-{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{"action": 1, "data": {}, "expected": "move up toward goal"}, {"action": 1, "data": {}, "expected": "continue up"}, {"action": 2, "data": {}, "expected": "move right to corridor"}, {"action": 2, "data": {}, "expected": "move right past obstacle"}, {"action": 4, "data": {}, "expected": "move down to target"}]}
-
-Rules:
-- Simulate to test ideas before committing. The World Model predicts outcomes.
-- Early in the game, explore systematically (try each action direction).
-- IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
-- For ACTION6, set "data" to {"x": <0-63>, "y": <0-63>}.
-- Always commit a plan before your turns run out.`;
-
-const TS_PLANNER_SYSTEM_BODY_NO_WM = `You are the PLANNER — you decide what actions to take in the game.
-You have analysis tools to inspect the current grid.
-
-Each turn, respond with EXACTLY one JSON object (no markdown, no extra text):
-
-Option 1 — Analyze the current grid:
-{"type": "analyze", "tool": "<region_map|histogram|change_map>"}
-
-Option 2 — Commit a plan to execute:
-{"type": "commit", "observation": "<what you see>", "reasoning": "<your reasoning>", "goal": "<what you're trying to achieve>", "plan": [{"action": 1, "data": {}, "expected": "move up toward goal"}, {"action": 1, "data": {}, "expected": "continue up"}, {"action": 2, "data": {}, "expected": "move right to corridor"}, {"action": 2, "data": {}, "expected": "move right past obstacle"}, {"action": 4, "data": {}, "expected": "move down to target"}]}
-
-Rules:
-- Early in the game, explore systematically (try each action direction).
-- IMPORTANT: Plans MUST be {min_plan_length}-{max_plan_length} actions long. Single-action plans are not allowed. Think ahead and commit a multi-step sequence.
-- For ACTION6, set "data" to {"x": <0-63>, "y": <0-63>}.
-- Always commit a plan before your turns run out.`;
-
-const TS_PLANNER_CONTEXT = `## CURRENT STATE
-Game: {game_id} | State: {state} | Levels: {levels_done}/{win_levels} | Step: {step_num}
-Available actions: {action_desc}
-
-{memory_block}
-{history_block}
-{change_map_block}
-{grid_block}
-
-## WORLD MODEL RULES (v{rules_version})
-{rules_doc}
-
-## YOUR TASK
-Plan your next sequence of actions. You can simulate actions to test ideas,
-analyze the grid for more info, or commit a plan when ready.
-Turn {turn_num}/{max_turns} — commit before running out of turns.`;
-
-const TS_PLANNER_CONTEXT_NO_WM = `## CURRENT STATE
-Game: {game_id} | State: {state} | Levels: {levels_done}/{win_levels} | Step: {step_num}
-Available actions: {action_desc}
-
-{memory_block}
-{history_block}
-{change_map_block}
-{grid_block}
-
-## YOUR TASK
-Plan your next sequence of actions. You can analyze the grid for more info,
-or commit a plan when ready.
-Turn {turn_num}/{max_turns} — commit before running out of turns.`;
-
-const TS_WM_SYSTEM_PROMPT = `You are a WORLD MODEL — you build an understanding of how this game works.
-
-You receive observations from executed steps (grids, change maps, color histograms)
-and must discover the rules: what each action does, what entities exist, what the goal is.
-
-Each turn, respond with EXACTLY one JSON object:
-
-Option 1 — Query historical data:
-{"type": "query", "tool": "change_map" | "histogram" | "grid", "step": <int> or "step_range": [<start>, <end>]}
-
-Option 2 — Commit your rules document:
-{"type": "commit", "rules_document": "<markdown rules>", "confidence": <0.0-1.0>}
-
-Your rules document should cover:
-- What each action does (ACTION1=UP, etc.)
-- Entity identification (player color, wall color, items, enemies)
-- Goal hypothesis (what wins the level)
-- Movement rules (what blocks movement, what happens on collision)
-- Any special mechanics discovered
-
-Commit when you have enough observations to update your understanding.`;
-
-const TS_WM_CONTEXT = `## GAME: {game_id} | Step: {step_num} | Levels: {levels_done}/{win_levels}
-
-## CURRENT RULES (v{rules_version})
-{rules_doc}
-
-## NEW OBSERVATIONS (steps {obs_start}-{obs_end})
-{observations_text}
-
-## YOUR TASK
-Analyze the new observations and update your rules document.
-You can query historical step data for more detail, or commit updated rules.
-Turn {turn_num}/{max_turns}`;
-
-const TS_MONITOR_PROMPT = `You are a MONITOR checking if a game action produced the expected result.
-
-Game: {game_id} | Step: {step_num} | Levels: {levels_done}/{win_levels}
-Action taken: {action_name}
-Expected outcome: "{expected}"
-
-Changes observed: {change_summary}
-Level change: {level_change}
-State: {state}
-{cooldown_line}
-
-Respond with EXACTLY this JSON (nothing else):
-{"verdict": "CONTINUE" or "REPLAN", "reason": "<brief explanation>", "discovery": "<any new rule discovered, or null>"}
-
-Rules:
-- CONTINUE = result matches expectations, is acceptable progress, or the deviation is minor
-- REPLAN = ONLY for serious, plan-breaking surprises: player is stuck/dead, completely wrong direction, dangerous enemy encountered, or a critical new discovery that changes the entire strategy
-- Default to CONTINUE. Game rules are consistent — small deviations are normal and don't warrant replanning.
-- REPLAN has a cooldown: only 1 replan per {replan_cooldown} plans. If on cooldown, you MUST return CONTINUE. Use discovery to note observations instead.
-- Keep reason under 80 chars
-- discovery: if you noticed something new about the game mechanics, describe it (≤ 120 chars). Otherwise null.`;
+const TS_PLANNER_SYSTEM_BODY = getPrompt('three_system.planner_system');
+const TS_PLANNER_SYSTEM_BODY_NO_WM = getPrompt('three_system.planner_system_no_wm');
+const TS_PLANNER_CONTEXT = window.PROMPTS.three_system.planner_context;
+const TS_PLANNER_CONTEXT_NO_WM = window.PROMPTS.three_system.planner_context_no_wm;
+const TS_WM_SYSTEM_PROMPT = getPrompt('three_system.wm_system');
+const TS_WM_CONTEXT = window.PROMPTS.three_system.wm_context;
+const TS_MONITOR_PROMPT = window.PROMPTS.three_system.monitor;
 {% endraw %}
 
 function _tsTemplateFill(template, vars) {
-  return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] !== undefined ? vars[key] : '');
+  return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] !== undefined ? vars[key] : '')
+                 .replace(/\{\{/g, '{').replace(/\}\}/g, '}');
 }
 
 // -- Color histogram & region map helpers --

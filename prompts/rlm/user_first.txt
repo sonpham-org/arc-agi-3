@@ -1,0 +1,10 @@
+Your game context is stored in the `context` variable (dict). It contains:
+- context['grid']: 2D list of color values (the current game board)
+- context['available_actions']: list of valid action integers
+- context['history']: recent move history
+- context['change_map']: cells that changed since last action
+- context['levels_completed']: current progress
+- context['win_levels']: target levels to win
+- context['compact_context']: summarized game knowledge (if available)
+
+Think step-by-step about what to do using the REPL environment to analyze the game state and determine the best action. Start by examining the context.

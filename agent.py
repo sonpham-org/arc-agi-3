@@ -41,23 +41,7 @@ ACTION_NAMES = {
     4: "ACTION4", 5: "ACTION5", 6: "ACTION6", 7: "ACTION7",
 }
 
-ARC_AGI3_DESCRIPTION = """\
-ARC-AGI-3 is an interactive reasoning benchmark. Each game is a 64x64 pixel
-grid with 16 colors (0-15).  There are NO instructions — you must discover the
-rules and goals by experimenting.
-
-Action mappings:
-- ACTION1 = UP, ACTION2 = RIGHT, ACTION3 = DOWN, ACTION4 = LEFT (directional movement)
-- ACTION5 = context-dependent (cycle, toggle, interact — varies by game)
-- ACTION6 = CLICK at (x, y) — for selecting, placing, or interacting with specific cells
-- ACTION7 = context-dependent (secondary interact, rotate, swap — varies by game)
-- ACTION0 = RESET — restarts the current level. Use only as a last resort.
-
-Key facts:
-- States: NOT_FINISHED (playing), WIN (all levels done), GAME_OVER (failed).
-- Large uniform regions = background/walls. Small shapes = player/items.
-- Edge bars = health/energy/progress meters.
-- You can lose by running out of lives, energy, or moves."""
+ARC_AGI3_DESCRIPTION = (Path(__file__).parent / "prompts" / "shared" / "arc_description.txt").read_text().strip()
 
 SYSTEM_MSG = (
     "You are an expert puzzle-solving AI. Analyse game grids and output ONLY "

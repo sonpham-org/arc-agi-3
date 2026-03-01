@@ -406,22 +406,22 @@ ACTION_NAMES = {
     4: "ACTION4", 5: "ACTION5", 6: "ACTION6", 7: "ACTION7",
 }
 
-ARC_AGI3_DESCRIPTION = """\
-ARC-AGI-3 is an interactive reasoning benchmark. Each game is a 64x64 pixel
-grid with 16 colors (0-15).  There are NO instructions — you must discover the
-rules and goals by experimenting.
+ARC_AGI3_DESCRIPTION = (Path(__file__).parent / "prompts" / "shared" / "arc_description.txt").read_text().strip()
 
-Action mappings:
-- ACTION1 = UP, ACTION2 = DOWN, ACTION3 = LEFT, ACTION4 = RIGHT (directional movement)
-- ACTION5 = context-dependent (cycle, toggle, interact — varies by game)
-- ACTION6 = CLICK at (x, y) — for selecting, placing, or interacting with specific cells
-- ACTION7 = context-dependent (secondary interact, rotate, swap — varies by game)
-- ACTION0 = RESET — restarts the current level. Use only as a last resort.
 
-Key facts:
-- States: NOT_FINISHED (playing), WIN (all levels done), GAME_OVER (failed).
-- Large uniform regions = background/walls. Small shapes = player/items.
-- Edge bars = health/energy/progress meters."""
+def _load_prompts():
+    """Load all prompt .txt files from prompts/ directory for injection into templates."""
+    base = Path(__file__).parent / "prompts"
+    result = {}
+    for section in sorted(base.iterdir()):
+        if section.is_dir():
+            result[section.name] = {
+                f.stem: f.read_text() for f in sorted(section.glob("*.txt"))
+            }
+    return result
+
+
+PROMPTS = _load_prompts()
 
 SYSTEM_MSG = (
     "You are an expert puzzle-solving AI agent. Analyse game grids and output "
@@ -1729,7 +1729,8 @@ def index():
     return render_template("index.html", color_map=COLOR_MAP,
                            turnstile_site_key=ts_key,
                            mode=mode, features=features,
-                           umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID)
+                           umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
+                           prompts=PROMPTS)
 
 
 @app.route("/api/turnstile/verify", methods=["POST"])
