@@ -421,7 +421,7 @@ def _load_prompts():
     return result
 
 
-PROMPTS = _load_prompts()
+# Prompts are loaded fresh per-request via _load_prompts() in the index route
 
 SYSTEM_MSG = (
     "You are an expert puzzle-solving AI agent. Analyse game grids and output "
@@ -668,6 +668,7 @@ MODEL_REGISTRY: dict[str, dict] = {
 
 # Ollama models discovered at runtime; all support text only by default.
 OLLAMA_VRAM = {
+    "qwen3.5:35b-a3b": "~24GB",
     "qwen2.5:32b": "~19GB", "qwen2.5:14b": "~9GB", "qwen3-8b:latest": "~5GB",
     "deepseek-r1:latest": "~5GB", "mistral:7b": "~4.4GB",
     "llama3.1:latest": "~4.9GB", "llama3:latest": "~4.7GB",
@@ -1730,7 +1731,7 @@ def index():
                            turnstile_site_key=ts_key,
                            mode=mode, features=features,
                            umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
-                           prompts=PROMPTS)
+                           prompts=_load_prompts())
 
 
 @app.route("/api/turnstile/verify", methods=["POST"])
