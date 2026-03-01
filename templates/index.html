@@ -2784,11 +2784,16 @@ async function pyodideUndo(count) {
 async function gameStep(sessionId, actionId, actionData, extras, callerState) {
   // Use Pyodide only if this session owns the game worker
   if (_pyodideGameActive && _pyodideGameSessionId === (callerState?._ownerSessionId || activeSessionId)) {
-    const prevGrid = (callerState?.grid) || currentState.grid;
-    const state = await pyodideStep(actionId, actionData);
-    state.change_map = computeChangeMapJS(prevGrid, state.grid);
-    state.session_id = sessionId;
-    return state;
+    try {
+      const prevGrid = (callerState?.grid) || currentState.grid;
+      const state = await pyodideStep(actionId, actionData);
+      state.change_map = computeChangeMapJS(prevGrid, state.grid);
+      state.session_id = sessionId;
+      return state;
+    } catch (err) {
+      console.error('[gameStep] Pyodide step failed:', err.message);
+      return { error: err.message };
+    }
   }
   // Fallback to server endpoint for non-owner sessions or server mode
   return fetchJSON('/api/step', {session_id: sessionId, action: actionId, data: actionData || {}, ...extras});
@@ -3354,6 +3359,8 @@ async function startGame(gameId) {
     curSession.tabLabel = '';
     sessions.set(data.session_id, curSession);
     activeSessionId = data.session_id;
+    // Update Pyodide ownership to match the new session ID
+    if (_pyodideGameSessionId === oldId) _pyodideGameSessionId = data.session_id;
   } else if (!curSession) {
     // No active session at all (first load)
     const s = new SessionState(data.session_id);
