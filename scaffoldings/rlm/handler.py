@@ -117,7 +117,7 @@ def handle_rlm_scaffolding(payload: dict, settings: dict, *,
     # Build conversation history for the iteration loop
     messages = [
         {"role": "system", "content": build_rlm_system_prompt(planning_horizon)},
-        {"role": "user", "content": RLM_USER_PROMPT_FIRST},
+        {"role": "user", "content": RLM_USER_PROMPT_FIRST.replace("{plan_instruction}", f"Plan up to {planning_horizon} steps ahead." if planning_horizon > 1 else "Pick the single best action.")},
     ]
 
     iterations_log = []  # track each iteration for the client
@@ -195,9 +195,12 @@ def handle_rlm_scaffolding(payload: dict, settings: dict, *,
             repl_feedback = "\n\n".join(
                 f"[REPL output {i+1}]:\n{out}" for i, out in enumerate(repl_outputs)
             )
-            messages.append({"role": "user", "content": repl_feedback + "\n\n" + RLM_USER_PROMPT_CONTINUE})
+            _plan_instr = f"Plan up to {planning_horizon} steps ahead." if planning_horizon > 1 else "Pick the single best action."
+            _continue = RLM_USER_PROMPT_CONTINUE.replace("{plan_instruction}", _plan_instr)
+            messages.append({"role": "user", "content": repl_feedback + "\n\n" + _continue})
         else:
-            messages.append({"role": "user", "content": RLM_USER_PROMPT_CONTINUE})
+            _plan_instr = f"Plan up to {planning_horizon} steps ahead." if planning_horizon > 1 else "Pick the single best action."
+            messages.append({"role": "user", "content": RLM_USER_PROMPT_CONTINUE.replace("{plan_instruction}", _plan_instr)})
 
     # Parse the final answer into the standard response format
     parsed = _parse_rlm_output(final_answer, iterations_log, extract_json, planning_horizon)

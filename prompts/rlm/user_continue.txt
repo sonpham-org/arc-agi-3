@@ -1,1 +1,3 @@
-Continue using the REPL environment to analyze the game context and determine your next action. Your next action:
+Continue using the REPL environment to analyze the game context. Review what happened since your last action — did it go as expected?
+
+Reassess your plan: what is your current goal and what sequence of moves will achieve it? {plan_instruction} Then output via FINAL().
