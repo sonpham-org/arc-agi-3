@@ -1942,7 +1942,6 @@ class SessionState {
     this.sessionStartTime = null;
     this.syncStepCounter = 0;
     // UI
-    this.reasoningHTML = '';
     this.gameId = '';
     this.model = '';
     this.status = 'NOT_PLAYED';
@@ -2024,12 +2023,6 @@ function saveSessionToState() {
   s._compactSummaryAtCall = _compactSummaryAtCall;
   s._compactSummaryAtStep = _compactSummaryAtStep;
   s._lastCompactPrompt = _lastCompactPrompt;
-  // Save reasoning HTML (strip transient waiting spinners — they're re-created on restore)
-  const rc = document.getElementById('reasoningContent');
-  if (rc) {
-    rc.querySelectorAll('.llm-waiting').forEach(el => el.remove());
-    s.reasoningHTML = rc.innerHTML;
-  }
   // Snapshot DOM settings so background sessions can read them when detached
   try {
     s._settings = {
@@ -2075,9 +2068,15 @@ function restoreSessionFromState(s) {
   _compactSummaryAtStep = s._compactSummaryAtStep;
   _lastCompactPrompt = s._lastCompactPrompt;
 
-  // Restore reasoning HTML
+  // Rebuild reasoning from step buffer (single source of truth — never cache DOM HTML)
   const rc = document.getElementById('reasoningContent');
-  if (rc) rc.innerHTML = s.reasoningHTML || '<div class="empty-state" style="height:auto;font-size:12px;">No reasoning yet.</div>';
+  if (rc) {
+    if (s.sessionStepsBuffer && s.sessionStepsBuffer.length > 0) {
+      renderRestoredReasoning(s.sessionStepsBuffer, null, null);
+    } else {
+      rc.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No reasoning yet.</div>';
+    }
+  }
 
   // If session has an LLM call in flight, show waiting indicator with elapsed time
   if (s.waitingForLLM && s.waitStartTime) {
@@ -3533,7 +3532,7 @@ async function doAction(actionId, isClick) {
   const data = await gameStep(sessionId, actionId, {}, {session_cost: sessionTotalTokens.cost});
   if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: actionId, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
-  recordStepForPersistence(actionId, {}, data.grid, data.change_map, null);
+  recordStepForPersistence(actionId, {}, data.grid, data.change_map, null, null, { levels_completed: data.levels_completed, result_state: data.state });
   logHumanAction(actionId, {}, data.change_map, currentTurnId);
   updateUI(data);
   showNoChangeIfSame(prevGrid, data.grid);
@@ -3562,7 +3561,7 @@ canvas.addEventListener('click', async (e) => {
   const data = await gameStep(sessionId, 6, { x, y }, {session_cost: sessionTotalTokens.cost});
   if (data.error) { undoStack.pop(); alert(data.error); return; }
   moveHistory.push({ step: stepCount, action: 6, result_state: data.state, x, y, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId });
-  recordStepForPersistence(6, { x, y }, data.grid, data.change_map, null);
+  recordStepForPersistence(6, { x, y }, data.grid, data.change_map, null, null, { levels_completed: data.levels_completed, result_state: data.state });
   logHumanAction(6, { x, y }, data.change_map, currentTurnId);
   updateUI(data);
   showNoChangeIfSame(prevGrid, data.grid);
@@ -5191,7 +5190,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
     const _histObs = i === 0 ? (resp?.parsed?.observation || '') : '';
     const _histReason = i === 0 ? (resp?.parsed?.reasoning || '') : '';
     _cur.moveHistory.push({ step: _cur.stepCount, action: step.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId, observation: _histObs, reasoning: _histReason });
-    recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null, _ss);
+    recordStepForPersistence(step.action, step.data || {}, data.grid, data.change_map, i === 0 ? resp : null, _ss, { levels_completed: data.levels_completed, result_state: data.state });
     if (isActive()) { updateUI(data); updateUndoBtn(); }
     completed++;
 
@@ -5373,7 +5372,7 @@ async function executeOneAction(resp) {
   if (!sessions.has(_actionSessionId)) { console.log('[executeOneAction] session closed, discarding'); return null; }
   if (data.error) { undoStack.pop(); stepCount--; alert(data.error); return null; }
   moveHistory.push({ step: stepCount, action: p.action, result_state: data.state, levels: data.levels_completed, grid: data.grid, change_map: data.change_map, turnId: currentTurnId, observation: p.observation || '', reasoning: p.reasoning || '' });
-  recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp);
+  recordStepForPersistence(p.action, p.data || {}, data.grid, data.change_map, resp, null, { levels_completed: data.levels_completed, result_state: data.state });
   updateUI(data);
   updateUndoBtn();
 
@@ -7565,7 +7564,7 @@ function buildSessionPayload(ss) {
   };
 }
 
-function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResponse, ss) {
+function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResponse, ss, extras) {
   const _ss = ss || { stepCount, sessionStepsBuffer, syncStepCounter, sessionId: sessionId };
   const stepEntry = {
     step_num: _ss.stepCount,
@@ -7575,6 +7574,8 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
     change_map: changeMap || null,
     llm_response: llmResponse || null,
     timestamp: Date.now() / 1000,
+    levels_completed: extras?.levels_completed ?? 0,
+    result_state: extras?.result_state || 'NOT_FINISHED',
   };
   _ss.sessionStepsBuffer.push(stepEntry);
   _ss.syncStepCounter++;
@@ -7848,11 +7849,13 @@ function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
   const content = document.getElementById('reasoningContent');
   content.innerHTML = '';
 
-  // Banner
-  const bannerEntry = document.createElement('div');
-  bannerEntry.className = 'reasoning-entry';
-  bannerEntry.innerHTML = `<div class="step-label" style="color:${bannerColor};">${bannerText}</div>`;
-  content.appendChild(bannerEntry);
+  // Banner (only for resume/branch, not tab-switch reconstruction)
+  if (bannerText) {
+    const bannerEntry = document.createElement('div');
+    bannerEntry.className = 'reasoning-entry';
+    bannerEntry.innerHTML = `<div class="step-label" style="color:${bannerColor};">${bannerText}</div>`;
+    content.appendChild(bannerEntry);
+  }
 
   // Group steps into LLM calls (plan groups) and human actions
   const groups = [];
