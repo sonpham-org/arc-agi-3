@@ -24,6 +24,9 @@ from scaffoldings.agent_spawn.tools import (
     make_game_action,
 )
 
+# Valid agent types for delegation
+VALID_AGENT_TYPES = {"explorer", "theorist", "tester", "solver"}
+
 
 def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                           session_id: str | None = None, step_callback=None) -> str:
@@ -119,7 +122,7 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
         turn_duration_ms += decision.get("duration_ms", 0)
         turn_llm_calls += decision.get("llm_calls", 0)
 
-        command = decision.get("command", "act")
+        command = decision.get("command", "think")
         print(f"    [orchestrator] command={command}")
 
         # ── HANDLE THINK ───────────────────────────────────────────────
@@ -134,13 +137,22 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
             total_llm_calls += turn_llm_calls
             continue
 
-        # ── HANDLE SPAWN ───────────────────────────────────────────────
-        if command == "spawn":
+        # ── HANDLE DELEGATE (spawn subagent) ──────────────────────────
+        if command == "delegate":
             agent_type = decision.get("agent_type", "explorer")
             task = decision.get("task", "explore the game")
             budget = min(decision.get("budget", 3), 10)
 
-            print(f"    [spawn] {agent_type} — budget={budget} — task: {task[:60]}")
+            # Validate agent type
+            if agent_type not in VALID_AGENT_TYPES:
+                print(f"    [orchestrator] WARNING: unknown agent type '{agent_type}', defaulting to explorer")
+                agent_type = "explorer"
+
+            # Theorists don't execute game actions — budget controls LLM iterations
+            if agent_type == "theorist":
+                print(f"    [delegate] {agent_type} — budget={budget} (analysis only) — task: {task[:60]}")
+            else:
+                print(f"    [delegate] {agent_type} — budget={budget} — task: {task[:60]}")
 
             sub_result = run_subagent(
                 agent_type=agent_type,
@@ -189,93 +201,15 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 else:
                     return terminal
 
-        # ── HANDLE ACT (direct orchestrator action) ────────────────────
-        elif command == "act":
-            action_id = decision.get("action", 1)
-            action_data = decision.get("data", {})
-            reasoning = decision.get("reasoning", "")
-
-            action_id = validate_action(action_id, frame.available_actions)
-            action = make_game_action(action_id)
-
-            prev_grid = grid
-            step_num += 1
-            steps_since_condense += 1
-            turn_steps_executed = 1
-
-            aname = ACTION_NAMES.get(action_id, f"ACTION{action_id}")
-            coord_str = (f"@({action_data.get('x','?')},{action_data.get('y','?')})"
-                         if action_id == 6 and action_data else "")
-            print(f"    Step {step_num:3d} | {aname}{coord_str} | "
-                  f"lvl {frame.levels_completed}/{frame.win_levels}")
-
-            frame = env.step(action, data=action_data or None, reasoning=reasoning)
-            if frame is None:
-                print("  [ERROR] env.step returned None")
-                _post_game(arcade, game_id, history, "ERROR", step_num, 0, 0, cfg)
-                return "ERROR"
-
-            new_grid = frame.frame[-1].tolist() if frame.frame else grid
-            state_str = frame.state.value if hasattr(frame.state, "value") else str(frame.state)
-
-            # Record observation in memories
-            observation = f"{aname}{coord_str} → state={state_str}"
-            memories.add_observation(step_num, action_id, observation, prev_grid, new_grid)
-            memories.log_action(step_num, action_id, action_data, "orchestrator", reasoning)
-
-            # History
-            history.append({
-                "step": step_num,
-                "action": action_id,
-                "data": action_data,
-                "state": state_str,
-                "levels": frame.levels_completed,
-                "observation": observation,
-                "reasoning": f"[orchestrator] {reasoning}",
-            })
-
-            # Step callback
-            if step_callback:
-                llm_resp = {
-                    "observation": observation,
-                    "reasoning": f"[orchestrator] {reasoning}",
-                    "action": action_id,
-                    "data": action_data,
-                }
-                try:
-                    step_callback(
-                        session_id=session_id, step_num=step_num,
-                        action=action_id, data=action_data,
-                        grid=new_grid, llm_response=llm_resp,
-                        state=state_str, levels=frame.levels_completed,
-                    )
-                except Exception as cb_err:
-                    print(f"    [callback error] {cb_err}")
-
-            # Check terminal after direct action
-            if frame.state == GameState.WIN:
-                total_llm_calls += turn_llm_calls
-                print(f"\n  >>> WIN! Completed {frame.win_levels} levels in {step_num} steps "
-                      f"({total_llm_calls} LLM calls) <<<\n")
-                _post_game(arcade, game_id, history, "WIN", step_num,
-                           frame.levels_completed, frame.win_levels, cfg)
-                return "WIN"
-            if frame.state == GameState.GAME_OVER:
-                total_llm_calls += turn_llm_calls
-                print(f"\n  >>> GAME OVER at step {step_num} ({total_llm_calls} LLM calls) <<<\n")
-                _post_game(arcade, game_id, history, "GAME_OVER", step_num,
-                           frame.levels_completed, frame.win_levels, cfg)
-                return "GAME_OVER"
-
         # ── LOG TURN ───────────────────────────────────────────────────
         total_llm_calls += turn_llm_calls
 
         if session_id:
             _log_turn(
                 session_id, turn_num, "agent_spawn",
-                goal=f"{command}: {decision.get('task', decision.get('reasoning', ''))}",
+                goal=f"{command}: {decision.get('task', decision.get('reasoning', decision.get('next', '')))}",
                 plan_json=json.dumps(decision, default=str),
-                steps_planned=decision.get("budget", 1) if command == "spawn" else 1,
+                steps_planned=decision.get("budget", 1) if command == "delegate" else 0,
                 steps_executed=turn_steps_executed,
                 step_start=step_start,
                 step_end=step_num,

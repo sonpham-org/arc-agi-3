@@ -1348,18 +1348,24 @@ const SCAFFOLDING_SCHEMAS = {
   agent_spawn: {
     id: 'agent_spawn',
     name: 'Agent Spawn',
-    description: 'Orchestrator spawns bounded explorer/solver subagents with shared memory.',
+    description: 'Agentica-style orchestrator delegates to explorer/theorist/tester/solver subagents.',
     pipeline: [
       { id: 'orchestrator', label: 'Orchestrator', color: 'var(--accent)', settingsRef: 'orchestrator_model' },
       { id: 'explorer', label: 'Explorer', color: 'var(--green)', settingsRef: null },
+      { id: 'theorist', label: 'Theorist', color: 'var(--cyan)', settingsRef: null },
+      { id: 'tester', label: 'Tester', color: 'var(--yellow)', settingsRef: null },
       { id: 'solver', label: 'Solver', color: 'var(--purple)', settingsRef: null },
-      { id: 'memory', label: 'Shared Memory', color: 'var(--yellow)', settingsRef: null },
+      { id: 'memory', label: 'Memory', color: 'var(--orange)', settingsRef: null },
     ],
     edges: [
-      { from: 'orchestrator', to: 'explorer', label: 'spawn' },
-      { from: 'orchestrator', to: 'solver', label: 'spawn' },
-      { from: 'explorer', to: 'memory', label: 'findings' },
-      { from: 'solver', to: 'memory', label: 'results' },
+      { from: 'orchestrator', to: 'explorer', label: 'delegate' },
+      { from: 'orchestrator', to: 'theorist', label: 'delegate' },
+      { from: 'orchestrator', to: 'tester', label: 'delegate' },
+      { from: 'orchestrator', to: 'solver', label: 'delegate' },
+      { from: 'explorer', to: 'memory', label: 'report' },
+      { from: 'theorist', to: 'memory', label: 'report' },
+      { from: 'tester', to: 'memory', label: 'report' },
+      { from: 'solver', to: 'memory', label: 'report' },
       { from: 'memory', to: 'orchestrator', label: 'context' },
     ],
     sections: [
@@ -4616,6 +4622,74 @@ function buildReasoningGroupHTML(g, gi, options) {
       + wmCallsHtml
       + wmPreviewHtml
       + '</div>';
+  } else if (g.type === 'llm' && g.llm && g.llm.agent_spawn) {
+    // ── Agent Spawn scaffolding rendering ──
+    var llm = g.llm;
+    var as = llm.agent_spawn;
+    var p = llm.parsed || {};
+    var firstStep = g.steps.length ? g.steps[0].step_num : '?';
+    var lastStep = g.steps.length > 1 ? g.steps[g.steps.length - 1].step_num : firstStep;
+    var stepLabel = g.steps.length > 1 ? 'Steps ' + firstStep + '\u2013' + lastStep : 'Step ' + firstStep;
+    var durationHtml = llm.call_duration_ms
+      ? '<span style="font-size:10px;color:var(--dim);margin-left:6px;">' + (llm.call_duration_ms / 1000).toFixed(1) + 's</span>' : '';
+
+    var asBadge = '<span class="tools-badge" style="background:#ff8b3d33;color:var(--orange);">SPAWN</span>';
+    var totalSteps = as.total_steps || g.steps.length || 0;
+    var totalSubs = as.total_subagents || 0;
+    var stepsBadge = '<span class="tools-badge" style="background:#3fb95033;color:var(--green);">' + totalSteps + ' steps</span>';
+    var subsBadge = '<span class="tools-badge" style="background:#bc8cff22;color:var(--purple);">' + totalSubs + ' agents</span>';
+
+    // Orchestrator log
+    var orchLog = as.orchestrator_log || [];
+    var orchHtml = '';
+    if (orchLog.length) {
+      orchHtml = '<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:10px;color:var(--dim);">Orchestrator Log (' + orchLog.length + ' turns)</summary><div style="font-size:10px;color:var(--fg);padding:4px 8px;margin-top:2px;">';
+      for (var oi = 0; oi < orchLog.length; oi++) {
+        var oEntry = orchLog[oi];
+        var oColor = oEntry.type === 'delegate' ? 'var(--accent)' : oEntry.type === 'think' ? 'var(--yellow)' : 'var(--dim)';
+        orchHtml += '<div style="color:' + oColor + ';">Turn ' + oEntry.turn + ': ' + oEntry.type;
+        if (oEntry.agent_type) orchHtml += ' (' + oEntry.agent_type + ')';
+        if (oEntry.task) orchHtml += ' — ' + esc(oEntry.task.substring(0, 80));
+        if (oEntry.duration_ms) orchHtml += ' <span style="color:var(--dim);">' + (oEntry.duration_ms / 1000).toFixed(1) + 's</span>';
+        orchHtml += '</div>';
+      }
+      orchHtml += '</div></details>';
+    }
+
+    // Subagent summaries
+    var subSummaries = as.subagent_summaries || [];
+    var subHtml = '';
+    if (subSummaries.length) {
+      subHtml = '<details style="margin-top:2px;"><summary style="cursor:pointer;font-size:10px;color:var(--dim);">Subagent Reports (' + subSummaries.length + ')</summary><div style="font-size:10px;color:var(--fg);padding:4px 8px;margin-top:2px;">';
+      for (var si2 = 0; si2 < subSummaries.length; si2++) {
+        var sub = subSummaries[si2];
+        var subColor = sub.type === 'explorer' ? 'var(--green)' : sub.type === 'theorist' ? 'var(--cyan)' : sub.type === 'tester' ? 'var(--yellow)' : 'var(--purple)';
+        subHtml += '<div style="color:' + subColor + ';">[' + sub.type + '] ' + (sub.steps || 0) + ' steps — ' + esc((sub.summary || '').substring(0, 150)) + '</div>';
+      }
+      subHtml += '</div></details>';
+    }
+
+    // Plan steps (executed actions)
+    var planHtml = '';
+    if (g.steps.length) {
+      planHtml = g.steps.map(function(s, i) {
+        var aName = ACTION_NAMES[s.action] || ('ACTION' + s.action);
+        var dataStr = (s.data && s.data.x !== undefined) ? ' (' + s.data.x + ',' + s.data.y + ')' : '';
+        var cls = 'plan-step done';
+        return '<div class="' + cls + '" data-plan-idx="' + i + '">' + (i + 1) + '. <span class="action-btn" style="background:var(--green);color:#000;border-color:var(--green);">' + aName + '</span>' + dataStr + '</div>';
+      }).join('');
+    }
+
+    var branchBtn3 = showBranchBtn && g.steps.length
+      ? '<button class="branch-btn" onclick="branchFromStep(' + firstStep + ')" title="Branch from step ' + firstStep + '">&#8627; branch</button>' : '';
+
+    var obsHtml = p.observation ? '<div style="font-size:11px;color:var(--fg);margin-top:3px;">' + esc(p.observation) + '</div>' : '';
+
+    return '<div class="reasoning-entry" data-group="' + gi + '" data-step-nums="' + stepNums + '"' + entryStyle + '>'
+      + branchBtn3
+      + '<div class="step-label">' + stepLabel + ' ' + asBadge + ' ' + stepsBadge + ' ' + subsBadge + ' ' + levelBadge + durationHtml + tag + '</div>'
+      + obsHtml + planHtml + orchHtml + subHtml
+      + '</div>';
   } else if (g.type === 'llm' && g.llm && g.llm.parsed) {
     // Human action
     var s = g.steps[0];
@@ -5180,6 +5254,50 @@ async function askLLM(ss) {
           <div style="color:var(--yellow);font-size:11px;">Planner fallback — could not commit a plan.</div>
           ${callsHtml}`;
       }
+    } else if (resp.scaffolding === 'agent_spawn' && resp.agent_spawn) {
+      // ── Agent Spawn scaffolding: show orchestrator + subagent details ──
+      const as = resp.agent_spawn;
+      const p = resp.parsed || {};
+      const durationHtml = resp.call_duration_ms
+        ? `<span style="font-size:10px;color:var(--dim);margin-left:6px;">${(resp.call_duration_ms / 1000).toFixed(1)}s</span>` : '';
+      const asBadge = '<span class="tools-badge" style="background:#ff8b3d33;color:var(--orange);">SPAWN</span>';
+      const totalSteps = as.total_steps || 0;
+      const totalSubs = as.total_subagents || 0;
+      const stepsBadge = `<span class="tools-badge" style="background:#3fb95033;color:var(--green);">${totalSteps} steps</span>`;
+      const subsBadge = `<span class="tools-badge" style="background:#bc8cff22;color:var(--purple);">${totalSubs} agents</span>`;
+
+      // Orchestrator log
+      let orchHtml = '';
+      if (as.orchestrator_log?.length) {
+        orchHtml = '<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:10px;color:var(--dim);">Orchestrator Log (' + as.orchestrator_log.length + ' turns)</summary><div style="font-size:10px;color:var(--fg);padding:4px 8px;margin-top:2px;">';
+        for (const oEntry of as.orchestrator_log) {
+          const oColor = oEntry.type === 'delegate' ? 'var(--accent)' : oEntry.type === 'think' ? 'var(--yellow)' : 'var(--dim)';
+          orchHtml += `<div style="color:${oColor};">Turn ${oEntry.turn}: ${oEntry.type}`;
+          if (oEntry.agent_type) orchHtml += ` (${oEntry.agent_type})`;
+          if (oEntry.task) orchHtml += ` — ${esc(oEntry.task.substring(0, 80))}`;
+          if (oEntry.duration_ms) orchHtml += ` <span style="color:var(--dim);">${(oEntry.duration_ms / 1000).toFixed(1)}s</span>`;
+          orchHtml += '</div>';
+        }
+        orchHtml += '</div></details>';
+      }
+
+      // Subagent summaries
+      let subHtml = '';
+      if (as.subagent_summaries?.length) {
+        subHtml = '<details style="margin-top:2px;"><summary style="cursor:pointer;font-size:10px;color:var(--dim);">Subagent Reports (' + as.subagent_summaries.length + ')</summary><div style="font-size:10px;color:var(--fg);padding:4px 8px;margin-top:2px;">';
+        for (const sub of as.subagent_summaries) {
+          const subColor = sub.type === 'explorer' ? 'var(--green)' : sub.type === 'theorist' ? 'var(--cyan)' : sub.type === 'tester' ? 'var(--yellow)' : 'var(--purple)';
+          subHtml += `<div style="color:${subColor};">[${sub.type}] ${sub.steps || 0} steps — ${esc((sub.summary || '').substring(0, 150))}</div>`;
+        }
+        subHtml += '</div></details>';
+      }
+
+      entry.dataset.branchStep = _cur.stepCount;
+      entry.innerHTML = `
+        <button class="branch-btn" onclick="branchFromStep(${_cur.stepCount})" title="Branch from here">&#8627; branch</button>
+        <div class="step-label">Step ${_cur.stepCount} — ${resp.model}${durationHtml}${asBadge}${stepsBadge}${subsBadge}</div>
+        <div class="observation">${esc(p.observation || '')}</div>
+        ${orchHtml}${subHtml}`;
     } else if (resp.parsed) {
       const p = resp.parsed;
       const thinkHtml = resp.thinking
@@ -5595,6 +5713,9 @@ async function stepOnce() {
   if (!resp || resp.error || resp.truncated || !resp.parsed) return;
   const p = resp.parsed;
 
+  // Agent spawn executes steps inline — skip executePlan
+  if (resp._alreadyExecuted) return;
+
   // Normalize: single action becomes a 1-step plan
   const plan = (p.plan && Array.isArray(p.plan) && p.plan.length > 0)
     ? p.plan
@@ -5629,7 +5750,7 @@ async function truncAutoRetry(btn, maxRetries) {
       continue;
     }
     // Success — not truncated
-    if (resp.parsed) {
+    if (resp.parsed && !resp._alreadyExecuted) {
       const p = resp.parsed;
       const plan = (p.plan && Array.isArray(p.plan) && p.plan.length > 0)
         ? p.plan
@@ -5740,29 +5861,35 @@ async function toggleAutoPlay() {
     }
     if (!sessions.has(mySessionId)) break;
     if (!resp || resp.error || resp.truncated || !resp.parsed) { if (ss) ss.autoPlaying = false; else autoPlaying = false; break; }
-    const p = resp.parsed;
 
-    // Normalize: single action becomes a 1-step plan
-    const plan = (p.plan && Array.isArray(p.plan) && p.plan.length > 0)
-      ? p.plan
-      : (p.action !== undefined && p.action !== null)
-        ? [{ action: p.action, data: p.data || {} }]
-        : null;
-    if (!plan) { if (ss) ss.autoPlaying = false; else autoPlaying = false; break; }
+    // Agent spawn already executed steps inline — skip executePlan
+    if (resp._alreadyExecuted) {
+      // Steps already done; just continue the autoplay loop
+    } else {
+      const p = resp.parsed;
 
-    const entry = (activeSessionId === mySessionId) ? getLastReasoningEntry() : null;
-    const expected = resp.parsed.expected || null;
-    let result;
-    try {
-      result = await executePlan(plan, resp, entry, expected, ss);
-    } catch (planErr) {
-      console.error('[autoPlay] executePlan threw:', planErr);
-      // Continue the loop — the plan failed but game may still be playable
-      await new Promise(r => setTimeout(r, 200));
-      continue;
-    }
-    if (!result || result.interrupted) {
-      await new Promise(r => setTimeout(r, 200));
+      // Normalize: single action becomes a 1-step plan
+      const plan = (p.plan && Array.isArray(p.plan) && p.plan.length > 0)
+        ? p.plan
+        : (p.action !== undefined && p.action !== null)
+          ? [{ action: p.action, data: p.data || {} }]
+          : null;
+      if (!plan) { if (ss) ss.autoPlaying = false; else autoPlaying = false; break; }
+
+      const entry = (activeSessionId === mySessionId) ? getLastReasoningEntry() : null;
+      const expected = resp.parsed.expected || null;
+      let result;
+      try {
+        result = await executePlan(plan, resp, entry, expected, ss);
+      } catch (planErr) {
+        console.error('[autoPlay] executePlan threw:', planErr);
+        // Continue the loop — the plan failed but game may still be playable
+        await new Promise(r => setTimeout(r, 200));
+        continue;
+      }
+      if (!result || result.interrupted) {
+        await new Promise(r => setTimeout(r, 200));
+      }
     }
 
     // Update session tabs to reflect progress
@@ -6339,7 +6466,14 @@ async function callLLM(messages, model, { maxTokens = 16384, thinkingLevel = 'of
   // ── Gemini ──
   if (provider === 'gemini') {
     const systemMsg = messages.find(m => m.role === 'system');
-    const chatMsgs = messages.filter(m => m.role !== 'system');
+    let chatMsgs = messages.filter(m => m.role !== 'system');
+    // Gemini requires at least one user message in contents; if only a system
+    // message was provided (common in scaffold REPL calls), promote it to user.
+    let promotedSystem = false;
+    if (!chatMsgs.length && systemMsg) {
+      chatMsgs = [{ role: 'user', content: systemMsg.content }];
+      promotedSystem = true;
+    }
     const contents = chatMsgs.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }]
@@ -6350,7 +6484,7 @@ async function callLLM(messages, model, { maxTokens = 16384, thinkingLevel = 'of
       contents,
       generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, ...thinkingConfig },
     };
-    if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+    if (systemMsg && !promotedSystem) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
     if (onChunk) {
       // Streaming SSE endpoint
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:streamGenerateContent?key=${key}&alt=sse`;
@@ -7165,25 +7299,453 @@ async function askLLMThreeSystem(_cur, model, modelInfo, waitEl, isActiveFn, his
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AGENT SPAWN — Client-side orchestrator + subagent loop
+// AGENT SPAWN — Agentica-style orchestrator + reactive subagent loops
 // ═══════════════════════════════════════════════════════════════════════════
 
-const AS_ORCHESTRATOR_SYSTEM = `You are the Orchestrator for an ARC-AGI-3 game-playing system.
-You coordinate specialized subagents to solve puzzle games on a grid.
+// ── Step 1: Per-step execution helper ────────────────────────────────────
 
-Your job:
-1. Observe the current game state (grid, available actions, level progress).
-2. Decide which subagent to spawn and what task to give it.
-3. Review subagent results and incorporate findings into shared memory.
-4. Decide the next action(s) to submit.
+async function _asExecuteOneStep(actionId, actionData, reasoning, agentType, _cur, isActiveFn) {
+  // Push undo snapshot
+  const currentTurnId = _cur.turnCounter;
+  _cur.undoStack.push({
+    grid: _cur.currentState.grid ? _cur.currentState.grid.map(r => [...r]) : [],
+    state: _cur.currentState.state,
+    levels_completed: _cur.currentState.levels_completed,
+    stepCount: _cur.stepCount,
+    turnId: currentTurnId,
+  });
 
-Available subagent types:
-- explorer: Tries actions to discover what they do. Good for early-game mapping.
-- solver: Executes a sequence of actions toward a specific goal.
+  const prevGrid = _cur.currentState.grid ? _cur.currentState.grid.map(r => [...r]) : [];
+  _cur.stepCount++;
 
-You respond in JSON only.`;
+  const extras = { session_cost: _cur.sessionTotalTokens?.cost || 0 };
+  const data = await gameStep(_cur.sessionId, actionId, actionData || {}, extras,
+    { grid: _cur.currentState.grid, _ownerSessionId: _cur.sessionId });
 
-const AS_ORCHESTRATOR_TURN = `# Current State
+  if (data.error) {
+    // Rollback
+    _cur.undoStack.pop();
+    _cur.stepCount--;
+    return { data, terminal: null, prevGrid, newGrid: prevGrid, error: true };
+  }
+
+  // Update session state
+  _cur.currentState = data;
+  _cur.currentGrid = data.grid;
+  _cur.currentChangeMap = data.change_map;
+
+  // Compute change map
+  const newGrid = data.grid || [];
+  const changeMap = computeChangeMapJS(prevGrid, newGrid);
+  _cur.currentChangeMap = changeMap;
+
+  // Push to move history
+  _cur.moveHistory.push({
+    step: _cur.stepCount, action: actionId,
+    result_state: data.state, levels: data.levels_completed,
+    grid: data.grid, change_map: changeMap,
+    turnId: currentTurnId,
+    observation: `[${agentType}] ${reasoning || ''}`,
+    reasoning: reasoning || '',
+  });
+
+  // Record for persistence
+  recordStepForPersistence(actionId, actionData || {}, data.grid, changeMap, null, _cur,
+    { levels_completed: data.levels_completed, result_state: data.state });
+
+  // Update UI if active
+  if (isActiveFn()) { updateUI(data); updateUndoBtn(); }
+
+  // Determine terminal
+  let terminal = null;
+  if (data.state === 'WIN') terminal = 'WIN';
+  else if (data.state === 'GAME_OVER') terminal = 'GAME_OVER';
+
+  return { data, terminal, prevGrid, newGrid, error: false };
+}
+
+// ── Step 2: Bounded budget + frame helpers ───────────────────────────────
+
+function _makeBoundedBudget(limit) {
+  return {
+    remaining: limit, total: limit,
+    use(actionId) {
+      if (actionId === 0) return true; // RESET doesn't cost budget
+      if (this.remaining <= 0) return false;
+      this.remaining--;
+      return true;
+    },
+    exhausted() { return this.remaining <= 0; },
+  };
+}
+
+function _asRenderGrid(grid) {
+  if (!grid || !grid.length) return '(empty grid)';
+  return grid.map((r, i) => `Row ${String(i).padStart(2)}: ${compressRowJS(r)}`).join('\n');
+}
+
+function _asDiffFrames(oldGrid, newGrid) {
+  if (!oldGrid || !newGrid) return '(no diff available)';
+  const cm = computeChangeMapJS(oldGrid, newGrid);
+  if (!cm.changes.length) return '(no changes)';
+  // Group changes by region
+  const byRow = {};
+  for (const c of cm.changes) {
+    if (!byRow[c.y]) byRow[c.y] = [];
+    byRow[c.y].push(c);
+  }
+  const lines = [];
+  for (const [row, changes] of Object.entries(byRow).sort((a, b) => a[0] - b[0])) {
+    const details = changes.map(c => `col ${c.x}: ${c.from}->${c.to}`).join(', ');
+    lines.push(`Row ${row}: ${details}`);
+  }
+  return lines.join('\n');
+}
+
+function _asChangeSummary(oldGrid, newGrid) {
+  if (!oldGrid || !newGrid) return 'No previous grid';
+  const cm = computeChangeMapJS(oldGrid, newGrid);
+  return `${cm.change_count} cell(s) changed`;
+}
+
+function _asFind(grid, ...colors) {
+  if (!grid || !grid.length) return '(empty grid)';
+  const colorSet = new Set(colors.map(Number));
+  const results = [];
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (colorSet.has(grid[r][c])) results.push(`(${r},${c})=${grid[r][c]}`);
+    }
+  }
+  return results.length ? results.join(', ') : '(none found)';
+}
+
+function _asBoundingBox(grid, ...colors) {
+  if (!grid || !grid.length) return '(empty grid)';
+  const colorSet = new Set(colors.map(Number));
+  let minR = Infinity, maxR = -1, minC = Infinity, maxC = -1;
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (colorSet.has(grid[r][c])) {
+        if (r < minR) minR = r; if (r > maxR) maxR = r;
+        if (c < minC) minC = c; if (c > maxC) maxC = c;
+      }
+    }
+  }
+  if (maxR === -1) return '(no cells with those colors)';
+  return `rows ${minR}-${maxR}, cols ${minC}-${maxC} (${maxR-minR+1}x${maxC-minC+1})`;
+}
+
+function _asColorCounts(grid) {
+  return _computeColorHistogram(grid);
+}
+
+function _asDispatchFrameTool(tool, grid, prevGrid, args) {
+  switch (tool) {
+    case 'render_grid': return _asRenderGrid(grid);
+    case 'diff_frames': return _asDiffFrames(prevGrid, grid);
+    case 'change_summary': return _asChangeSummary(prevGrid, grid);
+    case 'find_colors': return _asFind(grid, ...(args?.colors || []));
+    case 'bounding_box': return _asBoundingBox(grid, ...(args?.colors || []));
+    case 'color_counts': return _asColorCounts(grid);
+    default: return `Unknown frame tool: ${tool}`;
+  }
+}
+
+// ── Step 3: Stack-based shared memory ────────────────────────────────────
+
+function _asCreateMemories() {
+  return {
+    facts: [],
+    hypotheses: [],
+    stack: [], // [{summary, details, agentType, timestamp}]
+
+    addFact(fact) { if (!this.facts.includes(fact)) this.facts.push(fact); },
+    addHypothesis(h) { if (!this.hypotheses.includes(h)) this.hypotheses.push(h); },
+
+    add(summary, details, agentType) {
+      this.stack.push({ summary, details: details || '', agentType: agentType || 'system', timestamp: Date.now() });
+    },
+
+    summaries() {
+      return this.stack.map((m, i) => `[${i}] (${m.agentType}) ${m.summary}`);
+    },
+
+    formatForPrompt() {
+      const parts = [];
+      if (this.facts.length) {
+        const recent = this.facts.slice(-5);
+        parts.push('## Facts\n' + recent.map((f, i) => `${i + 1}. ${f}`).join('\n'));
+      }
+      if (this.hypotheses.length) {
+        const recent = this.hypotheses.slice(-5);
+        parts.push('## Hypotheses\n' + recent.map((h, i) => `${i + 1}. ${h}`).join('\n'));
+      }
+      if (this.stack.length) {
+        const recent = this.stack.slice(-8);
+        parts.push('## Agent Reports\n' + recent.map((m, i) =>
+          `[${i}] (${m.agentType}) ${m.summary}${m.details ? '\n   ' + m.details.substring(0, 200) : ''}`
+        ).join('\n'));
+      }
+      return parts.length ? parts.join('\n\n') : '(none yet)';
+    },
+  };
+}
+
+// ── Step 4: Agentica-style prompts ───────────────────────────────────────
+
+const AS_GAME_REFERENCE = `# ARC-AGI-3 Game Reference
+
+## Grid
+The game is played on a grid (up to 64x64). Each cell has a color value 0-15.
+Colors: 0=black/empty, 1=blue, 2=red, 3=green, 4=yellow, 5=grey, 6=magenta, 7=orange, 8=cyan, 9=brown, 10-15=extended.
+
+## Actions
+Actions are integers. Common mapping:
+  0=RESET (restart current level), 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT, 5=ACT5, 6=CLICK, 7=ACT7
+Not all actions are available in every game — check available_actions.
+
+## RESET Discipline
+Action 0 (RESET) restarts the current level to its initial state. Use it when stuck or to test hypotheses from a clean state. RESET does NOT cost budget.
+
+## Level Progression
+- levels_completed increments mid-action when you complete a level's objective.
+- state='WIN' ONLY when ALL levels are done (levels_completed == win_levels).
+- A single action can complete a level (levels_completed goes up) while state stays 'NOT_FINISHED' if more levels remain.
+
+## Frame Tools
+You can use frame tools to analyze the grid without taking an action:
+- render_grid: Full text rendering of the current grid with row numbers
+- diff_frames: Region-grouped diff between previous and current grid
+- change_summary: One-line summary of how many cells changed
+- find_colors(colors): Find pixel coordinates matching given color values
+- bounding_box(colors): Tight bounding box around cells of given colors
+- color_counts: Color histogram of the grid
+
+Usage: {"command": "frame_tool", "tool": "<name>", "args": {"colors": [1, 2]}}
+
+## Memory
+Findings are stored in shared memory. Reference by index: "See report [2]".
+Add findings as you discover them — other agents can see your reports.
+
+## Methodology
+1. Hypothesize what an action might do
+2. Test by executing the action
+3. Verify by analyzing the grid changes (use diff_frames / change_summary)
+4. Record confirmed findings as facts
+5. Always analyze changes AFTER each action — never assume the result`;
+
+const AS_ORCHESTRATOR_PREMISE = `You are the ORCHESTRATOR for an ARC-AGI-3 game-playing system.
+
+## Your Role
+You are a MANAGER, not a player. You coordinate subagents to explore, theorize, test, and solve.
+You do NOT have submit_action. You CANNOT play the game directly.
+Your only tools are THINKING and DELEGATING to subagents.
+
+## Subagent Types
+- **explorer**: Systematic action sampling. Tries available actions, uses frame tools, reports what each action does. Best for early-game discovery.
+- **theorist**: Analysis only — receives data, outputs hypotheses, challenges assumptions. Has NO game actions. Can only use frame_tool and report.
+- **tester**: Receives a hypothesis. Designs a minimal experiment (1-3 actions), executes, reports whether hypothesis is confirmed or refuted.
+- **solver**: Receives a strategy. Executes a sequence of actions efficiently. Reports progress and obstacles.
+
+## Orchestration Phases
+1. **Explore** — Spawn explorer(s) to try all available actions and map mechanics
+2. **Hypothesize** — Spawn theorist to analyze findings and propose level-solving strategy
+3. **Test** — Spawn tester to verify critical hypotheses before committing
+4. **Iterate** — If tests fail, update hypotheses and re-test
+5. **Solve** — Spawn solver with a clear strategy to complete the level
+6. **Next Level** — After level completion, re-explore (mechanics may change)
+
+## Briefing Subagents
+Always tell subagents:
+- What is known so far (summarize key facts)
+- What they should focus on (specific task)
+- Reference memory indices: "See reports [0]-[2] for explored actions"
+
+## Commands
+You MUST respond with exactly one JSON object:
+
+Option A — Delegate to a subagent:
+{"command": "delegate", "agent_type": "explorer|theorist|tester|solver", "task": "specific instructions", "budget": <1-10>}
+
+Option B — Think and record to memory:
+{"command": "think", "facts": ["confirmed fact", ...], "hypotheses": ["working theory", ...], "reasoning": "analysis"}`;
+
+const AS_AGENT_SYSTEM = {
+  explorer: `You are an EXPLORER subagent for ARC-AGI-3.
+
+Your mission: systematically try ALL available actions to discover what they do.
+- Try each available action at least once
+- Use frame tools (diff_frames, change_summary) AFTER each action to see what changed
+- Try actions from different grid states (use RESET to get a clean slate)
+- Report: what each action does, which actions seem to advance the level, any patterns
+
+You have a limited action budget. Prioritize coverage over depth — try different actions rather than repeating the same one.
+Respond in JSON only.`,
+
+  theorist: `You are a THEORIST subagent for ARC-AGI-3.
+
+Your mission: analyze data from other agents and formulate hypotheses.
+- You have NO game actions — you CANNOT use the "act" command
+- You CAN use frame_tool to examine the current grid state
+- Study the facts and agent reports in shared memory
+- Propose testable hypotheses about game mechanics and level solutions
+- Challenge existing assumptions — look for what might be wrong
+- Be specific: "Action 4 moves the player right by 1 cell" not "actions move things"
+
+Respond in JSON only.`,
+
+  tester: `You are a TESTER subagent for ARC-AGI-3.
+
+Your mission: test a specific hypothesis with minimal actions.
+- Design the smallest possible experiment to confirm or refute the hypothesis
+- RESET first if you need a clean state
+- Execute actions and analyze results with frame tools
+- Report conclusively: CONFIRMED or REFUTED, with evidence
+- Keep experiments small (1-3 actions) — don't waste budget on exploration
+
+Respond in JSON only.`,
+
+  solver: `You are a SOLVER subagent for ARC-AGI-3.
+
+Your mission: execute a strategy to complete the current level.
+- Follow the orchestrator's plan but adapt if results are unexpected
+- Use frame tools to verify progress after each action
+- If stuck, report the obstacle rather than thrashing
+- Report progress: what worked, what didn't, current state
+
+Respond in JSON only.`,
+};
+
+const AS_AGENT_TURN = `# Task from Orchestrator
+{task}
+
+# Current State
+- Step: {step_num} | Budget remaining: {budget_remaining}/{budget_total}
+- Level: {levels_done} / {win_levels}
+- State: {state_str}
+- Available actions: {action_desc}
+
+# Grid
+{grid_block}
+
+# Changes from last action
+{change_map_block}
+
+# Shared Memories
+{memories}
+
+# My Actions This Session
+{session_history}
+{tool_results}
+# Commands
+Respond with exactly one JSON object:
+
+Option A — Take a game action (NOT available for theorist):
+{"command": "act", "action": <action_id>, "data": {}, "reasoning": "why this action"}
+
+Option B — Use a frame tool to analyze the grid:
+{"command": "frame_tool", "tool": "render_grid|diff_frames|change_summary|find_colors|bounding_box|color_counts", "args": {"colors": [1, 2]}}
+
+Option C — Report findings and yield to orchestrator:
+{"command": "report", "findings": ["finding1", ...], "hypotheses": ["hypothesis1", ...], "summary": "what I learned"}`;
+
+function _asFill(template, vars) {
+  let s = template;
+  for (const [k, v] of Object.entries(vars)) s = s.replaceAll('{' + k + '}', String(v));
+  return s;
+}
+
+// ── Step 5: Main function — reactive subagent loops ──────────────────────
+
+async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, historyForLLM, compactBlock, _snap) {
+  const t0Total = performance.now();
+  const settings = _snap?.scaffolding || getScaffoldingSettings();
+  const orchModel = settings.orchestrator_model || settings.model || model;
+  const orchThinking = settings.orchestrator_thinking_level || 'low';
+  const orchMaxTokens = Math.min(parseInt(settings.orchestrator_max_tokens) || 16384, 65536);
+  const subModel = settings.subagent_model || orchModel;
+  const subThinking = settings.subagent_thinking_level || 'low';
+  const subMaxTokens = Math.min(parseInt(settings.subagent_max_tokens) || 16384, 65536);
+  const maxSubBudget = parseInt(settings.max_subagent_budget) || 5;
+  const orchMaxTurns = parseInt(settings.orchestrator_max_turns) || 5;
+
+  // Init shared memory on session (stack-based)
+  if (!_cur._asMemories) {
+    _cur._asMemories = _asCreateMemories();
+  }
+  const mem = _cur._asMemories;
+
+  // Assign a turn ID for all steps in this call
+  _cur.turnCounter++;
+  const currentTurnId = _cur.turnCounter;
+
+  const orchestratorLog = [];
+  const subagentSummaries = [];
+  let totalStepsExecuted = 0;
+  let totalSubagents = 0;
+
+  // Helper: build current context from _cur (re-read each time for fresh state)
+  function _buildContext() {
+    const grid = _cur.currentState.grid || [];
+    const avail = _cur.currentState.available_actions || [];
+    const cm = _cur.currentChangeMap || {};
+    let changeMapBlock = '';
+    if (typeof cm === 'object' && cm?.change_map_text) changeMapBlock = cm.change_map_text;
+    else if (typeof cm === 'string' && cm) changeMapBlock = cm;
+    else changeMapBlock = '(no changes)';
+
+    return {
+      game_id: _cur.currentState.game_id || 'unknown',
+      state: _cur.currentState.state || '',
+      step_num: _cur.stepCount || 0,
+      levels_completed: _cur.currentState.levels_completed || 0,
+      win_levels: _cur.currentState.win_levels || 0,
+      grid, avail,
+      actionDesc: avail.map(a => `${a}=${ACTION_NAMES[a] || 'ACTION' + a}`).join(', '),
+      gridText: grid.length ? grid.map((r, i) => `Row ${i}: ${compressRowJS(r)}`).join('\n') : '(no grid)',
+      changeMapBlock,
+    };
+  }
+
+  // Helper: format history
+  function _buildHistoryBlock() {
+    const hist = _cur.moveHistory || [];
+    if (!hist.length) return '(none)';
+    return hist.slice(-15).map(h => {
+      const aname = ACTION_NAMES[h.action] || '?';
+      return `  Step ${h.step || '?'}: ${aname} -> levels=${h.levels || '?'} | ${(h.observation || '').substring(0, 200)}`;
+    }).join('\n');
+  }
+
+  // ── Orchestrator REPL loop ──
+  for (let turn = 1; turn <= orchMaxTurns; turn++) {
+    if (!isActiveFn()) break;
+    // Check terminal
+    if (_cur.currentState.state === 'WIN' || _cur.currentState.state === 'GAME_OVER') break;
+
+    // Update wait label
+    const label = waitEl?.querySelector('.step-label');
+    if (label) {
+      const timer = label.querySelector('.wait-timer');
+      const spinner = label.querySelector('.spinner');
+      label.innerHTML = '';
+      if (spinner) label.appendChild(spinner);
+      label.appendChild(document.createTextNode(`Orchestrator turn ${turn}/${orchMaxTurns}... `));
+      if (timer) label.appendChild(timer);
+    }
+
+    const ctx = _buildContext();
+    const turnVars = {
+      game_id: ctx.game_id, step_num: ctx.step_num, levels_done: ctx.levels_completed,
+      win_levels: ctx.win_levels, state_str: ctx.state, action_desc: ctx.actionDesc,
+      grid_block: ctx.gridText, change_map_block: ctx.changeMapBlock,
+      memories: mem.formatForPrompt(),
+      history_block: _buildHistoryBlock(),
+    };
+
+    const prompt = AS_ORCHESTRATOR_PREMISE + '\n\n' + AS_GAME_REFERENCE + '\n\n' + _asFill(
+      `# Current State
 - Game: {game_id}
 - Step: {step_num}
 - Level: {levels_done} / {win_levels}
@@ -7199,392 +7761,238 @@ const AS_ORCHESTRATOR_TURN = `# Current State
 # Shared Memories
 {memories}
 
-# History (last {history_len} steps)
+# Recent History
 {history_block}
 
-# Instructions
-Decide your next move. You MUST respond with exactly one JSON object:
+Decide your next move. Respond with a JSON object (delegate or think).`, turnVars);
 
-Option A — Spawn a subagent:
-{
-  "command": "spawn",
-  "agent_type": "explorer" or "solver",
-  "task": "description of what the subagent should do",
-  "budget": <max steps for subagent, 1-10>
-}
-
-Option B — Submit action(s) directly (a plan of 1+ actions):
-{
-  "command": "act",
-  "plan": [{"action": <0-7>, "data": {}, "reasoning": "why"}],
-  "observation": "what I see",
-  "reasoning": "why these actions"
-}
-
-Option C — Record a finding and continue:
-{
-  "command": "think",
-  "facts": ["fact1", ...],
-  "hypotheses": ["hypothesis1", ...],
-  "next": "what to do next"
-}
-
-Choose the option that best advances your goal. Early in the game, prefer spawning an explorer.
-When you have a clear plan, use "act" or spawn a solver.`;
-
-const AS_SUBAGENT_SYSTEM = {
-  explorer: `You are an Explorer subagent for an ARC-AGI-3 game.
-Your job: try actions to discover what they do. Report your findings clearly.
-
-You have a limited action budget. Use it wisely — try different actions to
-map out the game mechanics. Focus on discovering:
-- What each action does to the grid
-- Which actions advance the level
-- Any patterns in how the grid changes
-
-You respond in JSON only.`,
-  solver: `You are a Solver subagent for an ARC-AGI-3 game.
-Your job: execute a specific plan to achieve a goal.
-
-Follow the orchestrator's instructions and execute actions toward the goal.
-Report results after each action so the orchestrator can evaluate progress.
-
-You respond in JSON only.`,
-};
-
-const AS_SUBAGENT_TURN = `# Task from Orchestrator
-{task}
-
-# Current State
-- Step: {step_num} (budget remaining: {budget_remaining})
-- Level: {levels_done} / {win_levels}
-- State: {state_str}
-- Available actions: {action_desc}
-
-# Grid
-{grid_block}
-
-# Change from last step
-{change_map_block}
-
-# Shared Memories
-{memories}
-
-# My Previous Actions This Session
-{session_history}
-
-# Instructions
-Choose your next action. Respond with exactly one JSON object:
-
-Option A — Take an action:
-{
-  "command": "act",
-  "action": <action_id 0-7>,
-  "data": {},
-  "reasoning": "why this action"
-}
-
-Option B — Report findings and yield back to orchestrator:
-{
-  "command": "report",
-  "findings": ["finding1", ...],
-  "hypotheses": ["hypothesis1", ...],
-  "summary": "what I learned"
-}
-
-If you've exhausted your budget or have enough findings, use "report".
-Otherwise, take actions to fulfill your task.`;
-
-function _asFill(template, vars) {
-  let s = template;
-  for (const [k, v] of Object.entries(vars)) s = s.replaceAll('{' + k + '}', String(v));
-  return s;
-}
-
-function _asFormatMemories(mem) {
-  const parts = [];
-  if (mem.facts.length) parts.push('## Facts\n' + mem.facts.map((f, i) => `${i + 1}. ${f}`).join('\n'));
-  if (mem.hypotheses.length) parts.push('## Hypotheses\n' + mem.hypotheses.map((h, i) => `${i + 1}. ${h}`).join('\n'));
-  if (mem.observations.length) {
-    const recent = mem.observations.slice(-10);
-    parts.push('## Recent Observations\n' + recent.map(o => `- Step ${o.step}: ${o.text}`).join('\n'));
-  }
-  return parts.length ? parts.join('\n\n') : '(none yet)';
-}
-
-async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, historyForLLM, compactBlock, _snap) {
-  const t0Total = performance.now();
-  const settings = _snap?.scaffolding || getScaffoldingSettings();
-  const orchModel = settings.orchestrator_model || settings.model || model;
-  const orchThinking = settings.orchestrator_thinking_level || 'low';
-  const orchMaxTokens = Math.min(parseInt(settings.orchestrator_max_tokens) || 16384, 65536);
-  const subModel = settings.subagent_model || orchModel;
-  const subThinking = settings.subagent_thinking_level || 'low';
-  const subMaxTokens = Math.min(parseInt(settings.subagent_max_tokens) || 16384, 65536);
-  const maxSubBudget = parseInt(settings.max_subagent_budget) || 5;
-  const orchMaxTurns = parseInt(settings.orchestrator_max_turns) || 5;
-
-  // Init shared memory on session
-  if (!_cur._asState) {
-    _cur._asState = { facts: [], hypotheses: [], observations: [], turn_count: 0 };
-  }
-  const mem = _cur._asState;
-  mem.turn_count++;
-
-  const context = {
-    grid: _cur.currentState.grid || [],
-    available_actions: _cur.currentState.available_actions || [],
-    history: historyForLLM || [],
-    change_map: _cur.currentChangeMap || {},
-    game_id: _cur.currentState.game_id || 'unknown',
-    state: _cur.currentState.state || '',
-    step_num: _cur.stepCount || 0,
-    levels_completed: _cur.currentState.levels_completed || 0,
-    win_levels: _cur.currentState.win_levels || 0,
-  };
-
-  const actionDesc = context.available_actions.map(a => `${a}=${ACTION_NAMES[a] || 'ACTION' + a}`).join(', ');
-  const gridText = context.grid.length ? context.grid.map((r, i) => `Row ${i}: ${compressRowJS(r)}`).join('\n') : '(no grid)';
-
-  let historyBlock = '';
-  if (context.history.length) {
-    const lines = context.history.slice(-15).map(h => {
-      const aname = ACTION_NAMES[h.action] || '?';
-      return `  Step ${h.step || '?'}: ${aname} -> levels=${h.levels || '?'} | ${(h.observation || '').substring(0, 300)}`;
-    });
-    historyBlock = lines.join('\n');
-  }
-
-  const cm = context.change_map;
-  let changeMapBlock = '';
-  if (typeof cm === 'object' && cm?.change_map_text) changeMapBlock = cm.change_map_text;
-  else if (typeof cm === 'string' && cm) changeMapBlock = cm;
-  else changeMapBlock = '(no changes)';
-
-  const orchestratorLog = [];
-  const allPlanSteps = [];
-
-  // Orchestrator REPL loop
-  for (let turn = 1; turn <= orchMaxTurns; turn++) {
-    if (!isActiveFn()) break;
-
-    // Update wait label
-    const label = waitEl?.querySelector('.step-label');
-    if (label) {
-      const timer = label.querySelector('.wait-timer');
-      const spinner = label.querySelector('.spinner');
-      label.innerHTML = '';
-      if (spinner) label.appendChild(spinner);
-      label.appendChild(document.createTextNode(`Orchestrator turn ${turn}/${orchMaxTurns}... `));
-      if (timer) label.appendChild(timer);
-    }
-
-    const turnVars = {
-      game_id: context.game_id, step_num: context.step_num, levels_done: context.levels_completed,
-      win_levels: context.win_levels, state_str: context.state, action_desc: actionDesc,
-      grid_block: gridText, change_map_block: changeMapBlock,
-      memories: _asFormatMemories(mem), history_len: Math.min(context.history.length, 15),
-      history_block: historyBlock || '(none)',
-    };
-
-    const prompt = AS_ORCHESTRATOR_SYSTEM + '\n\n' + _asFill(AS_ORCHESTRATOR_TURN, turnVars);
     const t0 = performance.now();
     let raw;
     try {
       raw = await callLLM([{role: 'system', content: prompt}], orchModel, { maxTokens: orchMaxTokens, thinkingLevel: orchThinking });
     } catch (e) {
       console.error(`[agent_spawn] orchestrator turn ${turn} failed:`, e);
-      orchestratorLog.push({turn, type: 'error', error: e.message});
+      orchestratorLog.push({ turn, type: 'error', error: e.message });
       break;
     }
     const durMs = Math.round(performance.now() - t0);
     const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.command) {
-      orchestratorLog.push({turn, type: 'error', error: 'unparseable', duration_ms: durMs});
+      orchestratorLog.push({ turn, type: 'error', error: 'unparseable', duration_ms: durMs });
       continue;
     }
 
     const command = parsed.command;
 
+    // ── THINK ──
     if (command === 'think') {
-      // Record facts/hypotheses to shared memory
       const facts = parsed.facts || [];
       const hypotheses = parsed.hypotheses || [];
-      for (const f of facts) { if (!mem.facts.includes(f)) mem.facts.push(f); }
-      for (const h of hypotheses) { if (!mem.hypotheses.includes(h)) mem.hypotheses.push(h); }
-      orchestratorLog.push({turn, type: 'think', facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs});
+      for (const f of facts) mem.addFact(f);
+      for (const h of hypotheses) mem.addHypothesis(h);
+      if (parsed.reasoning) mem.add(parsed.reasoning, '', 'orchestrator');
+      orchestratorLog.push({ turn, type: 'think', facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs });
       continue;
+    }
 
-    } else if (command === 'act') {
-      // Direct action(s) — return as plan
-      const planRaw = parsed.plan || [{action: parsed.action || 0, data: parsed.data || {}, reasoning: parsed.reasoning || ''}];
-      const avail = new Set(context.available_actions);
-      const validPlan = [];
-      for (const step of planRaw.slice(0, 15)) {
-        if (step.action !== undefined && avail.has(parseInt(step.action))) {
-          validPlan.push({action: parseInt(step.action), data: step.data || {}, expected: step.reasoning || ''});
-        }
-      }
-      if (!validPlan.length) {
-        orchestratorLog.push({turn, type: 'act_invalid', duration_ms: durMs});
-        continue;
-      }
-
-      orchestratorLog.push({turn, type: 'act', plan_length: validPlan.length, duration_ms: durMs});
-      const totalDur = Math.round(performance.now() - t0Total);
-
-      return {
-        raw, thinking: null,
-        parsed: {
-          observation: parsed.observation || '',
-          reasoning: parsed.reasoning || '',
-          action: validPlan[0].action,
-          data: validPlan[0].data || {},
-          plan: validPlan,
-        },
-        model: orchModel, scaffolding: 'agent_spawn',
-        _clientSide: true,
-        agent_spawn: {
-          turn: mem.turn_count,
-          orchestrator_log: orchestratorLog,
-          memories: { facts: [...mem.facts], hypotheses: [...mem.hypotheses] },
-        },
-        call_duration_ms: totalDur,
-      };
-
-    } else if (command === 'spawn') {
-      // Spawn a subagent — run its loop client-side
-      const agentType = parsed.agent_type === 'solver' ? 'solver' : 'explorer';
+    // ── DELEGATE ──
+    if (command === 'delegate' || command === 'spawn') {
+      const agentType = (['explorer', 'theorist', 'tester', 'solver'].includes(parsed.agent_type))
+        ? parsed.agent_type : 'explorer';
       const task = parsed.task || 'explore the game';
-      const budget = Math.min(parseInt(parsed.budget) || 3, maxSubBudget);
-      const systemPrompt = AS_SUBAGENT_SYSTEM[agentType];
+      const isTheorist = agentType === 'theorist';
+      const budgetLimit = isTheorist ? 0 : Math.min(parseInt(parsed.budget) || 3, maxSubBudget);
+      const budget = _makeBoundedBudget(budgetLimit);
 
-      orchestratorLog.push({turn, type: 'spawn', agent_type: agentType, task: task.substring(0, 80), budget, duration_ms: durMs});
+      orchestratorLog.push({ turn, type: 'delegate', agent_type: agentType, task: task.substring(0, 100), budget: budgetLimit, duration_ms: durMs });
+      totalSubagents++;
 
-      // Update wait label for subagent
+      // Update wait label
       if (label) {
         const timer = label.querySelector('.wait-timer');
         const spinner = label.querySelector('.spinner');
         label.innerHTML = '';
         if (spinner) label.appendChild(spinner);
-        label.appendChild(document.createTextNode(`[${agentType}] running (budget ${budget})... `));
+        label.appendChild(document.createTextNode(`[${agentType}] ${task.substring(0, 40)}... `));
         if (timer) label.appendChild(timer);
       }
 
-      // Subagent loop — each iteration produces one plan step
+      // ── SUBAGENT REACTIVE LOOP ──
       const subActions = [];
-      let subGrid = gridText;
-      let subChangeMap = changeMapBlock;
-      for (let si = 0; si < budget + 1; si++) {
+      let toolResults = '';
+      const maxIter = isTheorist ? 3 : (budgetLimit + 3); // theorist gets 3 iterations for frame_tool + report
+      let subTerminal = null;
+
+      for (let si = 0; si < maxIter; si++) {
         if (!isActiveFn()) break;
+        if (subTerminal) break;
+
+        // Re-read current state from _cur (fresh after each _asExecuteOneStep)
+        const subCtx = _buildContext();
 
         const subVars = {
-          task, step_num: context.step_num + subActions.length,
-          budget_remaining: budget - subActions.length,
-          levels_done: context.levels_completed, win_levels: context.win_levels,
-          state_str: context.state, action_desc: actionDesc,
-          grid_block: subGrid, change_map_block: subChangeMap,
-          memories: _asFormatMemories(mem),
+          task,
+          step_num: subCtx.step_num,
+          budget_remaining: budget.remaining,
+          budget_total: budget.total,
+          levels_done: subCtx.levels_completed,
+          win_levels: subCtx.win_levels,
+          state_str: subCtx.state,
+          action_desc: subCtx.actionDesc,
+          grid_block: subCtx.gridText,
+          change_map_block: subCtx.changeMapBlock,
+          memories: mem.formatForPrompt(),
           session_history: subActions.length
-            ? subActions.map((a, i) => `  ${i + 1}. ${ACTION_NAMES[a.action] || '?'}: ${a.reasoning || ''}`).join('\n')
+            ? subActions.map((a, i) => `  ${i + 1}. ${ACTION_NAMES[a.action] || '?'}: ${a.reasoning || ''} → ${a.result || ''}`).join('\n')
             : '(none yet)',
+          tool_results: toolResults ? `\n# Frame Tool Results\n${toolResults}\n` : '',
         };
 
-        const subPrompt = systemPrompt + '\n\n' + _asFill(AS_SUBAGENT_TURN, subVars);
+        const systemPrompt = AS_AGENT_SYSTEM[agentType] || AS_AGENT_SYSTEM.explorer;
+        const subPrompt = systemPrompt + '\n\n' + AS_GAME_REFERENCE + '\n\n' + _asFill(AS_AGENT_TURN, subVars);
+
         let subRaw;
         try {
           subRaw = await callLLM([{role: 'system', content: subPrompt}], subModel, { maxTokens: subMaxTokens, thinkingLevel: subThinking });
         } catch (e) {
-          console.error(`[agent_spawn] ${agentType} step ${si} failed:`, e);
+          console.error(`[agent_spawn] ${agentType} iter ${si} failed:`, e);
           break;
         }
 
         const subParsed = _extractJsonFromText(subRaw) || (() => { try { return JSON.parse(subRaw); } catch { return null; } })();
         if (!subParsed || !subParsed.command) break;
 
+        // ── REPORT ──
         if (subParsed.command === 'report') {
-          // Subagent reports findings and yields
           const findings = subParsed.findings || [];
           const hypotheses = subParsed.hypotheses || [];
-          for (const f of findings) { if (!mem.facts.includes(f)) mem.facts.push(f); }
-          for (const h of hypotheses) { if (!mem.hypotheses.includes(h)) mem.hypotheses.push(h); }
-          if (subParsed.summary) {
-            mem.observations.push({step: context.step_num, text: `[${agentType}] ${subParsed.summary}`});
-          }
+          for (const f of findings) mem.addFact(f);
+          for (const h of hypotheses) mem.addHypothesis(h);
+          const summary = subParsed.summary || findings.join('; ');
+          mem.add(summary, findings.join('\n'), agentType);
+          subagentSummaries.push({ type: agentType, task: task.substring(0, 60), steps: subActions.length, summary });
           break;
         }
 
+        // ── FRAME_TOOL ──
+        if (subParsed.command === 'frame_tool') {
+          const toolName = subParsed.tool || 'render_grid';
+          const toolArgs = subParsed.args || {};
+          const prevGrid = _cur.previousGrid || null;
+          const result = _asDispatchFrameTool(toolName, subCtx.grid, prevGrid, toolArgs);
+          toolResults = `Tool: ${toolName}\n${result}`;
+          continue; // Don't count as action, loop again
+        }
+
+        // ── ACT ──
         if (subParsed.command === 'act') {
+          // Theorists cannot act
+          if (isTheorist) {
+            toolResults = '(ERROR: theorists cannot take game actions — use frame_tool or report)';
+            continue;
+          }
+
           const actionId = parseInt(subParsed.action);
-          const avail = new Set(context.available_actions);
-          if (actionId === undefined || !avail.has(actionId)) break;
+          const avail = new Set(subCtx.avail);
+          if (isNaN(actionId) || !avail.has(actionId)) {
+            toolResults = `(ERROR: invalid action ${subParsed.action} — available: ${subCtx.actionDesc})`;
+            continue;
+          }
+
+          // Check budget
+          if (!budget.use(actionId)) {
+            toolResults = '(Budget exhausted — use "report" to yield findings)';
+            continue;
+          }
+
+          // Execute the step and SEE the result
+          const stepResult = await _asExecuteOneStep(
+            actionId, subParsed.data || {}, subParsed.reasoning || '', agentType, _cur, isActiveFn
+          );
+
+          if (stepResult.error) {
+            toolResults = `(Action ${actionId} failed — game error)`;
+            continue;
+          }
+
+          totalStepsExecuted++;
+
+          // Build observation for the subagent
+          const changeSummary = _asChangeSummary(stepResult.prevGrid, stepResult.newGrid);
+          const actionName = ACTION_NAMES[actionId] || `ACTION${actionId}`;
           subActions.push({
             action: actionId,
             data: subParsed.data || {},
-            expected: `[${agentType}] ${subParsed.reasoning || ''}`,
             reasoning: subParsed.reasoning || '',
+            result: `${changeSummary}, levels=${stepResult.data.levels_completed}`,
           });
-          if (subActions.length >= budget) break;
+
+          // Clear tool results, the new state will be in the next prompt
+          toolResults = `Last action: ${actionName} → ${changeSummary}`;
+
+          // Check terminal
+          if (stepResult.terminal) {
+            subTerminal = stepResult.terminal;
+            mem.add(`Game ${stepResult.terminal} after ${actionName}`, '', agentType);
+            break;
+          }
+
+          // Check budget exhaustion
+          if (budget.exhausted()) {
+            toolResults += '\n(Budget exhausted — next response should be "report")';
+          }
+
+          continue;
         }
       }
 
-      // Convert subagent actions into plan steps
-      if (subActions.length > 0) {
-        for (const sa of subActions) allPlanSteps.push(sa);
+      // If subagent didn't report, auto-summarize
+      if (!subagentSummaries.find(s => s.type === agentType && s.task === task.substring(0, 60))) {
+        const autoSummary = subActions.length
+          ? `Executed ${subActions.length} action(s): ${subActions.map(a => ACTION_NAMES[a.action] || '?').join(', ')}`
+          : (isTheorist ? 'Analysis complete' : 'No actions taken');
+        mem.add(autoSummary, '', agentType);
+        subagentSummaries.push({ type: agentType, task: task.substring(0, 60), steps: subActions.length, summary: autoSummary });
       }
-      // Continue orchestrator loop — it may spawn more subagents or commit
+
+      // If terminal, stop orchestrator loop
+      if (subTerminal) {
+        if (subTerminal === 'WIN' || subTerminal === 'GAME_OVER') {
+          checkSessionEndAndUpload();
+        }
+        break;
+      }
+
+      continue; // Back to orchestrator loop
     }
+
+    // Unknown command — treat as think
+    orchestratorLog.push({ turn, type: 'unknown', command, duration_ms: durMs });
   }
 
-  // Return collected plan steps (or fallback)
-  if (allPlanSteps.length > 0) {
-    const totalDur = Math.round(performance.now() - t0Total);
-    return {
-      raw: '', thinking: null,
-      parsed: {
-        observation: `Agent spawn completed — ${allPlanSteps.length} action(s) from subagents`,
-        reasoning: orchestratorLog.map(l => `Turn ${l.turn}: ${l.type}`).join(', '),
-        action: allPlanSteps[0].action,
-        data: allPlanSteps[0].data || {},
-        plan: allPlanSteps,
-      },
-      model: orchModel, scaffolding: 'agent_spawn',
-      _clientSide: true,
-      agent_spawn: {
-        turn: mem.turn_count,
-        orchestrator_log: orchestratorLog,
-        memories: { facts: [...mem.facts], hypotheses: [...mem.hypotheses] },
-      },
-      call_duration_ms: totalDur,
-    };
-  }
-
-  // Fallback: exploratory plan
-  const exploratory = context.available_actions.filter(a => a !== 0);
-  const fallbackPlan = [];
-  let fbIdx = 0;
-  while (fallbackPlan.length < 3 && exploratory.length) {
-    fallbackPlan.push({action: exploratory[fbIdx % exploratory.length], data: {}, expected: 'explore'});
-    fbIdx++;
-  }
+  // ── Return ──
+  // Steps are already executed, return empty plan
   const totalDur = Math.round(performance.now() - t0Total);
 
   return {
     raw: '', thinking: null,
     parsed: {
-      observation: 'Orchestrator could not produce a plan',
-      reasoning: 'Max turns reached or errors occurred, falling back to exploration',
-      action: fallbackPlan.length ? fallbackPlan[0].action : 0,
-      data: {},
-      plan: fallbackPlan,
+      observation: `Agent Spawn — ${totalSubagents} subagent(s), ${totalStepsExecuted} step(s) executed`,
+      reasoning: orchestratorLog.map(l => `Turn ${l.turn}: ${l.type}${l.agent_type ? ' (' + l.agent_type + ')' : ''}`).join(', '),
+      action: 0, data: {},
+      plan: [], // Empty — steps already executed via _asExecuteOneStep
     },
     model: orchModel, scaffolding: 'agent_spawn',
-    _clientSide: true, _fallbackAction: true,
+    _clientSide: true,
+    _alreadyExecuted: true, // Signal to executePlan: no-op
     agent_spawn: {
-      turn: mem.turn_count,
+      turn: orchestratorLog.length,
       orchestrator_log: orchestratorLog,
-      memories: { facts: [...mem.facts], hypotheses: [...mem.hypotheses] },
+      subagent_summaries: subagentSummaries,
+      total_steps: totalStepsExecuted,
+      total_subagents: totalSubagents,
+      memories: { facts: [...mem.facts], hypotheses: [...mem.hypotheses], stack: mem.stack.slice(-10) },
     },
     call_duration_ms: totalDur,
   };

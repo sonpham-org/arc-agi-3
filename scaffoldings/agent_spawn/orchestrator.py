@@ -19,10 +19,7 @@ from scaffoldings.agent_spawn.tools import (
     format_grid,
     format_change_map,
     format_history,
-    validate_action,
-    make_game_action,
 )
-from scaffoldings.agent_spawn.subagent import run_subagent
 
 
 def orchestrator_decide(
@@ -39,6 +36,7 @@ def orchestrator_decide(
     """One orchestrator turn: decide what to do next.
 
     Returns parsed JSON decision dict with 'command' key.
+    Only two valid commands: 'delegate' and 'think'.
     """
     model = effective_model(cfg, "planner")
     grid = frame.frame[-1].tolist() if frame.frame else []
@@ -81,25 +79,39 @@ def orchestrator_decide(
 
     if result.error or not result.text:
         print(f"    [orchestrator] LLM error: {result.error}")
-        # Fallback: try first available action
-        fallback_action = frame.available_actions[0] if frame.available_actions else 1
+        # Fallback: think about what to explore rather than acting directly
         return {
-            "command": "act",
-            "action": fallback_action,
-            "data": {},
-            "reasoning": "LLM error fallback",
+            "command": "think",
+            "facts": [],
+            "hypotheses": [],
+            "next": "LLM error — will retry on next turn",
             **meta,
         }
 
     parsed = _parse_json(result.text)
     if not parsed:
-        print(f"    [orchestrator] failed to parse, falling back")
-        fallback_action = frame.available_actions[0] if frame.available_actions else 1
+        print(f"    [orchestrator] failed to parse, falling back to think")
         return {
-            "command": "act",
-            "action": fallback_action,
-            "data": {},
-            "reasoning": "parse error fallback",
+            "command": "think",
+            "facts": [],
+            "hypotheses": [],
+            "next": "Parse error — will retry on next turn",
+            **meta,
+        }
+
+    # Normalize: treat "spawn" as "delegate" for backwards compatibility
+    if parsed.get("command") == "spawn":
+        parsed["command"] = "delegate"
+
+    # If LLM tried to use "act", convert to a think — orchestrator cannot act
+    if parsed.get("command") == "act":
+        print(f"    [orchestrator] WARNING: LLM tried 'act', converting to 'think'")
+        return {
+            "command": "think",
+            "facts": [],
+            "hypotheses": [],
+            "next": f"Attempted direct action (not allowed). Will delegate instead. "
+                    f"Original reasoning: {parsed.get('reasoning', 'none')}",
             **meta,
         }
 

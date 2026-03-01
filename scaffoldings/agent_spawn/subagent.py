@@ -1,4 +1,4 @@
-"""SubAgent REPL loop — explorer and solver agents with bounded action budgets."""
+"""SubAgent REPL loop — explorer, theorist, tester, and solver agents with bounded action budgets."""
 
 import json
 
@@ -15,6 +15,8 @@ from db import _log_llm_call
 from scaffoldings.agent_spawn.memories import SharedMemories
 from scaffoldings.agent_spawn.prompts import (
     EXPLORER_SYSTEM,
+    THEORIST_SYSTEM,
+    TESTER_SYSTEM,
     SOLVER_SYSTEM,
     SUBAGENT_TURN_TEMPLATE,
     SUBAGENT_SUMMARY_TEMPLATE,
@@ -24,11 +26,14 @@ from scaffoldings.agent_spawn.tools import (
     format_change_map,
     validate_action,
     make_game_action,
+    as_dispatch_frame_tool,
 )
 
 
 SYSTEM_PROMPTS = {
     "explorer": EXPLORER_SYSTEM,
+    "theorist": THEORIST_SYSTEM,
+    "tester": TESTER_SYSTEM,
     "solver": SOLVER_SYSTEM,
 }
 
@@ -66,10 +71,12 @@ def run_subagent(
         }
     """
     budget = min(budget, 10)  # hard cap
+    is_theorist = (agent_type == "theorist")
     model = effective_model(cfg, "executor")
     system_prompt = SYSTEM_PROMPTS.get(agent_type, EXPLORER_SYSTEM)
 
     session_actions = []
+    tool_results = []  # accumulates frame tool results across iterations
     steps_used = 0
     total_input_tokens = 0
     total_output_tokens = 0
@@ -83,17 +90,32 @@ def run_subagent(
     grid = frame.frame[-1].tolist() if frame.frame else []
     prev_grid = None
 
+    # For theorists, effective budget is 0 (no game actions), but allow LLM iterations
+    max_iterations = (budget + 5) if is_theorist else (budget + 2)
+
     print(f"      [{agent_type}] starting — task: {task[:60]}, budget: {budget}")
 
-    for turn in range(budget + 2):  # +2 for possible report-only turns
-        if steps_used >= budget or step_num >= max_steps:
+    for turn in range(max_iterations):
+        # For non-theorists, stop when action budget or global step limit is reached
+        if not is_theorist and (steps_used >= budget or step_num >= max_steps):
             break
+        # For theorists, limit total LLM calls to prevent infinite loops
+        if is_theorist and llm_calls >= budget + 3:
+            break
+
+        # Build tool results text
+        tool_results_text = "(none)"
+        if tool_results:
+            tool_results_text = "\n".join(
+                f"[{i+1}] {tr['tool']}: {tr['result'][:300]}"
+                for i, tr in enumerate(tool_results[-5:])  # last 5 tool results
+            )
 
         # Build prompt
         prompt = system_prompt + "\n\n" + SUBAGENT_TURN_TEMPLATE.format(
             task=task,
             step_num=step_num,
-            budget_remaining=budget - steps_used,
+            budget_remaining=0 if is_theorist else (budget - steps_used),
             levels_done=frame.levels_completed,
             win_levels=frame.win_levels,
             state_str=frame.state.value if hasattr(frame.state, "value") else str(frame.state),
@@ -102,6 +124,7 @@ def run_subagent(
             change_map=format_change_map(prev_grid, grid),
             memories=memories.format_for_prompt(max_observations=10),
             session_history=_format_session_actions(session_actions),
+            tool_results=tool_results_text,
         )
 
         # Call LLM
@@ -135,7 +158,7 @@ def run_subagent(
 
         command = parsed.get("command", "act")
 
-        # Handle report command — yield back to orchestrator
+        # ── Handle report command — yield back to orchestrator ────────
         if command == "report":
             findings = parsed.get("findings", [])
             hypotheses = parsed.get("hypotheses", [])
@@ -147,8 +170,30 @@ def run_subagent(
             print(f"      [{agent_type}] reporting: {report[:80]}")
             break
 
-        # Handle act command
+        # ── Handle frame_tool command — FREE, no budget cost ──────────
+        if command == "frame_tool":
+            tool_name = parsed.get("tool", "")
+            tool_args = parsed.get("args", {})
+            print(f"      [{agent_type}] frame_tool: {tool_name}")
+            tool_result = as_dispatch_frame_tool(tool_name, grid, prev_grid, tool_args)
+            tool_results.append({
+                "tool": tool_name,
+                "result": tool_result,
+            })
+            # Continue loop — frame tools don't consume budget or end the turn
+            continue
+
+        # ── Handle act command ────────────────────────────────────────
         if command == "act":
+            # Theorists cannot act — treat as error and continue
+            if is_theorist:
+                print(f"      [{agent_type}] ERROR: theorists cannot use 'act', ignoring")
+                tool_results.append({
+                    "tool": "ERROR",
+                    "result": "Theorists cannot use the 'act' command. Use 'frame_tool' or 'report' instead.",
+                })
+                continue
+
             action_id = parsed.get("action", 1)
             action_data = parsed.get("data", {})
             reasoning = parsed.get("reasoning", "")
@@ -176,7 +221,7 @@ def run_subagent(
             state_str = frame.state.value if hasattr(frame.state, "value") else str(frame.state)
 
             # Record observation
-            observation = f"{aname}{coord_str} → state={state_str}"
+            observation = f"{aname}{coord_str} -> state={state_str}"
             memories.add_observation(step_num, action_id, observation, prev_grid, new_grid)
             memories.log_action(step_num, action_id, action_data, agent_type, reasoning)
 
@@ -235,6 +280,13 @@ def run_subagent(
             f"Terminal: {terminal}" if terminal else "Budget exhausted."
         )
 
+    # Push report onto memory stack
+    memories.add_to_stack(
+        summary=report[:200],
+        details="; ".join(findings[:3]) if findings else "",
+        agent_type=agent_type,
+    )
+
     print(f"      [{agent_type}] done — {steps_used} steps, {llm_calls} calls")
 
     return {
@@ -260,5 +312,5 @@ def _format_session_actions(actions: list) -> str:
     lines = []
     for a in actions:
         aname = ACTION_NAMES.get(a["action"], "?")
-        lines.append(f"  Step {a['step']}: {aname} — {a['reasoning'][:60]} → {a['state']}")
+        lines.append(f"  Step {a['step']}: {aname} — {a['reasoning'][:60]} -> {a['state']}")
     return "\n".join(lines)
