@@ -2054,6 +2054,37 @@ def reset_game():
     return jsonify(state)
 
 
+@app.route("/api/llm/cf-proxy", methods=["POST"])
+@bot_protection
+@turnstile_required
+def cf_proxy():
+    """Minimal CORS proxy for Cloudflare Workers AI (browser can't call directly)."""
+    import httpx as _hx
+    body = request.get_json(force=True) or {}
+    api_key = body.get("api_key", "")
+    account_id = body.get("account_id", "")
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    max_tokens = min(int(body.get("max_tokens", 16384)), 65536)
+    if not api_key or not account_id or not model:
+        return jsonify({"error": "api_key, account_id, and model are required"}), 400
+    try:
+        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+        resp = _hx.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"messages": messages, "temperature": 0.3, "max_tokens": max_tokens},
+            timeout=90.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        result = data.get("result", {})
+        text = result.get("response", "") if isinstance(result, dict) else str(result)
+        return jsonify({"result": text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/llm/models")
 @bot_protection
 @turnstile_required

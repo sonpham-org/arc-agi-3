@@ -978,19 +978,7 @@ const SCAFFOLDING_SCHEMAS = {
       {
         id: 'secKeys', label: 'Model Keys', open: true,
         customHtml: function() {
-          let h = '<div id="keysEmptyHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
-          h += '<div id="byokPrompt" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model key</div>';
-          h += '<input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="compactByokPrompt" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Compact model key</div>';
-          h += '<input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="interruptByokPrompt" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Interrupt model key</div>';
-          h += '<input type="password" class="text-input" id="interruptByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          let h = '<div id="byokKeysContainer"></div>';
           if (FEATURES.copilot) {
             h += '<div id="copilotNotAuth">';
             h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">GitHub Copilot</div>';
@@ -1040,19 +1028,7 @@ const SCAFFOLDING_SCHEMAS = {
       {
         id: 'secKeys', label: 'Model Keys', open: true,
         customHtml: function() {
-          let h = '<div id="keysEmptyHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
-          h += '<div id="byokPrompt" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Reasoning model key</div>';
-          h += '<input type="password" class="text-input" id="byokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="compactByokPrompt" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Compact model key</div>';
-          h += '<input type="password" class="text-input" id="compactByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="interruptByokPrompt" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Interrupt model key</div>';
-          h += '<input type="password" class="text-input" id="interruptByokKeyInline" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
+          let h = '<div id="byokKeysContainer"></div>';
           if (FEATURES.copilot) {
             h += '<div id="copilotNotAuth">';
             h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">GitHub Copilot</div>';
@@ -1148,19 +1124,8 @@ const SCAFFOLDING_SCHEMAS = {
         }]
       },
       {
-        id: 'sf_rlm_secKeys', label: 'Model Keys', open: true,
-        customHtml: function() {
-          let h = '<div id="sf_rlm_keysHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
-          h += '<div id="sf_rlm_rootByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Root model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_rlm_rootByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="sf_rlm_subByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Sub model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_rlm_subByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          return h;
-        }
+        id: 'secKeys', label: 'Model Keys', open: true,
+        customHtml: function() { return '<div id="byokKeysContainer"></div>'; }
       }
     ]
   },
@@ -1259,23 +1224,8 @@ const SCAFFOLDING_SCHEMAS = {
         }]
       },
       {
-        id: 'sf_ts_secKeys', label: 'Model Keys', open: true,
-        customHtml: function() {
-          let h = '<div id="sf_ts_keysHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
-          h += '<div id="sf_ts_plannerByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Planner model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_ts_plannerByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="sf_ts_monitorByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Monitor model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_ts_monitorByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="sf_ts_wmByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">World model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_ts_wmByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          return h;
-        }
+        id: 'secKeys', label: 'Model Keys', open: true,
+        customHtml: function() { return '<div id="byokKeysContainer"></div>'; }
       }
     ]
   },
@@ -1353,19 +1303,8 @@ const SCAFFOLDING_SCHEMAS = {
         }]
       },
       {
-        id: 'sf_2s_secKeys', label: 'Model Keys', open: true,
-        customHtml: function() {
-          let h = '<div id="sf_2s_keysHint" style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
-          h += '<div id="sf_2s_plannerByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Planner model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_2s_plannerByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          h += '<div id="sf_2s_monitorByokPrompt" class="scaffold-byok" style="display:none;margin-bottom:8px;">';
-          h += '<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Monitor model key</div>';
-          h += '<input type="password" class="text-input scaffold-byok-key" id="sf_2s_monitorByokKey" placeholder="Paste API key here..." style="margin-bottom:4px;">';
-          h += '<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only \u2014 never sent to our server.</div></div>';
-          return h;
-        }
+        id: 'secKeys', label: 'Model Keys', open: true,
+        customHtml: function() { return '<div id="byokKeysContainer"></div>'; }
       }
     ]
   }
@@ -1718,9 +1657,7 @@ function attachSettingsListeners() {
   if (modelSel) {
     modelSel.addEventListener('change', function() {
       updateModelCaps();
-      updateByokPrompt();
-      updateCompactByokPrompt();
-      updateInterruptByokPrompt();
+      updateAllByokKeys();
       const model = this.value;
       const isPuter = modelsData.some(m => m.name === model && m.provider === 'puter');
       if (isPuter) loadPuterJS();
@@ -1731,7 +1668,7 @@ function attachSettingsListeners() {
   const compactSel = document.getElementById('compactModelSelectTop');
   if (compactSel) {
     compactSel.addEventListener('change', function() {
-      updateCompactByokPrompt();
+      updateAllByokKeys();
     });
   }
 
@@ -1739,7 +1676,7 @@ function attachSettingsListeners() {
   const interruptSel = document.getElementById('interruptModelSelect');
   if (interruptSel) {
     interruptSel.addEventListener('change', function() {
-      updateInterruptByokPrompt();
+      updateAllByokKeys();
     });
   }
 
@@ -1750,7 +1687,7 @@ function attachSettingsListeners() {
     'sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect'
   ]) {
     const el = document.getElementById(selId);
-    if (el) el.addEventListener('change', updateAllScaffoldByok);
+    if (el) el.addEventListener('change', updateAllByokKeys);
   }
 
   // toolsMode radio — Pyodide download prompt
@@ -2862,55 +2799,87 @@ const PROVIDER_LABELS = {
   local: 'Local Model', ollama: 'Ollama',
 };
 
-function updateKeysEmptyHint() {
-  const hint = document.getElementById('keysEmptyHint');
-  if (!hint) return;
-  const anyVisible = ['byokPrompt', 'compactByokPrompt', 'interruptByokPrompt'].some(
-    id => document.getElementById(id)?.style.display !== 'none'
-  );
-  hint.style.display = anyVisible ? 'none' : '';
-}
+// ── Centralized BYOK Key Management ──
+// Scans ALL model selects, collects unique providers, renders key inputs dynamically.
+// Called on any model select change. Future-proof: no per-scaffold wiring needed.
 
-function updateByokPrompt() {
-  const prompt = document.getElementById('byokPrompt');
-  const keyInput = document.getElementById('byokKeyInline');
-  const model = getSelectedModel();
-  const info = getModelInfo(model);
-  if (!info) { prompt.style.display = 'none'; return; }
-  // If Copilot model selected, auto-open Model Keys to show GitHub login
-  if (info.provider === 'copilot') {
-    prompt.style.display = 'none';
-    const sec = document.getElementById('secKeys');
-    if (sec && !sec.classList.contains('open')) sec.classList.add('open');
-    updateKeysEmptyHint();
+const _BYOK_FREE_PROVIDERS = new Set(['puter', 'copilot', 'ollama', 'local']);
+const _BYOK_PROVIDER_EXTRA_FIELDS = {
+  cloudflare: [{ key: 'byok_cf_account_id', label: 'Cloudflare Account ID', placeholder: 'Paste Account ID here...', hint: 'Found in Cloudflare dashboard → Workers & Pages.', type: 'text' }],
+};
+
+function updateAllByokKeys() {
+  const container = document.getElementById('byokKeysContainer');
+  if (!container) return;
+
+  // 1. Collect all model select IDs (main + compact + interrupt + all scaffold sub-selects)
+  const allSelectIds = ['modelSelect', 'compactModelSelectTop', 'interruptModelSelect',
+    'sf_rlm_modelSelect', 'sf_rlm_subModelSelect',
+    'sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect',
+    'sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect'];
+
+  // 2. Collect unique providers that need keys
+  const neededProviders = new Set();
+  for (const selId of allSelectIds) {
+    const val = document.getElementById(selId)?.value;
+    if (!val || val === 'auto' || val === 'auto-fastest' || val === 'same') continue;
+    const info = getModelInfo(val);
+    if (info && !_BYOK_FREE_PROVIDERS.has(info.provider)) {
+      neededProviders.add(info.provider);
+    }
+  }
+
+  // 3. Build HTML for each provider (preserving existing input values)
+  // Save current values before rebuilding
+  const savedValues = {};
+  container.querySelectorAll('input[data-byok-provider]').forEach(inp => {
+    savedValues[inp.dataset.byokProvider] = inp.value;
+  });
+  container.querySelectorAll('input[data-byok-extra]').forEach(inp => {
+    savedValues[inp.dataset.byokExtra] = inp.value;
+  });
+
+  if (neededProviders.size === 0) {
+    container.innerHTML = '<div style="padding:8px 0;font-size:11px;color:var(--text-dim);font-style:italic;">Required keys will appear when models are selected.</div>';
     return;
   }
-  // All providers except puter/copilot/ollama/local need BYOK keys (all LLM calls are client-side)
-  const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = !freeProviders.includes(info.provider);
-  if (needsKey) {
-    const label = PROVIDER_LABELS[info.provider] || info.provider;
-    keyInput.placeholder = `Paste API key for ${label} here...`;
-    // Restore saved key for this provider
-    const saved = localStorage.getItem(`byok_key_${info.provider}`) || '';
-    keyInput.value = saved;
-    keyInput.dataset.provider = info.provider;
-    prompt.style.display = 'block';
-    // Auto-open Model Keys section
-    const sec = document.getElementById('secKeys');
-    if (sec && !sec.classList.contains('open')) sec.classList.add('open');
-  } else {
-    prompt.style.display = 'none';
+
+  let html = '';
+  for (const provider of neededProviders) {
+    const label = PROVIDER_LABELS[provider] || provider;
+    const saved = savedValues[provider] || localStorage.getItem(`byok_key_${provider}`) || '';
+    html += `<div style="margin-bottom:8px;">`;
+    html += `<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">${label} API Key</div>`;
+    html += `<input type="password" class="text-input" data-byok-provider="${provider}" value="${saved.replace(/"/g, '&quot;')}" placeholder="Paste API key for ${label} here..." style="margin-bottom:4px;">`;
+    // Extra fields (e.g. Cloudflare Account ID)
+    const extras = _BYOK_PROVIDER_EXTRA_FIELDS[provider] || [];
+    for (const extra of extras) {
+      const extraSaved = savedValues[extra.key] || localStorage.getItem(extra.key) || '';
+      html += `<div style="font-size:10px;color:var(--dim);margin-bottom:3px;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">${extra.label}</div>`;
+      html += `<input type="${extra.type || 'text'}" class="text-input" data-byok-extra="${extra.key}" value="${extraSaved.replace(/"/g, '&quot;')}" placeholder="${extra.placeholder}" style="margin-bottom:2px;">`;
+      if (extra.hint) html += `<div style="font-size:9px;color:var(--dim);font-style:italic;">${extra.hint}</div>`;
+    }
+    html += `<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div></div>`;
   }
-  updateKeysEmptyHint();
+  container.innerHTML = html;
+
+  // Auto-open Model Keys section
+  const sec = document.getElementById('secKeys');
+  if (sec && !sec.classList.contains('open')) sec.classList.add('open');
 }
 
-// Auto-save BYOK key on input
+// Auto-save BYOK keys on input (single delegated listener)
 document.addEventListener('input', (e) => {
-  if (e.target.id !== 'byokKeyInline') return;
-  const provider = e.target.dataset.provider;
-  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
+  if (e.target.dataset.byokProvider) {
+    localStorage.setItem(`byok_key_${e.target.dataset.byokProvider}`, e.target.value.trim());
+    return;
+  }
+  if (e.target.dataset.byokExtra) {
+    localStorage.setItem(e.target.dataset.byokExtra, e.target.value.trim());
+    return;
+  }
 });
+
 
 function getModelInfo(key) {
   return modelsData.find(m => m.name === key);
@@ -2948,171 +2917,7 @@ function updateModelCaps() {
 
 // Moved to attachSettingsListeners() — called after renderScaffoldingSettings()
 
-function updateCompactByokPrompt() {
-  const prompt = document.getElementById('compactByokPrompt');
-  const keyInput = document.getElementById('compactByokKeyInline');
-  const compactVal = document.getElementById('compactModelSelectTop').value;
-
-  // Auto/same modes don't need a separate key
-  if (!compactVal || compactVal === 'auto' || compactVal === 'auto-fastest' || compactVal === 'same') {
-    prompt.style.display = 'none';
-    return;
-  }
-
-  const info = getModelInfo(compactVal);
-  if (!info || info.provider === 'puter' || info.provider === 'copilot') {
-    prompt.style.display = 'none';
-    return;
-  }
-
-  // Check if compact model needs a key
-  const freeProviders2 = ['puter', 'copilot', 'ollama', 'local'];
-  const compactNeedsKey = !freeProviders2.includes(info.provider);
-  if (compactNeedsKey) {
-    const reasoningInfo = getModelInfo(getSelectedModel());
-    const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
-    const reasoningKey = sameProvider ? (localStorage.getItem(`byok_key_${info.provider}`) || '') : '';
-
-    if (sameProvider && reasoningKey) {
-      // Same provider as reasoning — show disabled field with the key
-      const label = PROVIDER_LABELS[info.provider] || info.provider;
-      keyInput.placeholder = `Using ${label} key from reasoning model`;
-      keyInput.value = reasoningKey;
-      keyInput.disabled = true;
-      keyInput.style.opacity = '0.6';
-      keyInput.dataset.provider = '';
-      prompt.style.display = 'block';
-    } else {
-      // Different provider — show editable field
-      const label = PROVIDER_LABELS[info.provider] || info.provider;
-      keyInput.placeholder = `Paste API key for ${label} here...`;
-      const saved = localStorage.getItem(`byok_key_${info.provider}`) || '';
-      keyInput.value = saved;
-      keyInput.disabled = false;
-      keyInput.style.opacity = '1';
-      keyInput.dataset.provider = info.provider;
-      prompt.style.display = 'block';
-    }
-  } else {
-    prompt.style.display = 'none';
-  }
-  updateKeysEmptyHint();
-}
-
-// Auto-save compact BYOK key on input
-document.addEventListener('input', (e) => {
-  if (e.target.id !== 'compactByokKeyInline') return;
-  const provider = e.target.dataset.provider;
-  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
-});
-
-// Moved to attachSettingsListeners() — called after renderScaffoldingSettings()
-
-function updateInterruptByokPrompt() {
-  const prompt = document.getElementById('interruptByokPrompt');
-  const keyInput = document.getElementById('interruptByokKeyInline');
-  const val = document.getElementById('interruptModelSelect').value;
-
-  if (!val || val === 'auto' || val === 'auto-fastest' || val === 'same') {
-    prompt.style.display = 'none';
-    return;
-  }
-
-  const info = getModelInfo(val);
-  if (!info || info.provider === 'puter' || info.provider === 'copilot') {
-    prompt.style.display = 'none';
-    return;
-  }
-
-  const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = !freeProviders.includes(info.provider);
-  if (needsKey) {
-    const reasoningInfo = getModelInfo(getSelectedModel());
-    const sameProvider = reasoningInfo && reasoningInfo.provider === info.provider;
-    const reasoningKey = sameProvider ? (localStorage.getItem(`byok_key_${info.provider}`) || '') : '';
-
-    if (sameProvider && reasoningKey) {
-      const label = PROVIDER_LABELS[info.provider] || info.provider;
-      keyInput.placeholder = `Using ${label} key from reasoning model`;
-      keyInput.value = reasoningKey;
-      keyInput.disabled = true;
-      keyInput.style.opacity = '0.6';
-      keyInput.dataset.provider = '';
-      prompt.style.display = 'block';
-    } else {
-      const label = PROVIDER_LABELS[info.provider] || info.provider;
-      keyInput.placeholder = `Paste API key for ${label} here...`;
-      const saved = localStorage.getItem(`byok_key_${info.provider}`) || '';
-      keyInput.value = saved;
-      keyInput.disabled = false;
-      keyInput.style.opacity = '1';
-      keyInput.dataset.provider = info.provider;
-      prompt.style.display = 'block';
-    }
-    const sec = document.getElementById('secKeys');
-    if (sec && !sec.classList.contains('open')) sec.classList.add('open');
-  } else {
-    prompt.style.display = 'none';
-  }
-  updateKeysEmptyHint();
-}
-
-// Auto-save interrupt BYOK key on input
-document.addEventListener('input', (e) => {
-  if (e.target.id !== 'interruptByokKeyInline') return;
-  const provider = e.target.dataset.provider;
-  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
-});
-
 function updateModelEta() { /* removed — countdown/ETA disabled */ }
-
-// ── Generic BYOK key management for non-Linear scaffolds ──
-function updateScaffoldByok(selectId, promptId, keyInputId, hintId) {
-  const prompt = document.getElementById(promptId);
-  const keyInput = document.getElementById(keyInputId);
-  if (!prompt || !keyInput) return;
-  const val = document.getElementById(selectId)?.value;
-  if (!val) { prompt.style.display = 'none'; _updateScaffoldKeysHint(hintId); return; }
-  const info = getModelInfo(val);
-  if (!info) { prompt.style.display = 'none'; _updateScaffoldKeysHint(hintId); return; }
-  const freeProviders = ['puter', 'copilot', 'ollama', 'local'];
-  const needsKey = !freeProviders.includes(info.provider);
-  if (needsKey) {
-    const label = PROVIDER_LABELS[info.provider] || info.provider;
-    keyInput.placeholder = `Paste API key for ${label} here...`;
-    keyInput.value = localStorage.getItem(`byok_key_${info.provider}`) || '';
-    keyInput.dataset.provider = info.provider;
-    prompt.style.display = 'block';
-  } else {
-    prompt.style.display = 'none';
-  }
-  _updateScaffoldKeysHint(hintId);
-}
-function _updateScaffoldKeysHint(hintId) {
-  const hint = document.getElementById(hintId);
-  if (!hint) return;
-  const container = hint.parentElement;
-  const anyVisible = Array.from(container.querySelectorAll('.scaffold-byok')).some(el => el.style.display !== 'none');
-  hint.style.display = anyVisible ? 'none' : '';
-}
-function updateAllScaffoldByok() {
-  // RLM
-  updateScaffoldByok('sf_rlm_modelSelect', 'sf_rlm_rootByokPrompt', 'sf_rlm_rootByokKey', 'sf_rlm_keysHint');
-  updateScaffoldByok('sf_rlm_subModelSelect', 'sf_rlm_subByokPrompt', 'sf_rlm_subByokKey', 'sf_rlm_keysHint');
-  // Three-System
-  updateScaffoldByok('sf_ts_plannerModelSelect', 'sf_ts_plannerByokPrompt', 'sf_ts_plannerByokKey', 'sf_ts_keysHint');
-  updateScaffoldByok('sf_ts_monitorModelSelect', 'sf_ts_monitorByokPrompt', 'sf_ts_monitorByokKey', 'sf_ts_keysHint');
-  updateScaffoldByok('sf_ts_wmModelSelect', 'sf_ts_wmByokPrompt', 'sf_ts_wmByokKey', 'sf_ts_keysHint');
-  // Two-System
-  updateScaffoldByok('sf_2s_plannerModelSelect', 'sf_2s_plannerByokPrompt', 'sf_2s_plannerByokKey', 'sf_2s_keysHint');
-  updateScaffoldByok('sf_2s_monitorModelSelect', 'sf_2s_monitorByokPrompt', 'sf_2s_monitorByokKey', 'sf_2s_keysHint');
-}
-// Auto-save scaffold BYOK keys on input
-document.addEventListener('input', (e) => {
-  if (!e.target.classList.contains('scaffold-byok-key')) return;
-  const provider = e.target.dataset.provider;
-  if (provider) localStorage.setItem(`byok_key_${provider}`, e.target.value.trim());
-});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RENDERING
@@ -3832,22 +3637,10 @@ async function checkInterrupt(expected, grid, changeMap) {
         : (interruptModelSel === 'auto' || interruptModelSel === 'auto-fastest') ? null
         : interruptModelSel;
       const info = model ? getModelInfo(model) : getModelInfo(agentModel);
-      // Check if selected model is a Puter.js model
-      const isPuter = info?.provider === 'puter';
-      if (isPuter && FEATURES.puter_js) {
-        const result = await askLLMPuter(prompt, model || 'gpt-4o-mini');
-        rawResult = `${result} (puter/${model || 'gpt-4o-mini'})`;
-        _syncInterruptResult(rawResult);
-        _intResult = parseInterruptResult(result);
-      } else if (model && info && getByokKey(info.provider)) {
-        const result = await askLLMBYOK(prompt, model);
-        rawResult = `${result} (${model})`;
-        _syncInterruptResult(rawResult);
-        _intResult = parseInterruptResult(result);
-      } else if (FEATURES.puter_js) {
-        // Fallback to Puter.js
-        const result = await askLLMPuter(prompt, 'gpt-4o-mini');
-        rawResult = `${result} (puter/gpt-4o-mini)`;
+      const useModel = model || (FEATURES.puter_js ? 'gpt-4o-mini' : null);
+      if (useModel) {
+        const result = await callLLM([{role: 'user', content: prompt}], useModel);
+        rawResult = `${result} (${useModel})`;
         _syncInterruptResult(rawResult);
         _intResult = parseInterruptResult(result);
       }
@@ -3920,12 +3713,9 @@ Progress: Level ${_ss.currentState.levels_completed || 0}/${_ss.currentState.win
   try {
     let summary;
     const _compactStart = performance.now();
-    if (compactModel && getModelInfo(compactModel)?.provider === 'puter' && FEATURES.puter_js) {
-      summary = await askLLMPuter(summaryPrompt, compactModel);
-    } else if (compactModel && getByokKey(getModelInfo(compactModel)?.provider)) {
-      summary = await askLLMBYOK(summaryPrompt, compactModel);
-    } else if (FEATURES.puter_js) {
-      summary = await askLLMPuter(summaryPrompt, 'gpt-4o-mini');
+    const useCompactModel = compactModel || (FEATURES.puter_js ? 'gpt-4o-mini' : null);
+    if (useCompactModel) {
+      summary = await callLLM([{role: 'user', content: summaryPrompt}], useCompactModel);
     }
     if (summary) {
       const _compactDur = Math.round(performance.now() - _compactStart);
@@ -4669,84 +4459,53 @@ async function askLLM(ss) {
         if (resp) resp._clientSide = true;
       } else {
       const prompt = buildClientPrompt(_cur.currentState, historyForLLM, _cur.currentChangeMap, inputSettings, getToolsMode(), compactBlock, getPlanningMode());
-      // Stash grid context for BYOK MALFORMED_FUNCTION_CALL recovery (Pyodide)
       window._lastLLMGrid = _cur.currentState.grid;
       window._lastLLMPrevGrid = _ss ? _ss.previousGrid : previousGrid;
       let rawContent;
       try {
-        if (isByokModel && modelInfo?.provider === 'gemini') {
-          // Streaming path for Gemini BYOK
-          const streamResult = await askLLMBYOKStreaming(prompt, model, getMaxTokens(), (textSoFar) => {
-            if (isActive()) {
-              const previewEl = _waitEl.querySelector('.stream-preview');
-              if (previewEl) {
-                previewEl.style.display = 'block';
-                previewEl.textContent = textSoFar.length > 500 ? textSoFar.slice(-500) : textSoFar;
-                previewEl.scrollTop = previewEl.scrollHeight;
-              }
-              // Update wait label to show streaming
-              const label = _waitEl.querySelector('.step-label');
-              if (label && !label.dataset.streaming) {
-                label.dataset.streaming = '1';
-                const spinnerEl = label.querySelector('.spinner');
-                const timerEl = label.querySelector('.wait-timer');
-                label.innerHTML = '';
-                if (spinnerEl) label.appendChild(spinnerEl);
-                label.appendChild(timerEl);
-              }
+        const _onChunk = modelInfo?.provider === 'gemini' ? (textSoFar) => {
+          if (isActive()) {
+            const previewEl = _waitEl.querySelector('.stream-preview');
+            if (previewEl) {
+              previewEl.style.display = 'block';
+              previewEl.textContent = textSoFar.length > 500 ? textSoFar.slice(-500) : textSoFar;
+              previewEl.scrollTop = previewEl.scrollHeight;
             }
-          });
-          rawContent = streamResult.text;
-          if (streamResult.truncated) rawContent = { text: rawContent, truncated: true };
-          if (streamResult.malformed) {
-            // MALFORMED_FUNCTION_CALL recovery — same logic as non-streaming askLLMBYOK
-            const finishMsg = streamResult.finishMessage || '';
-            const codeMatch = finishMsg.match(/```python\s*\n([\s\S]*?)```/);
-            const geminiKey = getByokKey('gemini');
-            const geminiApiModel = modelInfo?.api_model || model;
-            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiApiModel}:generateContent?key=${geminiKey}`;
-            if (codeMatch && _pyodideReady) {
-              console.warn('BYOK Gemini streaming: MALFORMED_FUNCTION_CALL — extracting code, running via Pyodide');
-              const code = codeMatch[1].trim();
-              const grid = window._lastLLMGrid || [[]];
-              const prevGrid = window._lastLLMPrevGrid || null;
-              const output = await runPyodide(code, grid, prevGrid);
-              const retryResp = await fetch(geminiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [
-                    { parts: [{ text: prompt }] },
-                    { role: 'model', parts: [{ text: '```python\n' + code + '\n```' }] },
-                    { parts: [{ text: '[Code output]:\n' + output + '\n\nBased on this analysis, provide your answer as JSON only. No code.' }] },
-                  ],
-                  generationConfig: { temperature: 0.3, maxOutputTokens: getMaxTokens(), ..._geminiThinkingConfig(geminiApiModel) },
-                }),
-              });
-              const retryData = await retryResp.json();
-              if (retryData.error) throw new Error(retryData.error.message || JSON.stringify(retryData.error));
-              rawContent = retryData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            } else {
-              console.warn('BYOK Gemini streaming: MALFORMED_FUNCTION_CALL, retrying without tools');
-              const retryResp = await fetch(geminiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt + '\n\nIMPORTANT: Do NOT use code or function calls. Respond with plain JSON only.' }] }],
-                  generationConfig: { temperature: 0.3, maxOutputTokens: getMaxTokens(), ..._geminiThinkingConfig(geminiApiModel) },
-                }),
-              });
-              const retryData = await retryResp.json();
-              if (retryData.error) throw new Error(retryData.error.message || JSON.stringify(retryData.error));
-              rawContent = retryData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const label = _waitEl.querySelector('.step-label');
+            if (label && !label.dataset.streaming) {
+              label.dataset.streaming = '1';
+              const spinnerEl = label.querySelector('.spinner');
+              const timerEl = label.querySelector('.wait-timer');
+              label.innerHTML = '';
+              if (spinnerEl) label.appendChild(spinnerEl);
+              label.appendChild(timerEl);
             }
           }
-        } else if (isByokModel) {
-          rawContent = await askLLMBYOK(prompt, model, getMaxTokens());
-        } else if (isPuterModel && FEATURES.puter_js) {
-          rawContent = await askLLMPuter(prompt, model);
-        } else {
-          throw new Error('No LLM provider configured. Select a Puter.js model or add an API key.');
+        } : null;
+        rawContent = await callLLM(
+          [{role: 'user', content: prompt}], model,
+          { maxTokens: getMaxTokens(), onChunk: _onChunk }
+        );
+        // Handle Gemini MALFORMED_FUNCTION_CALL recovery
+        if (rawContent && typeof rawContent === 'object' && rawContent.malformed) {
+          const finishMsg = rawContent.finishMessage || '';
+          const codeMatch = finishMsg.match(/```python\s*\n([\s\S]*?)```/);
+          if (codeMatch && _pyodideReady) {
+            console.warn('Gemini MALFORMED_FUNCTION_CALL — extracting code, running via Pyodide');
+            const code = codeMatch[1].trim();
+            const output = await runPyodide(code, window._lastLLMGrid || [[]], window._lastLLMPrevGrid || null);
+            rawContent = await callLLM([
+              {role: 'user', content: prompt},
+              {role: 'assistant', content: '```python\n' + code + '\n```'},
+              {role: 'user', content: '[Code output]:\n' + output + '\n\nBased on this analysis, provide your answer as JSON only. No code.'},
+            ], model, { maxTokens: getMaxTokens() });
+          } else {
+            console.warn('Gemini MALFORMED_FUNCTION_CALL — retrying without tools');
+            rawContent = await callLLM(
+              [{role: 'user', content: prompt + '\n\nIMPORTANT: Do NOT use code or function calls. Respond with plain JSON only.'}],
+              model, { maxTokens: getMaxTokens() }
+            );
+          }
         }
       } catch (e) {
         resp = { error: e.message, model: model };
@@ -4786,11 +4545,7 @@ async function askLLM(ss) {
             }
             let retryRaw;
             try {
-              if (isByokModel) {
-                retryRaw = await askLLMBYOK(prompt + '\n\n' + nudge, model, getMaxTokens());
-              } else if (isPuterModel && FEATURES.puter_js) {
-                retryRaw = await askLLMPuter(prompt + '\n\n' + nudge, model);
-              }
+              retryRaw = await callLLM([{role: 'user', content: prompt + '\n\n' + nudge}], model, { maxTokens: getMaxTokens() });
             } catch (e) { console.warn('[askLLM] Parse retry error:', e.message); continue; }
             if (!sessions.has(_callSessionId)) return null;
             if (retryRaw && typeof retryRaw === 'object' && retryRaw.truncated) retryRaw = retryRaw.text;
@@ -4828,9 +4583,9 @@ async function askLLM(ss) {
           }
         }
         // Merge usage data from Puter.js if available
-        if (askLLMPuter._lastUsage) {
-          resp.usage = askLLMPuter._lastUsage;
-          askLLMPuter._lastUsage = null;
+        if (callLLM._lastUsage) {
+          resp.usage = callLLM._lastUsage;
+          callLLM._lastUsage = null;
         }
       }
       // Always set prompt_length for token estimation (even on error)
@@ -5835,13 +5590,7 @@ async function testModel() {
     const testPrompt = 'Reply with exactly: {"action": 1, "observation": "test"}';
     const t0 = performance.now();
     let result;
-    if (provider === 'puter' && FEATURES.puter_js) {
-      result = await askLLMPuter(testPrompt, model);
-    } else if (modelInfo && getByokKey(provider)) {
-      result = await askLLMBYOK(testPrompt, model);
-    } else {
-      throw new Error('No API key configured for ' + (provider || 'this model'));
-    }
+    result = await callLLM([{role: 'user', content: testPrompt}], model);
     const latency = Math.round(performance.now() - t0);
     resultEl.style.background = '#1a3a1a';
     resultEl.style.color = '#6f6';
@@ -6094,7 +5843,7 @@ async function loadModels() {
   } catch {}
 
   updateModelCaps();
-  updateAllScaffoldByok();
+  updateAllByokKeys();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6143,19 +5892,24 @@ The REPL environment is initialized with:
 
 Write code in \`\`\`repl blocks (not \`\`\`python). Variables persist across iterations AND across turns \u2014 any variables you create will still be available in the next turn's REPL. Use this to build up game knowledge (e.g. storing discovered rules, mapping actions).
 
-When you have determined the best action, call FINAL() with a JSON object:
-  FINAL({"action": <int>, "reasoning": "...", "observation": "..."})
+{final_format}
 
-{plan_instructions}Or use FINAL_VAR(variable_name) to return a variable containing the JSON.
+Or use FINAL_VAR(variable_name) to return a variable containing the JSON.
 
 IMPORTANT: The action must be one of the available_actions integers. Do NOT provide a final answer until you have analyzed the game state.`;
 
 function buildRlmSystemPrompt(planHorizon) {
-  let planInstructions = '';
+  let finalFormat;
   if (planHorizon > 1) {
-    planInstructions = `For multi-step plans (up to ${planHorizon} steps ahead):\n  FINAL({"plan": [{"action": <int>, "observation": "..."}, ...], "reasoning": "..."})\nPlan up to ${planHorizon} steps ahead if the next moves are obvious.\n\n`;
+    finalFormat = `When you have determined the best actions, call FINAL() with a multi-step plan (${planHorizon} steps):
+  FINAL({"plan": [{"action": <int>, "observation": "what you expect to happen"}, {"action": <int>, "observation": "..."}, ...], "reasoning": "why this sequence"})
+
+IMPORTANT: You MUST plan ${planHorizon} steps ahead. Do NOT return a single action — always return a "plan" array with multiple steps. Think about what sequence of moves will make progress toward the goal.`;
+  } else {
+    finalFormat = `When you have determined the best action, call FINAL() with a JSON object:
+  FINAL({"action": <int>, "reasoning": "...", "observation": "..."})`;
   }
-  return _RLM_SYSTEM_PROMPT_TEMPLATE.replace('{plan_instructions}', planInstructions);
+  return _RLM_SYSTEM_PROMPT_TEMPLATE.replace('{final_format}', finalFormat);
 }
 
 const RLM_USER_FIRST = `Your game context is stored in the \`context\` variable (dict). It contains:
@@ -6243,14 +5997,30 @@ function _parseRlmClientOutput(finalAnswer, iterationsLog, planHorizon) {
   return parsed;
 }
 
-async function _rlmCallLLMChat(messages, model, maxTokens, thinkingLevel, onChunk) {
+async function callLLM(messages, model, { maxTokens = 16384, thinkingLevel = 'off', onChunk = null } = {}) {
   const modelInfo = getModelInfo(model);
   const provider = modelInfo?.provider;
   const apiModel = modelInfo?.api_model || model;
 
+  // ── Puter.js (free, proxied) ──
+  if (provider === 'puter') {
+    await loadPuterJS();
+    if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter.js not loaded');
+    const prompt = messages.map(m => `[${m.role.toUpperCase()}]: ${m.content}`).join('\n\n');
+    const resp = await puter.ai.chat(prompt, { model: model || 'gpt-4o-mini' });
+    if (typeof resp === 'string') return resp;
+    const text = resp.message?.content || resp.toString();
+    if (resp.usage) callLLM._lastUsage = resp.usage;
+    else callLLM._lastUsage = null;
+    return text;
+  }
+
+  // ── All other providers need an API key ──
+  const key = getByokKey(provider);
+  if (!key) throw new Error(`No API key for ${PROVIDER_LABELS[provider] || provider}. Select the model and paste your key in Model Keys.`);
+
+  // ── Gemini ──
   if (provider === 'gemini') {
-    const key = getByokKey('gemini');
-    if (!key) throw new Error('Gemini API key not configured');
     const systemMsg = messages.find(m => m.role === 'system');
     const chatMsgs = messages.filter(m => m.role !== 'system');
     const contents = chatMsgs.map(m => ({
@@ -6258,7 +6028,7 @@ async function _rlmCallLLMChat(messages, model, maxTokens, thinkingLevel, onChun
       parts: [{ text: m.content }]
     }));
     const isThinking = /2\.5|3-pro|3-flash|3\.1/.test(apiModel);
-    const thinkingConfig = isThinking ? { thinkingConfig: { thinkingBudget: THINKING_BUDGETS[thinkingLevel] ?? 1024 } } : {};
+    const thinkingConfig = isThinking ? { thinkingConfig: { thinkingBudget: THINKING_BUDGETS[thinkingLevel] || 1024 } } : {};
     const body = {
       contents,
       generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, ...thinkingConfig },
@@ -6293,11 +6063,16 @@ async function _rlmCallLLMChat(messages, model, maxTokens, thinkingLevel, onChun
       const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json();
       if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      return data.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || '';
+      const fr = data.candidates?.[0]?.finishReason;
+      const text = data.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || '';
+      if (fr === 'MAX_TOKENS') return { text, truncated: true };
+      if (fr === 'MALFORMED_FUNCTION_CALL') return { text, malformed: true, finishMessage: data.candidates?.[0]?.finishMessage || '' };
+      return text;
     }
-  } else if (provider === 'openai' || provider === 'groq' || provider === 'mistral') {
-    const key = getByokKey(provider);
-    if (!key) throw new Error(`${provider} API key not configured`);
+  }
+
+  // ── OpenAI-compatible (OpenAI, Groq, Mistral) ──
+  if (provider === 'openai' || provider === 'groq' || provider === 'mistral') {
     const urls = { openai: 'https://api.openai.com/v1/chat/completions', groq: 'https://api.groq.com/openai/v1/chat/completions', mistral: 'https://api.mistral.ai/v1/chat/completions' };
     const resp = await fetch(urls[provider], {
       method: 'POST',
@@ -6307,9 +6082,10 @@ async function _rlmCallLLMChat(messages, model, maxTokens, thinkingLevel, onChun
     const data = await resp.json();
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     return data.choices?.[0]?.message?.content || '';
-  } else if (provider === 'anthropic') {
-    const key = getByokKey('anthropic');
-    if (!key) throw new Error('Anthropic API key not configured');
+  }
+
+  // ── Anthropic ──
+  if (provider === 'anthropic') {
     const systemMsg = messages.find(m => m.role === 'system');
     const chatMsgs = messages.filter(m => m.role !== 'system');
     const body = { model: apiModel, max_tokens: maxTokens, messages: chatMsgs.map(m => ({ role: m.role, content: m.content })) };
@@ -6322,13 +6098,29 @@ async function _rlmCallLLMChat(messages, model, maxTokens, thinkingLevel, onChun
     const data = await resp.json();
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     return data.content?.map(c => c.text).filter(Boolean).join('') || '';
-  } else if (provider === 'puter') {
-    const prompt = messages.map(m => `[${m.role.toUpperCase()}]: ${m.content}`).join('\n\n');
-    return await askLLMPuter(prompt, model);
-  } else {
-    throw new Error(`Unsupported provider for RLM: ${provider || 'unknown'}`);
   }
+
+  // ── Cloudflare Workers AI (via server proxy — no browser CORS) ──
+  if (provider === 'cloudflare') {
+    const accountId = localStorage.getItem('byok_cf_account_id') || '';
+    if (!accountId) throw new Error('Cloudflare Account ID not set. Enter it in Model Keys.');
+    const resp = await fetch('/api/llm/cf-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: key, account_id: accountId, model: apiModel,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        max_tokens: maxTokens,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    return data.result || '';
+  }
+
+  throw new Error(`Unsupported provider: ${provider || 'unknown'}. Configure an API key or use Puter.js.`);
 }
+callLLM._lastUsage = null;
 
 async function askLLMRlm(_cur, model, modelInfo, waitEl, isActiveFn, historyForLLM, compactBlock) {
   const settings = getScaffoldingSettings();
@@ -6419,7 +6211,7 @@ if 'SHOW_VARS' not in dir():
     // Call LLM with multi-turn conversation
     let responseText;
     try {
-      responseText = await _rlmCallLLMChat(messages, model, maxTokens, thinkingLevel, modelInfo?.provider === 'gemini' ? onChunk : null);
+      responseText = await callLLM(messages, model, { maxTokens, thinkingLevel, onChunk: modelInfo?.provider === 'gemini' ? onChunk : null });
     } catch (e) {
       console.error(`[RLM] Iteration ${iter} LLM call failed:`, e);
       iterationsLog.push({ iteration: iter, error: e.message });
@@ -6744,9 +6536,9 @@ Respond with EXACTLY this JSON:
 
 If uncertain, say "uncertain — <best guess>". Keep each prediction under 100 chars.`;
   try {
-    const raw = await _rlmCallLLMChat(
+    const raw = await callLLM(
       [{role: 'system', content: prompt}],
-      wmModel, wmMaxTokens, wmThinking, null
+      wmModel, { maxTokens: wmMaxTokens, thinkingLevel: wmThinking }
     );
     const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
     if (parsed && parsed.predictions) {
@@ -6819,7 +6611,7 @@ async function _tsRunWmUpdate(tsState, context, settings, waitEl, isActive) {
     const t0 = performance.now();
     let raw;
     try {
-      raw = await _rlmCallLLMChat([{role: 'system', content: prompt}], wmModel, wmMaxTokens, wmThinking, null);
+      raw = await callLLM([{role: 'system', content: prompt}], wmModel, { maxTokens: wmMaxTokens, thinkingLevel: wmThinking });
     } catch (e) {
       console.error(`[ts_wm] turn ${turn} failed:`, e);
       wmLog.push({turn, type: 'error', error: e.message, duration_ms: 0});
@@ -6894,7 +6686,7 @@ async function _tsMonitorCheck(step, expected, changeData, gameState, settings, 
 
   const t0 = performance.now();
   try {
-    const raw = await _rlmCallLLMChat([{role: 'system', content: prompt}], monitorModel, monitorMaxTokens, monitorThinking, null);
+    const raw = await callLLM([{role: 'system', content: prompt}], monitorModel, { maxTokens: monitorMaxTokens, thinkingLevel: monitorThinking });
     const durMs = Math.round(performance.now() - t0);
     const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
     if (!parsed) return {verdict: 'CONTINUE', reason: 'monitor parse error', discovery: null, duration_ms: durMs};
@@ -7050,7 +6842,7 @@ async function askLLMThreeSystem(_cur, model, modelInfo, waitEl, isActiveFn, his
     const t0 = performance.now();
     let raw;
     try {
-      raw = await _rlmCallLLMChat([{role: 'system', content: prompt}], plannerModel, plannerMaxTokens, plannerThinking, null);
+      raw = await callLLM([{role: 'system', content: prompt}], plannerModel, { maxTokens: plannerMaxTokens, thinkingLevel: plannerThinking });
     } catch (e) {
       console.error(`[ts_planner] turn ${turn} failed:`, e);
       plannerLog.push({turn, type: 'error', error: e.message, duration_ms: 0});
@@ -7317,20 +7109,6 @@ function loadPuterJS() {
   return _puterJsLoading;
 }
 
-async function askLLMPuter(prompt, model) {
-  // Ensure Puter.js is loaded before calling
-  await loadPuterJS();
-  if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter.js not loaded');
-  const resp = await puter.ai.chat(prompt, { model: model || 'gpt-4o-mini' });
-  // Puter may return a string or an object with message + usage
-  if (typeof resp === 'string') return resp;
-  const text = resp.message?.content || resp.toString();
-  // Stash usage data if available (will be merged into parsed response)
-  if (resp.usage) askLLMPuter._lastUsage = resp.usage;
-  else askLLMPuter._lastUsage = null;
-  return text;
-}
-askLLMPuter._lastUsage = null;
 
 function getByokKey(provider) {
   // New per-provider keys
@@ -7344,7 +7122,7 @@ function getByokKey(provider) {
 
 function byokActive() {
   // Check if any provider has a saved key
-  for (const p of ['openai', 'gemini', 'anthropic', 'groq', 'mistral']) {
+  for (const p of ['openai', 'gemini', 'anthropic', 'groq', 'mistral', 'cloudflare']) {
     if (localStorage.getItem(`byok_key_${p}`)) return true;
   }
   // Legacy check
@@ -7360,159 +7138,7 @@ function _geminiThinkingConfig(apiModel) {
   return { thinkingConfig: { thinkingBudget: budget } };
 }
 
-async function askLLMBYOKStreaming(prompt, model, maxTokens, onChunk) {
-  // Streaming version for Gemini BYOK — uses SSE endpoint
-  const info = getModelInfo(model);
-  const key = getByokKey('gemini');
-  if (!key) throw new Error('No API key for Gemini. Select the model and paste your key.');
-  const apiModel = info?.api_model || model;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:streamGenerateContent?key=${key}&alt=sse`;
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, ..._geminiThinkingConfig(apiModel) },
-    }),
-  });
-  if (!resp.ok) {
-    const errData = await resp.json().catch(() => ({}));
-    throw new Error(errData.error?.message || `Gemini API error ${resp.status}`);
-  }
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let accumulated = '';
-  let buffer = '';
-  let lastFinishReason = null;
-  let finishMessage = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete last line
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const json = line.slice(6).trim();
-      if (!json || json === '[DONE]') continue;
-      try {
-        const chunk = JSON.parse(json);
-        const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        accumulated += text;
-        if (onChunk) onChunk(accumulated);
-
-        const fr = chunk.candidates?.[0]?.finishReason;
-        if (fr && fr !== 'STOP') {
-          lastFinishReason = fr;
-          finishMessage = chunk.candidates?.[0]?.finishMessage || '';
-        }
-      } catch (e) { /* skip malformed SSE chunk */ }
-    }
-  }
-
-  const result = { text: accumulated };
-  if (lastFinishReason === 'MALFORMED_FUNCTION_CALL') {
-    result.malformed = true;
-    result.finishMessage = finishMessage;
-  }
-  if (lastFinishReason === 'MAX_TOKENS') result.truncated = true;
-  return result;
-}
-
-async function askLLMBYOK(prompt, model, maxTokens = 16384) {
-  const info = getModelInfo(model);
-  const provider = info?.provider || 'openai';
-  const key = getByokKey(provider);
-  if (!key) throw new Error(`No API key for ${PROVIDER_LABELS[provider] || provider}. Select the model and paste your key.`);
-
-  const sysMsg = 'You are an expert puzzle-solving AI agent. Analyse game grids and output ONLY valid JSON.';
-
-  if (provider === 'gemini') {
-    const apiModel = info?.api_model || model;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${key}`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, ..._geminiThinkingConfig(apiModel) } }),
-    });
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-    const fr = data.candidates?.[0]?.finishReason;
-    // MALFORMED_FUNCTION_CALL: model emitted code instead of a proper function call.
-    // Extract code from finishMessage and run it via Pyodide (mirrors server-side recovery).
-    if (fr === 'MALFORMED_FUNCTION_CALL') {
-      const finishMsg = data.candidates?.[0]?.finishMessage || '';
-      const codeMatch = finishMsg.match(/```python\s*\n([\s\S]*?)```/);
-      if (codeMatch && _pyodideReady) {
-        console.warn('BYOK Gemini: MALFORMED_FUNCTION_CALL — extracting code, running via Pyodide');
-        const code = codeMatch[1].trim();
-        const grid = window._lastLLMGrid || [[]];
-        const prevGrid = window._lastLLMPrevGrid || null;
-        const output = await runPyodide(code, grid, prevGrid);
-        // Feed the code output back to the model for a proper text answer
-        const retryResp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              { parts: [{ text: prompt }] },
-              { role: 'model', parts: [{ text: '```python\n' + code + '\n```' }] },
-              { parts: [{ text: '[Code output]:\n' + output + '\n\nBased on this analysis, provide your answer as JSON only. No code.' }] },
-            ],
-            generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, ..._geminiThinkingConfig(apiModel) },
-          }),
-        });
-        const retryData = await retryResp.json();
-        if (retryData.error) throw new Error(retryData.error.message || JSON.stringify(retryData.error));
-        return retryData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      }
-      // No code or no Pyodide — retry without tools
-      console.warn('BYOK Gemini: MALFORMED_FUNCTION_CALL, retrying without tools');
-      const retryResp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt + '\n\nIMPORTANT: Do NOT use code or function calls. Respond with plain JSON only.' }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, ..._geminiThinkingConfig(apiModel) },
-        }),
-      });
-      const retryData = await retryResp.json();
-      if (retryData.error) throw new Error(retryData.error.message || JSON.stringify(retryData.error));
-      return retryData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    }
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || JSON.stringify(data);
-    if (fr === 'MAX_TOKENS') return { text, truncated: true };
-    return text;
-  }
-
-  // OpenAI-compatible API (OpenAI, Groq, Mistral)
-  const urlMap = {
-    openai: 'https://api.openai.com/v1/chat/completions',
-    groq: 'https://api.groq.com/openai/v1/chat/completions',
-    mistral: 'https://api.mistral.ai/v1/chat/completions',
-  };
-  const url = urlMap[provider];
-  if (!url) throw new Error(`BYOK not supported for ${provider} from browser (CORS). Use Puter.js instead.`);
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: info?.api_model || model,
-      messages: [{ role: 'system', content: sysMsg }, { role: 'user', content: prompt }],
-      temperature: 0.3, max_tokens: maxTokens,
-    }),
-  });
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  const text = data.choices?.[0]?.message?.content || JSON.stringify(data);
-  if (data.choices?.[0]?.finish_reason === 'length') return { text, truncated: true };
-  return text;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COPILOT AUTH (local only)

@@ -109,6 +109,25 @@ Only two environments — no separate "local" mode:
 
 The `HIDDEN_GAMES` list is a hardcoded Python list in `server.py`. `SERVER_MODE` env var controls which mode is active.
 
+## Client-Side Architecture (CRITICAL)
+
+**All game-playing logic runs CLIENT-SIDE in the browser.** This includes:
+- Game environment execution (Pyodide or server-proxied game steps)
+- LLM calls (BYOK / Puter.js / Copilot — keys stored in browser)
+- REPL / code execution (Pyodide sandbox in browser)
+- Agent memory / variables (in-memory JS, persisted to session state)
+- Scaffolding logic (RLM iterations, planning, compaction)
+
+The server's role is LIMITED to:
+- Serving static files (`index.html`, game data)
+- Session persistence (save/resume via SQLite/Turso)
+- Proxying game steps when Pyodide isn't available
+- Model registry / capabilities metadata
+
+**Never add server-side LLM orchestration for scaffoldings.** All scaffolding types (Linear, RLM, Three-System) must run their iteration loops, REPL execution, and sub-calls client-side. The server-side `scaffoldings/` Python handlers exist only for the CLI `agent.py` / `batch_runner.py` path, not the web UI.
+
+When a session is saved/resumed, all necessary state (REPL variables, memory, compact summaries) must be serialized into the session record so the session can be accurately restored.
+
 ## Model Select Checklist (recurring bug)
 
 Every `{ type: 'model-select', id: '...' }` field in `SCAFFOLDING_SCHEMAS` **must** be wired up in three places:
@@ -124,6 +143,7 @@ This has been missed repeatedly (Three-System selects, REPL selects, etc.). When
 After completing any fix or feature, **always**:
 1. Push to `staging`
 2. Run all non-LLM tests (import check + any unit/integration tests that don't require API keys)
+3. After any refactor, clean up dead code: remove old functions, aliases, unused HTML IDs, and dangling references that are no longer called
 
 ## Pre-Push QC
 
