@@ -467,7 +467,7 @@
 
   .session-tab-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px;
     background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0;
-    overflow-x: auto; min-height: 42px; }
+    overflow-x: auto; flex-wrap: nowrap; min-height: 42px; }
   .session-tab { display: flex; align-items: center; gap: 8px; padding: 7px 14px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
     font-size: 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
@@ -491,6 +491,47 @@
     background: none; border: 1px dashed var(--border); border-radius: 6px;
     font-size: 12px; cursor: pointer; color: var(--text-dim); transition: all 0.15s; }
   .session-tab-new:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Menu tab ──────────────────────────────────────────────────────────── */
+  .session-tab-menu { display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; cursor: pointer; color: var(--text-dim); transition: all 0.15s;
+    white-space: nowrap; flex-shrink: 0; font-weight: 600; }
+  .session-tab-menu:hover { background: var(--surface2); border-color: var(--accent); color: var(--accent); }
+  .session-tab-menu.active { background: var(--surface2); border-color: var(--accent);
+    color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .session-tab-menu .menu-icon { font-size: 14px; }
+
+  /* ── Menu view ─────────────────────────────────────────────────────────── */
+  #menuView { display: none; flex: 1; padding: 24px; overflow-y: auto; gap: 24px; }
+  #menuView.visible { display: flex; }
+  .menu-layout { display: flex; gap: 24px; width: 100%; max-width: 900px; margin: 0 auto; }
+  .menu-left { flex: 0 0 200px; display: flex; flex-direction: column; gap: 12px; }
+  .menu-right { flex: 1; min-width: 0; }
+  .menu-new-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 16px; border: 2px dashed var(--border); border-radius: 10px; background: none;
+    color: var(--text-dim); font-size: 14px; cursor: pointer; transition: all 0.2s; width: 100%; }
+  .menu-new-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .menu-new-btn .hero-icon { font-size: 20px; }
+  .menu-sessions-header { font-size: 13px; font-weight: 600; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .menu-session-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    font-size: 12px; cursor: pointer; transition: all 0.15s; margin-bottom: 6px; }
+  .menu-session-row:hover { border-color: var(--accent); background: var(--surface2); }
+  .menu-session-row .ms-game { font-weight: 600; color: var(--text); flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-session-row .ms-steps { color: var(--text-dim); font-size: 11px; }
+  .menu-session-row .ms-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    font-weight: 600; text-transform: uppercase; }
+  .ms-badge-WIN { background: var(--green); color: #000; }
+  .ms-badge-GAME_OVER { background: var(--red); color: #fff; }
+  .ms-badge-NOT_FINISHED { background: var(--yellow); color: #000; }
+  .menu-session-row .ms-date { color: var(--text-dim); font-size: 10px; }
+  .menu-session-row .ms-resume { background: var(--accent); color: #fff; border: none;
+    padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+  .menu-session-row .ms-resume:hover { opacity: 0.85; }
+  .menu-empty { padding: 20px; text-align: center; color: var(--text-dim); font-size: 12px; }
 
   /* ── Sidebar lock (game running) ─────────────────────────────────────── */
   .sidebar.locked { pointer-events: none; opacity: 0.4; transition: all 0.3s; }
@@ -574,6 +615,20 @@
       <div class="hero-icon">+</div>
       <div>New Session</div>
       <div style="font-size:12px;margin-top:8px;color:var(--text-dim);">Try playing ARC-AGI-3 with an agent today!</div>
+    </div>
+  </div>
+  <!-- ── Menu view (session management) ────────────────────────────────── -->
+  <div id="menuView">
+    <div class="menu-layout">
+      <div class="menu-left">
+        <button class="menu-new-btn" onclick="createNewSession()">
+          <span class="hero-icon">+</span> New Session
+        </button>
+      </div>
+      <div class="menu-right">
+        <div class="menu-sessions-header">Saved Sessions</div>
+        <div id="menuSessionList"></div>
+      </div>
     </div>
   </div>
   <!-- ── Browse Sessions view ────────────────────────────────────────── -->
@@ -2102,31 +2157,37 @@ function _initPyodideWorker() {
   const workerSrc = `
     importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.4/full/pyodide.js');
     let pyodide = null;
-    let ns = null;
+    const _namespaces = {};  // session_id -> namespace dict
+
+    function _getNamespace(sessionId) {
+      if (!sessionId) sessionId = '__default__';
+      if (!_namespaces[sessionId]) {
+        _namespaces[sessionId] = pyodide.globals.get('dict')();
+        pyodide.runPython('import numpy as np; import collections; from collections import Counter, defaultdict; import itertools; import math',
+          {globals: _namespaces[sessionId]});
+      }
+      return _namespaces[sessionId];
+    }
 
     self.onmessage = async (e) => {
-      const {type, id, code, grid, prev_grid} = e.data;
+      const {type, id, code, grid, prev_grid, session_id} = e.data;
       if (type === 'init') {
         try {
           pyodide = await loadPyodide();
           await pyodide.loadPackage('numpy');
-          ns = pyodide.globals.get('dict')();
-          pyodide.runPython(\`
-import numpy as np
-import collections
-from collections import Counter, defaultdict
-import itertools
-import math
-\`, {globals: ns});
           self.postMessage({type: 'ready', id});
         } catch (err) {
           self.postMessage({type: 'error', id, error: err.message});
         }
+      } else if (type === 'clear_session') {
+        if (session_id && _namespaces[session_id]) {
+          delete _namespaces[session_id];
+        }
+        self.postMessage({type: 'result', id, output: 'cleared'});
       } else if (type === 'execute') {
+        const ns = _getNamespace(session_id);
         try {
           // Set grid/prev_grid in namespace
-          const gridArr = grid ? pyodide.toPy(grid) : pyodide.toPy([[]]);
-          const prevArr = prev_grid ? pyodide.toPy(prev_grid) : pyodide.globals.get('None');
           pyodide.runPython('import numpy as np', {globals: ns});
           ns.set('grid', pyodide.runPython('np.array(' + JSON.stringify(grid || [[]]) + ')', {globals: ns}));
           if (prev_grid) {
@@ -2204,12 +2265,12 @@ async function ensurePyodide() {
   await _initPyodideWorker();
 }
 
-async function runPyodide(code, grid, prev_grid) {
+async function runPyodide(code, grid, prev_grid, sessionId) {
   if (!_pyodideReady) throw new Error('Pyodide not loaded');
   const id = ++_pyodideCallId;
   return new Promise((resolve, reject) => {
     _pyodidePending.set(id, {resolve, reject});
-    _pyodideWorker.postMessage({type: 'execute', id, code, grid, prev_grid});
+    _pyodideWorker.postMessage({type: 'execute', id, code, grid, prev_grid, session_id: sessionId || activeSessionId});
     // Timeout after 10s
     setTimeout(() => {
       if (_pyodidePending.has(id)) {
@@ -2235,14 +2296,14 @@ function extractPythonBlocks(text) {
 }
 
 // Run tool calls from LLM response, return tool_calls array
-async function executeToolBlocks(text, grid, prev_grid) {
+async function executeToolBlocks(text, grid, prev_grid, sessionId) {
   const blocks = extractPythonBlocks(text);
   if (!blocks.length) return [];
   // Pyodide only
   if (!_pyodideReady) return [];
   const toolCalls = [];
   for (const code of blocks) {
-    const output = await runPyodide(code, grid, prev_grid);
+    const output = await runPyodide(code, grid, prev_grid, sessionId);
     toolCalls.push({name: 'run_python', arguments: {code}, output});
   }
   return toolCalls;
@@ -2256,6 +2317,7 @@ let _pyodideGameWorker = null;
 let _pyodideGameReady = false;
 let _pyodideGameLoading = false;
 let _pyodideGameActive = false;  // true when current session uses Pyodide
+let _pyodideGameSessionId = null;  // which session owns the Pyodide game worker
 let _pyodideGameCallId = 0;
 const _pyodideGamePending = new Map();
 let _pyodideGameProgress = { stage: '', percent: 0 };
@@ -2666,14 +2728,16 @@ async function pyodideUndo(count) {
 
 // ── Dispatch layer ──────────────────────────────────────────────────────
 
-async function gameStep(sessionId, actionId, actionData, extras) {
-  if (_pyodideGameActive) {
-    const prevGrid = currentState.grid;
+async function gameStep(sessionId, actionId, actionData, extras, callerState) {
+  // Use Pyodide only if this session owns the game worker
+  if (_pyodideGameActive && _pyodideGameSessionId === (callerState?._ownerSessionId || activeSessionId)) {
+    const prevGrid = (callerState?.grid) || currentState.grid;
     const state = await pyodideStep(actionId, actionData);
     state.change_map = computeChangeMapJS(prevGrid, state.grid);
     state.session_id = sessionId;
     return state;
   }
+  // Fallback to server endpoint for non-owner sessions or server mode
   return fetchJSON('/api/step', {session_id: sessionId, action: actionId, data: actionData || {}, ...extras});
 }
 
@@ -3181,6 +3245,7 @@ async function startGame(gameId) {
   let data;
   if (FEATURES.pyodide_game) {
     _pyodideGameActive = true;
+    _pyodideGameSessionId = activeSessionId;
     try {
       data = await pyodideStartGame(gameId);
       console.log('[PyodideGame] Game started client-side:', gameId);
@@ -4483,7 +4548,7 @@ async function askLLM(ss) {
           if (codeMatch && _pyodideReady) {
             console.warn('Gemini MALFORMED_FUNCTION_CALL — extracting code, running via Pyodide');
             const code = codeMatch[1].trim();
-            const output = await runPyodide(code, window._lastLLMGrid || [[]], window._lastLLMPrevGrid || null);
+            const output = await runPyodide(code, window._lastLLMGrid || [[]], window._lastLLMPrevGrid || null, _callSessionId);
             rawContent = await callLLM([
               {role: 'user', content: prompt},
               {role: 'assistant', content: '```python\n' + code + '\n```'},
@@ -4567,7 +4632,7 @@ async function askLLM(ss) {
 
         // Execute Python code blocks if tools are on (Pyodide)
         if (resp.tools_active && _pyodideReady && rawContent) {
-          const toolCalls = await executeToolBlocks(rawContent, _cur.currentState.grid, _ss ? _ss.previousGrid : previousGrid);
+          const toolCalls = await executeToolBlocks(rawContent, _cur.currentState.grid, _ss ? _ss.previousGrid : previousGrid, _callSessionId);
           if (toolCalls.length) {
             resp.tool_calls = toolCalls;
           }
@@ -5015,7 +5080,8 @@ async function executePlan(plan, resp, entry, expected, ss) {
     if (!_ss) stepCount = _cur.stepCount;
     const extras = { session_cost: _cur.sessionTotalTokens.cost };
     if (resp?._clientSide) extras.llm_response = (i === 0) ? resp : null;
-    const data = await gameStep(_planSessionId, step.action, step.data || {}, extras);
+    const data = await gameStep(_planSessionId, step.action, step.data || {}, extras,
+      { grid: _cur.currentState.grid, _ownerSessionId: _ss?.sessionId || activeSessionId });
 
     // Guard: session closed mid-plan — stop executing further steps
     if (!sessions.has(_planSessionId)) {
@@ -6134,7 +6200,7 @@ if 'SHOW_VARS' not in dir():
         return "[llm_query not available in browser mode - use REPL iterations to reason step-by-step]"
     def llm_query_batched(prompts):
         return ["[llm_query not available in browser mode]"] * len(prompts)`;
-  await runPyodide(setupCode, context.grid, null);
+  await runPyodide(setupCode, context.grid, null, _cur.sessionId);
 
   // Build conversation messages
   const systemPrompt = buildRlmSystemPrompt(planHorizon);
@@ -6198,7 +6264,7 @@ if 'SHOW_VARS' not in dir():
     // Execute each code block via Pyodide
     const replOutputs = [];
     for (const code of codeBlocks) {
-      let output = await runPyodide(code, context.grid, null);
+      let output = await runPyodide(code, context.grid, null, _cur.sessionId);
       if (output.length > outputTrunc) {
         output = output.substring(0, outputTrunc) + `\n... [${output.length - outputTrunc} chars truncated]`;
       }
@@ -8319,6 +8385,7 @@ let _customHardMemory = null;
 // ═══════════════════════════════════════════════════════════════════════════
 
 let _browseActive = false;
+let _menuActive = false;
 let _browseGlobalCache = null;  // cache server sessions
 let _browseGameFilter = null;   // currently selected game in By Game tab
 
@@ -8329,23 +8396,90 @@ function showAppView(view) {
   const mainLayout = document.getElementById('mainLayout');
   const tabBar = document.getElementById('sessionTabBar');
   const emptyApp = document.getElementById('emptyAppState');
+  const menuView = document.getElementById('menuView');
 
   if (view === 'browse') {
     links[1]?.classList.add('active');
     _browseActive = true;
+    _menuActive = false;
     browseView.style.display = 'flex';
     mainLayout.style.display = 'none';
     tabBar.style.display = 'none';
     emptyApp.style.display = 'none';
+    menuView.classList.remove('visible');
     loadBrowseView();
   } else {
     links[0]?.classList.add('active');
     _browseActive = false;
     browseView.style.display = 'none';
     tabBar.style.display = 'flex';
-    updateEmptyAppState();
-    if (sessions.size > 0) mainLayout.style.display = 'flex';
+    if (_menuActive) {
+      menuView.classList.add('visible');
+      mainLayout.style.display = 'none';
+      emptyApp.style.display = 'none';
+    } else {
+      menuView.classList.remove('visible');
+      updateEmptyAppState();
+      if (sessions.size > 0) mainLayout.style.display = 'flex';
+    }
   }
+}
+
+// ── Menu view ─────────────────────────────────────────────────────────────
+
+function showMenuView() {
+  _menuActive = true;
+  _browseActive = false;
+  // Save current session state
+  if (activeSessionId && sessions.has(activeSessionId)) saveSessionToState();
+  // Hide game layout, show menu
+  const menuView = document.getElementById('menuView');
+  const mainLayout = document.getElementById('mainLayout');
+  const emptyApp = document.getElementById('emptyAppState');
+  const browseView = document.getElementById('browseView');
+  menuView.classList.add('visible');
+  mainLayout.style.display = 'none';
+  emptyApp.style.display = 'none';
+  browseView.style.display = 'none';
+  // Highlight Play nav link
+  document.querySelectorAll('.top-nav .nav-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('.top-nav .nav-link')[0]?.classList.add('active');
+  renderMenuSessions();
+  renderSessionTabs();
+}
+
+function renderMenuSessions() {
+  const container = document.getElementById('menuSessionList');
+  if (!container) return;
+  const saved = getLocalSessions();
+  if (!saved.length) {
+    container.innerHTML = '<div class="menu-empty">No saved sessions yet. Start a new session to play!</div>';
+    return;
+  }
+  container.innerHTML = '';
+  for (const s of saved) {
+    const row = document.createElement('div');
+    row.className = 'menu-session-row';
+    const gameName = s.game_id || s.id?.slice(0, 8) || '?';
+    const steps = s.steps || 0;
+    const result = s.result || 'NOT_FINISHED';
+    const badgeClass = 'ms-badge-' + result.replace(/\s/g, '_');
+    const date = s.created_at ? new Date(s.created_at * 1000).toLocaleDateString() : '';
+    row.innerHTML = `
+      <span class="ms-game">${gameName}</span>
+      <span class="ms-steps">${steps} steps</span>
+      <span class="ms-badge ${badgeClass}">${result.replace(/_/g, ' ')}</span>
+      <span class="ms-date">${date}</span>
+      <button class="ms-resume" onclick="event.stopPropagation(); menuResume('${s.id}');">Resume</button>`;
+    container.appendChild(row);
+  }
+}
+
+function menuResume(sid) {
+  _menuActive = false;
+  document.getElementById('menuView').classList.remove('visible');
+  showAppView('play');
+  browseResume(sid);
 }
 
 function switchBrowseTab(tab) {
@@ -8552,9 +8686,18 @@ function renderSessionTabs() {
   const bar = document.getElementById('sessionTabBar');
   if (!bar) return;
   bar.innerHTML = '';
+
+  // Menu tab (always first)
+  const menuTab = document.createElement('div');
+  menuTab.className = 'session-tab-menu' + (_menuActive ? ' active' : '');
+  menuTab.innerHTML = '<span class="menu-icon">&#9776;</span> Menu';
+  menuTab.onclick = () => showMenuView();
+  bar.appendChild(menuTab);
+
+  // Session tabs
   for (const [id, s] of sessions) {
     const tab = document.createElement('div');
-    tab.className = 'session-tab' + (id === activeSessionId ? ' active' : '');
+    tab.className = 'session-tab' + (id === activeSessionId && !_menuActive ? ' active' : '');
     const label = s.tabLabel || s.gameId || (id.startsWith('pending_') ? 'New Session' : id.slice(0, 8));
     const dotClass = getTabDotClass(s);
     const stepBadge = s.stepCount > 0 ? `<span class="tab-steps">${s.stepCount}</span>` : '';
@@ -8567,22 +8710,25 @@ function renderSessionTabs() {
     tab.onclick = () => switchSession(id);
     bar.appendChild(tab);
   }
+
+  // Quick + button for new session
   const newBtn = document.createElement('button');
   newBtn.className = 'session-tab-new';
-  newBtn.textContent = '+ New Session';
-  if (sessions.size >= 1) {
-    newBtn.disabled = true;
-    newBtn.title = 'Close the current session first to start a new one';
-    newBtn.style.opacity = '0.4';
-    newBtn.style.cursor = 'not-allowed';
-  } else {
-    newBtn.onclick = createNewSession;
-  }
+  newBtn.textContent = '+';
+  newBtn.title = 'New Session';
+  newBtn.onclick = createNewSession;
   bar.appendChild(newBtn);
+
   updateEmptyAppState();
 }
 
 function createNewSession() {
+  // Hide menu view if active
+  if (_menuActive) {
+    _menuActive = false;
+    document.getElementById('menuView').classList.remove('visible');
+    document.getElementById('mainLayout').style.display = 'flex';
+  }
   // Save current session state if one exists
   if (activeSessionId && sessions.has(activeSessionId)) {
     if (autoPlaying) { autoPlaying = false; updateAutoBtn(); }
@@ -8636,9 +8782,16 @@ function createNewSession() {
 }
 
 function switchSession(targetId) {
-  if (targetId === activeSessionId) return;
+  if (targetId === activeSessionId && !_menuActive) return;
   const target = sessions.get(targetId);
   if (!target) return;
+
+  // Hide menu view if active
+  if (_menuActive) {
+    _menuActive = false;
+    document.getElementById('menuView').classList.remove('visible');
+    document.getElementById('mainLayout').style.display = 'flex';
+  }
 
   // Clear global autoPlaying flag (the session's ss.autoPlaying keeps running independently)
   autoPlaying = false;
@@ -8646,7 +8799,7 @@ function switchSession(targetId) {
   // Close replay if open
   closeReplay();
   // Save current session
-  if (activeSessionId && sessions.has(activeSessionId)) {
+  if (activeSessionId && sessions.has(activeSessionId) && activeSessionId !== targetId) {
     saveSessionToState();
   }
   // Switch
@@ -8670,6 +8823,11 @@ function closeSession(id) {
     if (id === activeSessionId && autoPlaying) { autoPlaying = false; updateAutoBtn(); }
     // Abort in-flight LLM fetch
     if (s.abortController) { s.abortController.abort(); s.abortController = null; }
+    // Clear REPL namespace for this session
+    if (_pyodideWorker && _pyodideReady) {
+      const clearId = ++_pyodideCallId;
+      _pyodideWorker.postMessage({type: 'clear_session', id: clearId, session_id: s.sessionId || id});
+    }
     // Upload session to main DB before deleting (if enough steps)
     if (id === activeSessionId) saveSessionToState();
     uploadClosedSession(s);
@@ -8737,13 +8895,21 @@ function updateGameListLock() {
 function updateEmptyAppState() {
   const empty = document.getElementById('emptyAppState');
   const layout = document.getElementById('mainLayout');
+  const menuView = document.getElementById('menuView');
   if (!empty || !layout) return;
   if (_browseActive) return; // browse view handles its own display
+  if (_menuActive) return; // menu view handles its own display
   if (sessions.size === 0) {
-    empty.style.display = 'flex';
+    // Show menu view instead of hero when no sessions
+    empty.style.display = 'none';
     layout.style.display = 'none';
+    _menuActive = true;
+    menuView.classList.add('visible');
+    renderMenuSessions();
+    renderSessionTabs();
   } else {
     empty.style.display = 'none';
+    menuView.classList.remove('visible');
     layout.style.display = 'flex';
   }
 }
