@@ -8376,10 +8376,20 @@ function _populatePromptFields() {
   });
 }
 
+// Which runtime fields each scaffold gets in the Prompts tab
+const _PROMPTS_TAB_FEATURES = {
+  linear:           { compact: true,  interrupt: false },
+  linear_interrupt: { compact: true,  interrupt: true  },
+  rlm:              { compact: false, interrupt: false },
+  three_system:     { compact: false, interrupt: true  },
+  two_system:       { compact: false, interrupt: true  },
+};
+
 function renderPromptsTab() {
   const container = document.getElementById('promptsTabBody');
   if (!container) return;
   const schemaId = localStorage.getItem('arc_scaffolding_type') || 'linear';
+  const features = _PROMPTS_TAB_FEATURES[schemaId] || { compact: false, interrupt: false };
   const promptSections = _getPromptSections(schemaId);
   let html = '';
   for (const { section, name, label } of promptSections) {
@@ -8388,12 +8398,16 @@ function renderPromptsTab() {
     html += `<textarea data-prompt-key="${key}" rows="6" placeholder="${key}..."`;
     html += ` onblur="_savePromptField(this)"></textarea></div>`;
   }
-  // Runtime fields: compact summary + interrupt result
-  html += '<div class="mem-section"><label>Compact Summary <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(auto-generated, editable)</span></label>';
-  html += '<textarea id="memoryCompactSummary" rows="3" placeholder="No compact summary yet." onblur="applyCompactEdit()"></textarea></div>';
-  html += '<div class="mem-section"><label>Interrupt Result <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(last response, read-only)</span></label>';
-  html += '<textarea id="memoryInterruptResult" rows="2" readonly placeholder="—" style="opacity:0.8;"></textarea></div>';
-  html += '<div style="font-size:9px;color:var(--dim);margin-top:4px;font-style:italic;">Edits auto-save to your browser on blur.</div>';
+  // Runtime fields (read-only, auto-generated) — only shown for relevant scaffolds
+  if (features.compact) {
+    html += '<div class="mem-section"><label>Compact Summary <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(auto-generated)</span></label>';
+    html += '<textarea id="memoryCompactSummary" rows="3" readonly placeholder="No compact summary yet." style="opacity:0.8;"></textarea></div>';
+  }
+  if (features.interrupt) {
+    html += '<div class="mem-section"><label>Interrupt Result <span style="font-size:10px;color:var(--text-dim);text-transform:none;">(auto-generated)</span></label>';
+    html += '<textarea id="memoryInterruptResult" rows="2" readonly placeholder="—" style="opacity:0.8;"></textarea></div>';
+  }
+  html += '<div style="font-size:9px;color:var(--dim);margin-top:4px;font-style:italic;">Edits to prompt templates auto-save to your browser on blur.</div>';
   container.innerHTML = html;
   _populatePromptFields();
   // Restore runtime fields
