@@ -2181,6 +2181,9 @@ function attachSessionView(sid) {
   const host = document.getElementById('sessionViewHost');
   const ss = sessions.get(sid);
   if (!ss) return;
+  // Remove any existing #mainLayout (static or stale) before attaching
+  const existing = host.querySelector('#mainLayout');
+  if (existing) existing.remove();
   if (!ss._viewEl) ss._viewEl = createSessionView();
   ss._viewEl.id = 'mainLayout';
   host.appendChild(ss._viewEl);
