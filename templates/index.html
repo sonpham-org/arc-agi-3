@@ -858,6 +858,9 @@
                 Start a game and enable LLM reasoning to see analysis here.
               </div>
             </div>
+            <div class="reasoning-toolbar" style="display:flex;justify-content:flex-end;padding:4px 10px;border-top:1px solid var(--border);flex-shrink:0;">
+              <button class="btn" style="font-size:10px;padding:2px 8px;" onclick="copyReasoningLog()">Copy Log</button>
+            </div>
             <div id="adBanner" class="ad-banner">
               <div class="ad-banner-header">
                 <span class="ad-support-msg">Support this project</span>
@@ -4287,6 +4290,74 @@ function esc(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 function scrollReasoningToBottom() {
   const el = document.getElementById('reasoningContent');
   if (el) el.scrollTop = el.scrollHeight;
+}
+function copyReasoningLog() {
+  const s = getActiveSession();
+  const buf = s ? s.sessionStepsBuffer : sessionStepsBuffer;
+  if (!buf || !buf.length) {
+    navigator.clipboard.writeText('(no steps recorded)');
+    _flashCopyBtn('Copied (empty)');
+    return;
+  }
+  const lines = [];
+  lines.push(`=== Reasoning Log (${buf.length} steps) ===`);
+  lines.push(`Session: ${s?.sessionId || sessionId || '?'}`);
+  lines.push(`Game: ${s?.gameId || ''}`);
+  lines.push(`Model: ${s?.model || getSelectedModel() || '?'}`);
+  lines.push('');
+  for (const step of buf) {
+    lines.push(`--- Step ${step.step_num} | Action ${step.action} (${ACTION_NAMES[step.action] || '?'}) ---`);
+    if (step.data && Object.keys(step.data).length) lines.push(`Data: ${JSON.stringify(step.data)}`);
+    if (step.levels_completed !== undefined) lines.push(`Levels: ${step.levels_completed} | State: ${step.result_state || '?'}`);
+    const resp = step.llm_response;
+    if (resp) {
+      if (resp.parsed) {
+        const p = resp.parsed;
+        if (p.observation) lines.push(`Observation: ${p.observation}`);
+        if (p.reasoning) lines.push(`Reasoning: ${p.reasoning}`);
+        if (p.plan && Array.isArray(p.plan)) {
+          lines.push(`Plan (${p.plan.length} actions): ${JSON.stringify(p.plan)}`);
+        } else if (p.action !== undefined) {
+          lines.push(`Action: ${p.action} Data: ${JSON.stringify(p.data || {})}`);
+        }
+      }
+      if (resp.model) lines.push(`Model: ${resp.model}`);
+      if (resp.scaffolding) lines.push(`Scaffolding: ${resp.scaffolding}`);
+      // RLM iteration log
+      if (resp.rlm?.log?.length) {
+        lines.push(`RLM: ${resp.rlm.iterations} iterations, ${resp.rlm.sub_calls || 0} sub-calls`);
+        for (const it of resp.rlm.log) {
+          lines.push(`  [Iter ${it.iteration + 1}]${it.code_blocks ? ` (${it.code_blocks} code blocks)` : ''}`);
+          if (it.error) { lines.push(`    ERROR: ${it.error}`); continue; }
+          if (it.response) lines.push(`    Response: ${it.response.substring(0, 2000)}${it.response.length > 2000 ? '...' : ''}`);
+          if (it.repl_outputs?.length) {
+            for (const o of it.repl_outputs) lines.push(`    REPL: ${o.substring(0, 1000)}${o.length > 1000 ? '...' : ''}`);
+          }
+        }
+        if (resp.rlm.final_answer) lines.push(`  FINAL: ${resp.rlm.final_answer}`);
+      }
+      // Three-system planner log
+      if (resp.three_system?.planner_log?.length) {
+        lines.push(`Planner log (${resp.three_system.planner_log.length} iterations):`);
+        for (const it of resp.three_system.planner_log) {
+          lines.push(`  [Iter] ${JSON.stringify(it).substring(0, 500)}`);
+        }
+      }
+      if (resp.raw && !resp.rlm && !resp.three_system) {
+        lines.push(`Raw: ${resp.raw.substring(0, 1000)}${resp.raw.length > 1000 ? '...' : ''}`);
+      }
+    }
+    lines.push('');
+  }
+  navigator.clipboard.writeText(lines.join('\n'));
+  _flashCopyBtn('Copied!');
+}
+function _flashCopyBtn(msg) {
+  const btn = document.querySelector('.reasoning-toolbar button');
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => { btn.textContent = orig; }, 1500);
 }
 function getLastReasoningEntry() {
   const el = document.getElementById('reasoningContent');
