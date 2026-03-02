@@ -82,11 +82,15 @@ python test_providers.py groq     # test single provider
 
 Each test sends one short prompt and validates the response parses as JSON. Total cost: <$0.01 for all paid providers combined.
 
+## Default Test Game
+
+Use **LS20** (`ls20`) as the default game for all smoke tests and manual testing.
+
 ## Batch Runner
 
 ```bash
 # Single game smoke test
-python batch_runner.py --games fd01 --concurrency 1 --max-steps 10
+python batch_runner.py --games ls20 --concurrency 1 --max-steps 10
 
 # All games, 4 workers
 python batch_runner.py --games all --concurrency 4
@@ -152,5 +156,5 @@ Before every push to staging, run:
 ```bash
 python test_providers.py          # all provider API paths work
 python -c "import db; import server; import agent; import batch_runner; print('OK')"  # import check
-python batch_runner.py --games fd01 --concurrency 1 --max-steps 5  # smoke test
+python batch_runner.py --games ls20 --concurrency 1 --max-steps 5  # smoke test
 ```
