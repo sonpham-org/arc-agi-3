@@ -1303,6 +1303,39 @@ def _post_game(arcade, game_id: str, history: list, result: str,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# OBSERVABILITY SERVER (auto-started with --obs)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_obs_server = None
+
+
+def _start_obs_server(port: int = 5111):
+    """Start the Flask server in a background thread for the /obs dashboard."""
+    global _obs_server
+    try:
+        from server import app
+        from werkzeug.serving import make_server
+        _obs_server = make_server("0.0.0.0", port, app)
+        t = threading.Thread(target=_obs_server.serve_forever, daemon=True)
+        t.start()
+        print(f"\n  Observatory dashboard: http://localhost:{port}/obs\n")
+    except Exception as e:
+        print(f"  [obs] Failed to start dashboard server: {e}")
+
+
+def _obs_keepalive(seconds: int = 60):
+    """Keep the process alive so the dashboard remains accessible after the run."""
+    if _obs_server is None:
+        return
+    print(f"\n  Run complete. Dashboard still live for {seconds}s — Ctrl+C to exit early.")
+    try:
+        time.sleep(seconds)
+    except KeyboardInterrupt:
+        pass
+    print("  Observatory shutting down.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1330,6 +1363,7 @@ def main() -> None:
         cfg["reasoning"]["planning_horizon"] = args.planning_horizon
     if args.obs:
         cfg["observability"] = True
+        _start_obs_server()
 
     if args.list_models:
         print("\nAvailable models:\n")
@@ -1399,6 +1433,9 @@ def main() -> None:
     for gid, res in results.items():
         print(f"  {gid:15s} -> {res}")
     print(f"\n  Scorecard: {arcade.get_scorecard()}\n")
+
+    if args.obs:
+        _obs_keepalive(60)
 
 
 if __name__ == "__main__":
