@@ -1,0 +1,7 @@
+- Simplify the state of the game whenever possible for understanding (but not too simple).
+- Bar/meter changes along edges tend to be health bars, not real progress.
+- Large uniform regions = background/walls. Small shapes = player/items.
+- ACTION5 often cycles or toggles something context-dependent.
+- ACTION7 is a secondary interact (rotate, swap, etc.).
+- ACTION0 = RESET. Only use as a last resort.
+- Try all directional actions first to understand movement.

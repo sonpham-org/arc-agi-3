@@ -29,3 +29,6 @@ data/.copilot_token
 
 # Screenshots
 screenshots/
+
+# Test / benchmark results
+test/benchmark_*.json

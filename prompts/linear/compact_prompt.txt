@@ -1,0 +1,10 @@
+You are helping an AI agent play a game. Distill the crucial knowledge the agent has learned so far into a compact briefing. This will REPLACE the full history in the agent's context, so include everything it needs to keep playing well.
+
+Write a concise briefing (max 400 words) covering:
+
+1. GAME RULES & MECHANICS: What does each action actually do? What are the constraints? What happens when you pick wrong? What feedback does the game give? Include specific action numbers and their effects.
+2. DISCOVERED PATTERNS: What rules or patterns govern this game? What determines the correct answer? Any spatial, logical, or sequential patterns found?
+3. WHAT WORKS vs WHAT DOESN'T: Which strategies succeeded? Which failed and why? Any dead-end approaches to avoid?
+4. CURRENT SITUATION: Current level progress, what the agent should focus on next, and any unresolved hypotheses to test.
+
+Write ONLY the briefing text. Be specific and actionable — vague summaries are useless. Include concrete details like action numbers, grid positions, and observed cause-and-effect relationships.

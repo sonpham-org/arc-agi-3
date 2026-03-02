@@ -1,0 +1,1 @@
+0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black 6=Magenta 7=LightMagenta 8=Red 9=Blue 10=LightBlue 11=Yellow 12=Orange 13=Maroon 14=Green 15=Purple

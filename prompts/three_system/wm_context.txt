@@ -1,0 +1,12 @@
+## GAME: {game_id} | Step: {step_num} | Levels: {levels_done}/{win_levels}
+
+## CURRENT RULES (v{rules_version})
+{rules_doc}
+
+## NEW OBSERVATIONS (steps {obs_start}-{obs_end})
+{observations_text}
+
+## YOUR TASK
+Analyze the new observations and update your rules document.
+You can query historical step data for more detail, or commit updated rules.
+Turn {turn_num}/{max_turns}

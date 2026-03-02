@@ -27,8 +27,16 @@ context:
   region_map: false
 
   # How many recent moves to show in the prompt.
-  # Larger window = more context but more tokens per call.
-  history_length: 10
+  # 0 = show ALL history (no truncation). Positive = last N entries.
+  history_length: 0
+
+  # Include LLM reasoning trace in history entries sent to the model.
+  # When true, each history line includes the LLM's observation + reasoning.
+  reasoning_trace: false
+
+  # Token budget for context. When estimated history tokens exceed ~60% of this,
+  # trigger compaction. Set to 0 to disable token-based compaction.
+  max_context_tokens: 100000
 
   # Inject relevant hard-memory facts (from memory/MEMORY.md) into each prompt.
   # The agent uses this to recall what it already knows about a game.
@@ -63,8 +71,29 @@ reasoning:
   # Max output tokens for action decisions.
   max_tokens: 2048
 
+  # Max actions per LLM call (1 = current single-action behavior).
+  # Higher values let the model plan ahead and execute multi-step sequences.
+  planning_horizon: 5
+
   # Max output tokens for condensation / reflection passes.
   reflection_max_tokens: 1024
+
+  # ── Scaffolding models (3-system mode) ──────────────────────────────────
+  # Set to null to reuse executor_model.
+
+  # Model for the Planner REPL (expensive, needs strong reasoning).
+  planner_model: null
+
+  # Model for the Monitor (cheap, fast single-shot check).
+  monitor_model: null
+
+  # Model for the World Model REPL (medium, builds game understanding).
+  world_model_model: null
+
+  # Max output tokens per system role.
+  planner_max_tokens: 4096
+  monitor_max_tokens: 512
+  world_model_max_tokens: 2048
 
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
@@ -93,9 +122,32 @@ memory:
   # ── In-context history condensation ──────────────────────────────────────
 
   # Summarise the oldest history entries every N steps.
-  # Set to 0 to disable condensation entirely.
-  condense_every: 25
+  # Set to 0 to disable step-count condensation (use token-based instead).
+  condense_every: 0
 
   # If accumulated history exceeds this many entries, force a condensation
-  # pass regardless of the condense_every counter.
-  condense_threshold: 50
+  # pass regardless of the condense_every counter. 0 = disabled.
+  condense_threshold: 0
+
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │  SCAFFOLDING BLOCK                                                       │
+# │  Controls the 3-system agent architecture (Planner/Monitor/World Model).│
+# └──────────────────────────────────────────────────────────────────────────┘
+scaffolding:
+
+  # "single" = original play_game, "three_system" = scaffold agent
+  mode: "single"
+
+  # Max REPL iterations for the Planner (simulate/analyze/commit loop).
+  planner_max_turns: 10
+
+  # Max REPL iterations for the World Model (query/commit loop).
+  world_model_max_turns: 5
+
+  # How often (in executed steps) to trigger a World Model update.
+  world_model_update_every: 5
+
+  # Plan length bounds.
+  max_plan_length: 15
+  min_plan_length: 3

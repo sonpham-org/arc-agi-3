@@ -10,10 +10,6 @@ import os
 import re
 import secrets
 import sqlite3
-try:
-    import libsql_experimental as libsql
-except ImportError:
-    libsql = None
 import sys
 import io
 import threading
@@ -43,33 +39,41 @@ app.logger.setLevel(logging.INFO)
 # ═══════════════════════════════════════════════════════════════════════════
 
 FEATURES = {
-    "copilot":       {"local": False,  "online": False},
-    "server_llm":    {"local": True,  "online": False},
-    "puter_js":      {"local": True,  "online": True},
-    "byok":          {"local": True,  "online": True},
-    "session_db":    {"local": True,  "online": True},
-    "memory_md":     {"local": True,  "online": False},
-    "pyodide_game":  {"local": True,  "online": True},
+    "copilot":       {"staging": False,  "prod": False},
+    "server_llm":    {"staging": False,  "prod": False},  # removed: all LLM calls are client-side
+    "puter_js":      {"staging": True,   "prod": True},
+    "byok":          {"staging": True,   "prod": True},
+    "session_db":    {"staging": True,   "prod": True},
+    "memory_md":     {"staging": True,   "prod": False},
+    "pyodide_game":  {"staging": True,   "prod": True},
 }
 
-# Will be set by CLI args; default to local
-_server_mode = "local"
-_server_port_local = 5000
-_server_port_online = 5001
+# Games hidden in prod mode (non-foundation games)
+HIDDEN_GAMES = ["fd01", "fy01", "pi01", "pt01"]
+
+# Will be set by CLI args; default to staging
+_server_mode = "staging"
+_server_port_staging = 5000
+_server_port_prod = 5001
 
 
 def get_mode() -> str:
     """Determine mode from SERVER_MODE env var or port the request arrived on."""
     env_mode = os.environ.get("SERVER_MODE", "")
-    if env_mode in ("local", "online"):
+    if env_mode in ("staging", "prod"):
         return env_mode
+    # Legacy compat: treat "local" as staging, "online" as prod
+    if env_mode == "local":
+        return "staging"
+    if env_mode == "online":
+        return "prod"
     try:
-        port = int(request.environ.get("SERVER_PORT", _server_port_local))
-        if port == _server_port_online:
-            return "online"
+        port = int(request.environ.get("SERVER_PORT", _server_port_staging))
+        if port == _server_port_prod:
+            return "prod"
     except (ValueError, RuntimeError):
         pass
-    return "local"
+    return "staging"
 
 
 def feature_enabled(name: str) -> bool:
@@ -92,6 +96,10 @@ TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 # Analytics — Umami (set both env vars to enable)
 UMAMI_URL = os.environ.get("UMAMI_URL", "")          # e.g. https://umami.example.com
 UMAMI_WEBSITE_ID = os.environ.get("UMAMI_WEBSITE_ID", "")
+
+# Magic link email — Resend (free tier: 100 emails/day)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("RESEND_FROM", "noreply@arc3.sonpham.net")
 
 BOT_UA_PATTERNS = [
     "bot", "crawler", "spider", "scraper", "wget", "curl", "python-requests",
@@ -152,8 +160,8 @@ def _verify_turnstile_token(token: str, ip: str) -> bool:
 
 
 def _is_turnstile_verified() -> bool:
-    if get_mode() == "local":
-        return True  # skip Turnstile in local mode
+    if get_mode() == "staging":
+        return True  # skip Turnstile in staging mode
     if not TURNSTILE_SITE_KEY or not TURNSTILE_SECRET_KEY:
         return True  # skip if not configured
     token_hash = request.cookies.get("ts_verified", "")
@@ -169,10 +177,10 @@ def _is_turnstile_verified() -> bool:
 
 
 def bot_protection(f):
-    """UA filtering + rate limiting on API routes (online mode only)."""
+    """UA filtering + rate limiting on API routes (prod mode only)."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if get_mode() == "local":
+        if get_mode() == "staging":
             return f(*args, **kwargs)
         ip = _get_client_ip()
         ua = request.headers.get("User-Agent", "")
@@ -194,6 +202,30 @@ def turnstile_required(f):
             return jsonify({"error": "Human verification required", "need_turnstile": True}), 403
         return f(*args, **kwargs)
     return decorated
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────
+
+_auth_cache: dict[str, tuple[dict, float]] = {}  # token → (user_dict, cache_expiry)
+_AUTH_CACHE_TTL = 300  # 5 minutes
+
+
+def get_current_user() -> dict | None:
+    """Get the currently authenticated user from the arc_auth cookie, or None."""
+    token = request.cookies.get("arc_auth")
+    if not token:
+        return None
+    now = time.time()
+    cached = _auth_cache.get(token)
+    if cached and cached[1] > now:
+        return cached[0]
+    user = _turso_verify_auth_token(token)
+    if user:
+        _auth_cache[token] = (user, now + _AUTH_CACHE_TTL)
+    else:
+        _auth_cache.pop(token, None)
+    return user
+
 
 # ── Global state ───────────────────────────────────────────────────────────
 
@@ -265,138 +297,14 @@ _provider_last_call: dict[str, float] = {}  # provider → last call unix time
 _throttle_lock = threading.Lock()
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SQLite SESSION PERSISTENCE
+# SQLite SESSION PERSISTENCE (extracted to db.py)
 # ═══════════════════════════════════════════════════════════════════════════
 
-DB_PATH = Path(__file__).parent / "data" / "sessions.db"
-
-
-def _init_db():
-    """Create the sessions database and tables if they don't exist."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            game_id TEXT NOT NULL,
-            model TEXT DEFAULT '',
-            mode TEXT DEFAULT 'local',
-            created_at REAL NOT NULL,
-            result TEXT DEFAULT 'NOT_FINISHED',
-            steps INTEGER DEFAULT 0,
-            levels INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS session_steps (
-            session_id TEXT NOT NULL,
-            step_num INTEGER NOT NULL,
-            action INTEGER NOT NULL,
-            data_json TEXT DEFAULT '{}',
-            grid_snapshot TEXT,
-            change_map_json TEXT,
-            llm_response_json TEXT,
-            timestamp REAL NOT NULL,
-            PRIMARY KEY (session_id, step_num),
-            FOREIGN KEY (session_id) REFERENCES sessions(id)
-        );
-    """)
-    # Schema migration: add columns (idempotent)
-    for col, defn in [("parent_session_id", "TEXT DEFAULT NULL"),
-                      ("branch_at_step", "INTEGER DEFAULT NULL"),
-                      ("total_cost", "REAL DEFAULT 0"),
-                      ("prompts_json", "TEXT DEFAULT NULL"),
-                      ("timeline_json", "TEXT DEFAULT NULL")]:
-        try:
-            conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-    # Session events table (compaction, branch, resume tracking)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS session_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            step_num INTEGER,
-            data_json TEXT DEFAULT '{}',
-            timestamp REAL NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(id)
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def _get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _compress_grid(grid: list) -> str:
-    """Compress a grid to zlib+base64 for storage."""
-    raw = json.dumps(grid).encode()
-    return base64.b64encode(zlib.compress(raw)).decode()
-
-
-def _decompress_grid(data: str) -> list:
-    """Decompress a zlib+base64 grid."""
-    return json.loads(zlib.decompress(base64.b64decode(data)))
-
-
-def _db_insert_session(session_id: str, game_id: str, mode: str):
-    """Insert a new session record."""
-    try:
-        conn = _get_db()
-        conn.execute(
-            "INSERT OR IGNORE INTO sessions (id, game_id, mode, created_at) VALUES (?, ?, ?, ?)",
-            (session_id, game_id, mode, time.time()),
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"DB insert session failed: {e}")
-
-
-def _db_insert_step(session_id: str, step_num: int, action: int,
-                     data: dict, grid: list, change_map: dict,
-                     llm_response: dict | None = None):
-    """Insert a step record with compressed grid."""
-    try:
-        conn = _get_db()
-        conn.execute(
-            "INSERT OR REPLACE INTO session_steps "
-            "(session_id, step_num, action, data_json, grid_snapshot, change_map_json, llm_response_json, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                session_id, step_num, action,
-                json.dumps(data),
-                _compress_grid(grid) if grid else None,
-                json.dumps(change_map) if change_map else None,
-                json.dumps(llm_response) if llm_response else None,
-                time.time(),
-            ),
-        )
-        conn.execute(
-            "UPDATE sessions SET steps = ?, result = (SELECT result FROM sessions WHERE id = ?) WHERE id = ?",
-            (step_num, session_id, session_id),
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"DB insert step failed: {e}")
-
-
-def _db_update_session(session_id: str, **kwargs):
-    """Update session fields."""
-    try:
-        conn = _get_db()
-        sets = ", ".join(f"{k} = ?" for k in kwargs)
-        conn.execute(f"UPDATE sessions SET {sets} WHERE id = ?",
-                     (*kwargs.values(), session_id))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"DB update session failed: {e}")
+from db import (
+    DB_PATH, _init_db, _get_db, _compress_grid, _decompress_grid,
+    _db_insert_session, _db_insert_step, _db_update_session,
+    _log_llm_call, _get_session_calls,
+)
 
 def _reconstruct_session(game_id: str, actions: list[dict], capture_per_step: bool = False):
     """Replay a list of {action, data} dicts on a fresh env. Returns (env, state_dict).
@@ -465,154 +373,18 @@ def _try_recover_session(session_id: str):
         return None, None
 
 
-# Initialize DB at import time (for gunicorn/Railway)
-_init_db()
+# DB + Turso initialized at import time via db.py
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TURSO — shared remote DB for persistent session replays
-# ═══════════════════════════════════════════════════════════════════════════
-
-TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
-
-
-def _get_turso_db():
-    """Return a libsql connection to Turso, or None if not configured."""
-    if not libsql or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
-        return None
-    try:
-        conn = libsql.connect("db/turso_replica.db",
-                              sync_url=TURSO_DATABASE_URL,
-                              auth_token=TURSO_AUTH_TOKEN)
-        conn.sync()
-        return conn
-    except Exception as e:
-        logging.warning(f"Turso connection failed: {e}")
-        return None
-
-
-def _turso_dict_fetchone(cursor):
-    """Convert a single libsql tuple row to dict using cursor.description."""
-    row = cursor.fetchone()
-    if not row:
-        return None
-    cols = [d[0].lower() for d in cursor.description]
-    return dict(zip(cols, row))
-
-
-def _turso_dict_fetchall(cursor):
-    """Convert all libsql tuple rows to dicts using cursor.description."""
-    rows = cursor.fetchall()
-    if not rows:
-        return []
-    cols = [d[0].lower() for d in cursor.description]
-    return [dict(zip(cols, r)) for r in rows]
-
-
-def _init_turso_db():
-    """Create tables on Turso (idempotent). Called at import time."""
-    conn = _get_turso_db()
-    if not conn:
-        return
-    try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                game_id TEXT NOT NULL,
-                model TEXT DEFAULT '',
-                mode TEXT DEFAULT 'local',
-                created_at REAL NOT NULL,
-                result TEXT DEFAULT 'NOT_FINISHED',
-                steps INTEGER DEFAULT 0,
-                levels INTEGER DEFAULT 0,
-                parent_session_id TEXT DEFAULT NULL,
-                branch_at_step INTEGER DEFAULT NULL,
-                total_cost REAL DEFAULT 0,
-                prompts_json TEXT DEFAULT NULL,
-                timeline_json TEXT DEFAULT NULL
-            );
-            CREATE TABLE IF NOT EXISTS session_steps (
-                session_id TEXT NOT NULL,
-                step_num INTEGER NOT NULL,
-                action INTEGER NOT NULL,
-                data_json TEXT DEFAULT '{}',
-                grid_snapshot TEXT,
-                change_map_json TEXT,
-                llm_response_json TEXT,
-                timestamp REAL NOT NULL,
-                PRIMARY KEY (session_id, step_num),
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
-            );
-        """)
-        # Schema migration: add columns (idempotent)
-        for col, defn in [("prompts_json", "TEXT DEFAULT NULL"),
-                          ("timeline_json", "TEXT DEFAULT NULL")]:
-            try:
-                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
-            except Exception:
-                pass  # column already exists
-        conn.commit()
-        conn.sync()
-        conn.close()
-        logging.info("Turso DB initialized successfully")
-    except Exception as e:
-        logging.warning(f"Turso DB init failed: {e}")
-
-
-def _turso_import_session(payload):
-    """Write a session + steps to Turso. Reuses same compression logic as local DB."""
-    conn = _get_turso_db()
-    if not conn:
-        return False
-    try:
-        sess = payload.get("session")
-        steps = payload.get("steps", [])
-        prompts_json = json.dumps(sess.get("prompts")) if sess.get("prompts") else None
-        timeline_json = json.dumps(sess.get("timeline")) if sess.get("timeline") else None
-        conn.execute(
-            """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET
-                 result = excluded.result, steps = excluded.steps, levels = excluded.levels,
-                 model = COALESCE(excluded.model, sessions.model),
-                 prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
-                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json)""",
-            (sess["id"], sess["game_id"], sess.get("model", ""),
-             sess.get("mode", "online"), sess.get("created_at", time.time()),
-             sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
-             sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json),
-        )
-        for s in steps:
-            grid_snapshot = None
-            if s.get("grid"):
-                grid_snapshot = _compress_grid(s["grid"])
-            conn.execute(
-                """INSERT OR REPLACE INTO session_steps
-                   (session_id, step_num, action, data_json, grid_snapshot,
-                    change_map_json, llm_response_json, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (sess["id"], s.get("step_num", 0), s.get("action", 0),
-                 json.dumps(s.get("data", {})),
-                 grid_snapshot,
-                 json.dumps(s.get("change_map")) if s.get("change_map") else None,
-                 json.dumps(s.get("llm_response")) if s.get("llm_response") else None,
-                 s.get("timestamp", time.time())),
-            )
-        conn.commit()
-        conn.sync()
-        conn.close()
-        logging.info(f"Turso: imported session {sess['id']} ({len(steps)} steps)")
-        return True
-    except Exception as e:
-        logging.warning(f"Turso import failed: {e}")
-        return False
-
-
-# Initialize Turso DB at import time
-_init_turso_db()
+from db import (
+    TURSO_DATABASE_URL, TURSO_AUTH_TOKEN,
+    _get_turso_db, _turso_dict_fetchone, _turso_dict_fetchall,
+    _init_turso_db, _turso_import_session,
+    _turso_find_or_create_user, _turso_create_auth_token,
+    _turso_verify_auth_token, _turso_create_magic_link,
+    _turso_verify_magic_link, _turso_delete_auth_token,
+    _turso_claim_sessions, _turso_get_user_sessions,
+    _turso_count_recent_magic_links, AUTH_TOKEN_TTL,
+)
 
 
 COLOR_MAP = {
@@ -634,22 +406,22 @@ ACTION_NAMES = {
     4: "ACTION4", 5: "ACTION5", 6: "ACTION6", 7: "ACTION7",
 }
 
-ARC_AGI3_DESCRIPTION = """\
-ARC-AGI-3 is an interactive reasoning benchmark. Each game is a 64x64 pixel
-grid with 16 colors (0-15).  There are NO instructions — you must discover the
-rules and goals by experimenting.
+ARC_AGI3_DESCRIPTION = (Path(__file__).parent / "prompts" / "shared" / "arc_description.txt").read_text().strip()
 
-Action mappings:
-- ACTION1 = UP, ACTION2 = DOWN, ACTION3 = LEFT, ACTION4 = RIGHT (directional movement)
-- ACTION5 = context-dependent (cycle, toggle, interact — varies by game)
-- ACTION6 = CLICK at (x, y) — for selecting, placing, or interacting with specific cells
-- ACTION7 = context-dependent (secondary interact, rotate, swap — varies by game)
-- ACTION0 = RESET — restarts the current level. Use only as a last resort.
 
-Key facts:
-- States: NOT_FINISHED (playing), WIN (all levels done), GAME_OVER (failed).
-- Large uniform regions = background/walls. Small shapes = player/items.
-- Edge bars = health/energy/progress meters."""
+def _load_prompts():
+    """Load all prompt .txt files from prompts/ directory for injection into templates."""
+    base = Path(__file__).parent / "prompts"
+    result = {}
+    for section in sorted(base.iterdir()):
+        if section.is_dir():
+            result[section.name] = {
+                f.stem: f.read_text() for f in sorted(section.glob("*.txt"))
+            }
+    return result
+
+
+# Prompts are loaded fresh per-request via _load_prompts() in the index route
 
 SYSTEM_MSG = (
     "You are an expert puzzle-solving AI agent. Analyse game grids and output "
@@ -896,6 +668,7 @@ MODEL_REGISTRY: dict[str, dict] = {
 
 # Ollama models discovered at runtime; all support text only by default.
 OLLAMA_VRAM = {
+    "qwen3.5:35b-a3b": "~24GB",
     "qwen2.5:32b": "~19GB", "qwen2.5:14b": "~9GB", "qwen3-8b:latest": "~5GB",
     "deepseek-r1:latest": "~5GB", "mistral:7b": "~4.4GB",
     "llama3.1:latest": "~4.9GB", "llama3:latest": "~4.7GB",
@@ -904,6 +677,9 @@ OLLAMA_VRAM = {
 
 # Models that support vision via Ollama (llava family)
 OLLAMA_VISION_MODELS = {"llava", "llava:latest", "llava:13b", "bakllava"}
+
+# Runtime dict of discovered local OpenAI-compatible models (populated by /api/llm/models)
+_discovered_local_models: dict = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1173,6 +949,18 @@ def _cleanup_tool_session(session_id: str):
         _tool_sessions.pop(session_id, None)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SCAFFOLDING — imported from scaffoldings/ package
+# ═══════════════════════════════════════════════════════════════════════════
+
+from scaffoldings.rlm.handler import handle_rlm_scaffolding as _handle_rlm_scaffolding_impl  # noqa: used by agent.py
+from scaffoldings.three_system.handler import (  # noqa: used by agent.py
+    handle_three_system_scaffolding as _handle_three_system_scaffolding_impl,
+)
+# Server-side LLM route wrappers removed — all LLM calls are now client-side
+
+
+_SCAFFOLDING_PLACEHOLDER = True  # inline code moved to scaffoldings/ package
 # ═══════════════════════════════════════════════════════════════════════════
 # GEMINI CONTEXT CACHING
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1477,7 +1265,7 @@ def _extract_json(text: str) -> dict | None:
                 if depth == 0:
                     try:
                         obj = json.loads(cleaned[i : j + 1])
-                        if "action" in obj or "plan" in obj:
+                        if "action" in obj or "plan" in obj or "type" in obj or "verdict" in obj:
                             return obj
                     except json.JSONDecodeError:
                         pass
@@ -1546,6 +1334,59 @@ def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
         response = client.models.generate_content(
             model=model_name, contents=contents, config=config,
         )
+
+        # Check for MALFORMED_FUNCTION_CALL — model tried to call a tool
+        # but formatted it as a code block instead of a proper function call.
+        # Extract the code and execute it as if it were a run_python call.
+        if response.candidates:
+            fr = getattr(response.candidates[0], 'finish_reason', None)
+            fr_str = str(fr).upper() if fr else ""
+            if "MALFORMED" in fr_str and tools_enabled and session_id:
+                # Try to extract code from the malformed response
+                raw_text = ""
+                try:
+                    raw_text = response.text or ""
+                except Exception:
+                    # content may be empty; try finish_message
+                    fm = getattr(response.candidates[0], 'finish_message', None)
+                    if fm:
+                        raw_text = fm
+                # Extract code from ```python ... ``` blocks
+                import re as _re
+                code_match = _re.search(r'```python\s*\n(.*?)```', raw_text, _re.DOTALL)
+                if code_match:
+                    code = code_match.group(1).strip()
+                    app.logger.info(
+                        f"Recovered code from MALFORMED_FUNCTION_CALL (len={len(code)}), executing as run_python"
+                    )
+                    output = _execute_python(session_id, code, grid, prev_grid)
+                    tool_calls_log.append({
+                        "name": "run_python",
+                        "arguments": {"code": code},
+                        "output": output,
+                    })
+                    # Feed the result back to the model (without tools, to get a text answer)
+                    contents.append(genai.types.Content(
+                        role="model",
+                        parts=[genai.types.Part.from_function_call(
+                            name="run_python", args={"code": code}
+                        )],
+                    ))
+                    contents.append(genai.types.Content(
+                        role="user",
+                        parts=[genai.types.Part.from_function_response(
+                            name="run_python",
+                            response={"result": output},
+                        )],
+                    ))
+                    config.tools = None  # force text answer on next round
+                    continue  # next round
+                else:
+                    app.logger.warning(
+                        "MALFORMED_FUNCTION_CALL but couldn't extract code, retrying without tools"
+                    )
+                    config.tools = None
+                    continue  # retry this round without tools
 
         # Check for function calls in the response
         has_function_call = False
@@ -1825,8 +1666,14 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
     """
     info = MODEL_REGISTRY.get(model_key)
 
-    # If not in registry, try ollama
+    # If not in registry, check runtime-discovered local models, then try ollama
     if info is None:
+        if model_key in _discovered_local_models:
+            local_info = _discovered_local_models[model_key]
+            port = local_info["local_port"]
+            api_model = local_info.get("api_model", model_key)
+            url = f"http://localhost:{port}/v1/chat/completions"
+            return _call_openai_compatible(url, "no-key-needed", api_model, prompt, image_b64, max_tokens=max_tokens)
         return _call_ollama(model_key, prompt, image_b64)
 
     provider = info["provider"]
@@ -1879,11 +1726,12 @@ def add_cache_headers(response):
 def index():
     mode = get_mode()
     features = get_enabled_features()
-    ts_key = TURNSTILE_SITE_KEY if mode == "online" else ""
+    ts_key = TURNSTILE_SITE_KEY if mode == "prod" else ""
     return render_template("index.html", color_map=COLOR_MAP,
                            turnstile_site_key=ts_key,
                            mode=mode, features=features,
-                           umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID)
+                           umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
+                           prompts=_load_prompts())
 
 
 @app.route("/api/turnstile/verify", methods=["POST"])
@@ -1911,16 +1759,151 @@ def turnstile_verify():
     return resp
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# AUTH — Magic link email login
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _send_magic_email(email: str, code: str) -> bool:
+    """Send a magic link email via Resend API. Returns True on success."""
+    if not RESEND_API_KEY:
+        app.logger.warning("RESEND_API_KEY not set — cannot send magic link email")
+        return False
+    base_url = request.host_url.rstrip("/")
+    link = f"{base_url}/api/auth/verify?code={code}"
+    try:
+        resp = _httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                     "Content-Type": "application/json"},
+            json={
+                "from": RESEND_FROM,
+                "to": [email],
+                "subject": "Your ARC-AGI-3 login link",
+                "html": (
+                    f"<p>Click the link below to log in to ARC-AGI-3:</p>"
+                    f'<p><a href="{link}">{link}</a></p>'
+                    f"<p>This link expires in 15 minutes and can only be used once.</p>"
+                    f"<p>If you didn't request this, you can safely ignore this email.</p>"
+                ),
+            },
+            timeout=10.0,
+        )
+        if resp.status_code >= 400:
+            app.logger.warning(f"Resend API error: {resp.status_code} {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        app.logger.warning(f"Failed to send magic link email: {e}")
+        return False
+
+
+@app.route("/api/auth/magic-link", methods=["POST"])
+@bot_protection
+def auth_magic_link():
+    """Send a magic link email. Rate limited to 3 per email per 15 min."""
+    payload = request.get_json(force=True)
+    email = (payload.get("email") or "").lower().strip()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Valid email required"}), 400
+    # Rate limit: max 3 magic links per email per 15 minutes
+    recent = _turso_count_recent_magic_links(email)
+    if recent >= 3:
+        return jsonify({"error": "Too many requests. Please wait a few minutes."}), 429
+    code = _turso_create_magic_link(email)
+    if not code:
+        return jsonify({"error": "Service unavailable"}), 503
+    sent = _send_magic_email(email, code)
+    if not sent:
+        # In staging/dev mode, log the code for manual testing
+        if get_mode() == "staging":
+            app.logger.info(f"[DEV] Magic link code for {email}: {code}")
+            return jsonify({"status": "ok", "dev_code": code})
+        return jsonify({"error": "Failed to send email"}), 500
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/auth/verify")
+@bot_protection
+def auth_verify():
+    """Verify a magic link code and log the user in."""
+    code = request.args.get("code", "")
+    if not code:
+        return "Missing code", 400
+    email = _turso_verify_magic_link(code)
+    if not email:
+        return "Invalid or expired link. Please request a new one.", 400
+    user = _turso_find_or_create_user(email)
+    if not user:
+        return "Service unavailable", 503
+    token = _turso_create_auth_token(user["id"])
+    if not token:
+        return "Service unavailable", 503
+    resp = make_response("")
+    resp.headers["Location"] = "/?logged_in=1"
+    resp.status_code = 302
+    resp.set_cookie("arc_auth", token,
+                     max_age=AUTH_TOKEN_TTL, httponly=True,
+                     samesite="Lax", secure=request.is_secure)
+    return resp
+
+
+@app.route("/api/auth/status")
+@bot_protection
+def auth_status():
+    """Return current auth state."""
+    user = get_current_user()
+    if user:
+        return jsonify({"authenticated": True, "user": {
+            "id": user["id"], "email": user["email"],
+            "display_name": user.get("display_name"),
+        }})
+    return jsonify({"authenticated": False, "user": None})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@bot_protection
+def auth_logout():
+    """Delete auth token and clear cookie."""
+    token = request.cookies.get("arc_auth")
+    if token:
+        _turso_delete_auth_token(token)
+        _auth_cache.pop(token, None)
+    resp = make_response(jsonify({"status": "ok"}))
+    resp.delete_cookie("arc_auth")
+    return resp
+
+
+@app.route("/api/auth/claim-sessions", methods=["POST"])
+@bot_protection
+def auth_claim_sessions():
+    """Associate anonymous sessions with the current user."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    payload = request.get_json(force=True)
+    session_ids = payload.get("session_ids", [])
+    if not session_ids or not isinstance(session_ids, list):
+        return jsonify({"error": "session_ids array required"}), 400
+    # Limit to 100 at a time
+    session_ids = session_ids[:100]
+    claimed = _turso_claim_sessions(user["id"], session_ids)
+    return jsonify({"status": "ok", "claimed": claimed})
+
+
 @app.route("/api/games")
 @bot_protection
 @turnstile_required
 def list_games():
     arc = get_arcade()
     envs = arc.get_environments()
-    return jsonify([
+    games = [
         {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps}
         for e in envs
-    ])
+    ]
+    # In prod mode, hide non-foundation games unless ?show_all=1
+    if get_mode() == "prod" and request.args.get("show_all") != "1":
+        games = [g for g in games if g["game_id"].split("-")[0] not in HIDDEN_GAMES]
+    return jsonify(games)
 
 
 @app.route("/api/games/<game_id>/source")
@@ -2073,6 +2056,37 @@ def reset_game():
     return jsonify(state)
 
 
+@app.route("/api/llm/cf-proxy", methods=["POST"])
+@bot_protection
+@turnstile_required
+def cf_proxy():
+    """Minimal CORS proxy for Cloudflare Workers AI (browser can't call directly)."""
+    import httpx as _hx
+    body = request.get_json(force=True) or {}
+    api_key = body.get("api_key", "")
+    account_id = body.get("account_id", "")
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    max_tokens = min(int(body.get("max_tokens", 16384)), 65536)
+    if not api_key or not account_id or not model:
+        return jsonify({"error": "api_key, account_id, and model are required"}), 400
+    try:
+        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+        resp = _hx.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"messages": messages, "temperature": 0.3, "max_tokens": max_tokens},
+            timeout=90.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        result = data.get("result", {})
+        text = result.get("response", "") if isinstance(result, dict) else str(result)
+        return jsonify({"result": text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/llm/models")
 @bot_protection
 @turnstile_required
@@ -2088,8 +2102,8 @@ def llm_models():
             if not feature_enabled("copilot"):
                 continue
             available = copilot_oauth_token is not None
-        elif mode == "online":
-            # In online mode, all server providers shown but marked unavailable
+        elif mode == "prod":
+            # In prod mode, all server providers shown but marked unavailable
             # (user provides their own key via BYOK)
             available = False
         else:
@@ -2105,8 +2119,8 @@ def llm_models():
             "available": available,
         })
 
-    # Discover Ollama models (local only)
-    if mode == "local":
+    # Discover Ollama models (staging only)
+    if mode == "staging":
         try:
             import ollama
             ollama_list = ollama.list()
@@ -2124,380 +2138,45 @@ def llm_models():
         except Exception:
             pass
 
+    # Discover local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)
+    if mode == "staging":
+        import httpx
+        LOCAL_PORTS = [
+            (1234, "LM Studio"),
+            (8080, "Local Server"),
+            (8000, "Local Server"),
+        ]
+        for port, label in LOCAL_PORTS:
+            try:
+                resp = httpx.get(f"http://localhost:{port}/v1/models", timeout=1.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    model_list = data.get("data", [])
+                    for m in model_list:
+                        mid = m.get("id", "")
+                        if not mid:
+                            continue
+                        entry = {
+                            "name": mid,
+                            "api_model": mid,
+                            "provider": "local",
+                            "local_port": port,
+                            "local_label": label,
+                            "price": f"Free ({label}:{port})",
+                            "capabilities": {"image": False, "reasoning": False, "tools": False},
+                            "available": True,
+                        }
+                        models.append(entry)
+                        _discovered_local_models[mid] = entry
+            except Exception:
+                pass
+
     return jsonify({"models": models, "mode": mode})
 
 
-@app.route("/api/llm/summarize", methods=["POST"])
-@bot_protection
-@turnstile_required
-def llm_summarize():
-    """Use a cheap/fast model to summarize game history for compact context."""
-    if not feature_enabled("server_llm"):
-        return jsonify({"error": "Server LLM not available"}), 403
-    payload = request.get_json(force=True)
-    prompt = payload.get("prompt", "")
-    if not prompt:
-        return jsonify({"error": "No prompt"}), 400
 
-    # If a specific model is requested, use it directly
-    requested_model = payload.get("model")
-    if requested_model and requested_model in MODEL_REGISTRY:
-        info = MODEL_REGISTRY[requested_model]
-        env_key = info.get("env_key", "")
-        if not env_key or os.environ.get(env_key):
-            try:
-                result = _route_model_call(requested_model, prompt, None)
-                text = result.get("text", result) if isinstance(result, dict) else result
-                return jsonify({"summary": text, "model_used": requested_model})
-            except Exception as e:
-                app.logger.warning("Summarize with requested %s failed: %s", requested_model, e)
-
-    # Fallback: auto-select model from the same provider as the agent
-    agent_model = payload.get("agent_model", "")
-    agent_provider = MODEL_REGISTRY.get(agent_model, {}).get("provider", "gemini")
-    strategy = payload.get("strategy", "cheapest")  # "cheapest" or "fastest"
-
-    # Priority lists per provider: cheapest first
-    CHEAPEST_BY_PROVIDER = {
-        "gemini":     ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
-        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
-        "groq":       ["gemma2-9b", "mixtral-8x7b", "llama-3.3-70b"],
-        "mistral":    ["open-mistral-nemo", "mistral-small"],
-        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
-        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
-        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
-    }
-    # Priority lists per provider: fastest (lowest latency) first
-    FASTEST_BY_PROVIDER = {
-        "gemini":     ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
-        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
-        "groq":       ["gemma2-9b", "llama-3.3-70b", "mixtral-8x7b"],
-        "mistral":    ["open-mistral-nemo", "mistral-small"],
-        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
-        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
-        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
-    }
-    lookup = FASTEST_BY_PROVIDER if strategy == "fastest" else CHEAPEST_BY_PROVIDER
-
-    # Try same provider first, then fall back to any provider
-    providers_to_try = [agent_provider] + [p for p in lookup if p != agent_provider]
-    for provider in providers_to_try:
-        candidates = lookup.get(provider, [])
-        for candidate in candidates:
-            # Find matching model in registry (partial match)
-            matched = None
-            for reg_name, reg_info in MODEL_REGISTRY.items():
-                if reg_info.get("provider") == provider and candidate in reg_name:
-                    env_key = reg_info.get("env_key", "")
-                    if env_key and not os.environ.get(env_key):
-                        continue
-                    matched = reg_name
-                    break
-            if not matched:
-                continue
-            try:
-                result = _route_model_call(matched, prompt, None)
-                text = result.get("text", result) if isinstance(result, dict) else result
-                return jsonify({"summary": text, "model_used": matched})
-            except Exception as e:
-                app.logger.warning("Summarize with %s failed: %s", matched, e)
-                continue
-    return jsonify({"error": "No summarization model available"}), 500
-
-
-@app.route("/api/llm/interrupt-check", methods=["POST"])
-@bot_protection
-@turnstile_required
-def llm_interrupt_check():
-    """Use a cheap/fast model to check if a plan step went as expected."""
-    if not feature_enabled("server_llm"):
-        return jsonify({"error": "Server LLM not available"}), 403
-    payload = request.get_json(force=True)
-    prompt = payload.get("prompt", "")
-    if not prompt:
-        return jsonify({"error": "No prompt"}), 400
-
-    # If a specific model is requested, use it directly
-    requested_model = payload.get("model")
-    if requested_model and requested_model in MODEL_REGISTRY:
-        info = MODEL_REGISTRY[requested_model]
-        env_key = info.get("env_key", "")
-        if not env_key or os.environ.get(env_key):
-            try:
-                result = _route_model_call(requested_model, prompt, None)
-                text = result.get("text", result) if isinstance(result, dict) else result
-                return jsonify({"result": text, "model_used": requested_model})
-            except Exception as e:
-                app.logger.warning("Interrupt check with requested %s failed: %s", requested_model, e)
-
-    # Fallback: auto-select model from the same provider as the agent
-    agent_model = payload.get("agent_model", "")
-    agent_provider = MODEL_REGISTRY.get(agent_model, {}).get("provider", "gemini")
-    strategy = payload.get("strategy", "cheapest")
-
-    CHEAPEST_BY_PROVIDER = {
-        "gemini":     ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
-        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
-        "groq":       ["gemma2-9b", "mixtral-8x7b", "llama-3.3-70b"],
-        "mistral":    ["open-mistral-nemo", "mistral-small"],
-        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
-        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
-        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
-    }
-    FASTEST_BY_PROVIDER = {
-        "gemini":     ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
-        "anthropic":  ["claude-haiku-4-5", "claude-sonnet-4-5"],
-        "groq":       ["gemma2-9b", "llama-3.3-70b", "mixtral-8x7b"],
-        "mistral":    ["open-mistral-nemo", "mistral-small"],
-        "cloudflare": ["llama-3.1-8b", "llama-3.3-70b", "qwen3-30b"],
-        "copilot":    ["gpt-5-mini", "gpt-4o", "gpt-4.1"],
-        "huggingface":["llama-3.1-70b", "qwen2.5-72b"],
-    }
-    lookup = FASTEST_BY_PROVIDER if strategy == "fastest" else CHEAPEST_BY_PROVIDER
-
-    providers_to_try = [agent_provider] + [p for p in lookup if p != agent_provider]
-    for provider in providers_to_try:
-        candidates = lookup.get(provider, [])
-        for candidate in candidates:
-            matched = None
-            for reg_name, reg_info in MODEL_REGISTRY.items():
-                if reg_info.get("provider") == provider and candidate in reg_name:
-                    env_key = reg_info.get("env_key", "")
-                    if env_key and not os.environ.get(env_key):
-                        continue
-                    matched = reg_name
-                    break
-            if not matched:
-                continue
-            try:
-                result = _route_model_call(matched, prompt, None)
-                text = result.get("text", result) if isinstance(result, dict) else result
-                return jsonify({"result": text, "model_used": matched})
-            except Exception as e:
-                app.logger.warning("Interrupt check with %s failed: %s", matched, e)
-                continue
-    return jsonify({"error": "No interrupt check model available"}), 500
-
-
-@app.route("/api/llm/ask", methods=["POST"])
-@bot_protection
-@turnstile_required
-def llm_ask():
-    """Ask LLM for next action.
-
-    Body includes:
-      - standard game state fields (grid, state, available_actions, etc.)
-      - settings.input: {diff, full_grid, image, color_histogram}
-      - settings.thinking_level: "off" | "low" | "med" | "high"
-      - settings.tools_mode: "on" | "off" | "adaptive"
-      - settings.model: model key
-      - image_b64: base64-encoded PNG screenshot (optional)
-    """
-    # Gate: online mode cannot use server-side LLM
-    if not feature_enabled("server_llm"):
-        return jsonify({
-            "error": "Server-side LLM is not available in online mode. Use Puter.js or BYOK.",
-            "mode": get_mode(),
-        }), 403
-
-    payload = request.get_json(force=True)
-    settings = payload.get("settings", {})
-    model_key = settings.get("model") or payload.get("model", "gemini-2.5-flash")
-
-    input_settings = settings.get("input", {"diff": True, "full_grid": True})
-    tools_mode = settings.get("tools_mode", "off")
-
-    # Adaptive tools: enable extra analysis after 10+ steps with no level progress
-    if tools_mode == "adaptive":
-        history = payload.get("history", [])
-        if len(history) >= 10:
-            # Check if levels changed in last 10 steps
-            recent_levels = [h.get("levels", 0) for h in history[-10:]]
-            if len(set(recent_levels)) <= 1:
-                tools_mode = "on"
-            else:
-                tools_mode = "off"
-        else:
-            tools_mode = "off"
-
-    planning_mode = settings.get("planning_mode", "off")
-    thinking_level = settings.get("thinking_level", "low")
-    interrupt_plan = settings.get("interrupt_plan", False)
-    max_tokens = min(int(settings.get("max_tokens", 16384)), 65536)
-    prompt = _build_prompt(payload, input_settings, tools_mode, planning_mode, interrupt_plan)
-
-    # Get image if the input setting is on and data was provided
-    image_b64 = None
-    if input_settings.get("image"):
-        image_b64 = payload.get("image_b64")
-
-    # Determine if we should enable real tool execution
-    session_id = payload.get("session_id")
-    grid = payload.get("grid", [])
-    prev_grid = None
-    if session_id:
-        with session_lock:
-            prev_grid = session_grids.get(session_id)
-
-    # Only enable real tools for Gemini models with tools capability
-    model_info = MODEL_REGISTRY.get(model_key, {})
-    is_gemini = model_info.get("provider") == "gemini"
-    model_has_tools = model_info.get("capabilities", {}).get("tools", False)
-    real_tools = tools_mode == "on" and is_gemini and model_has_tools
-
-    # Try Gemini context caching for static prompt parts
-    cached_content_name = None
-    if is_gemini:
-        static_content, _ = _build_prompt_parts(payload, input_settings, tools_mode, planning_mode)
-        cached_content_name = _get_or_create_gemini_cache(
-            model_info.get("api_model", ""), static_content)
-
-    max_retries = 3
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            content = _route_model_call(
-                model_key, prompt, image_b64,
-                tools_enabled=real_tools,
-                session_id=session_id,
-                grid=grid, prev_grid=prev_grid,
-                cached_content_name=cached_content_name,
-                thinking_level=thinking_level,
-                max_tokens=max_tokens,
-            )
-
-            # Handle dict return (Gemini w/ tools, or truncated) vs str return (others)
-            truncated = False
-            if isinstance(content, dict):
-                text = content.get("text", "")
-                truncated = content.get("truncated", False)
-                result = _parse_llm_response(text, model_key)
-                result["tool_calls"] = content.get("tool_calls", [])
-                result["cache_active"] = content.get("cache_active", False)
-                if content.get("usage"):
-                    result["usage"] = content["usage"]
-            else:
-                result = _parse_llm_response(content, model_key)
-            if truncated:
-                result["truncated"] = True
-
-            # Retry if no parseable response (empty or unparseable)
-            if not result.get("parsed") and attempt < max_retries - 1:
-                app.logger.warning(
-                    f"LLM returned no parsed response (attempt {attempt + 1}/{max_retries}), retrying..."
-                )
-                # If tools were on but produced no parseable answer, retry without tools
-                if real_tools:
-                    app.logger.info("Disabling tools for retry — model may be stuck in tool loops")
-                    real_tools = False
-                continue
-
-            result["tools_active"] = tools_mode == "on"
-            result["thinking_level"] = thinking_level
-            result["prompt_length"] = len(prompt)
-            if attempt > 0:
-                result["retries"] = attempt
-
-            # Stash LLM response for session DB persistence
-            if session_id and feature_enabled("session_db"):
-                with session_lock:
-                    session_last_llm[session_id] = result
-                _db_update_session(session_id, model=model_key)
-
-            return jsonify(result)
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries - 1:
-                app.logger.warning(
-                    f"LLM call failed (attempt {attempt + 1}/{max_retries}): {e}, retrying..."
-                )
-                continue
-            return jsonify({"error": str(e), "model": model_key}), 500
-
-    return jsonify({"error": str(last_error or "No response after retries"), "model": model_key}), 500
-
-
-@app.route("/api/tools/execute", methods=["POST"])
-@bot_protection
-@turnstile_required
-def tools_execute():
-    """Execute Python code in the server-side sandbox (local mode only).
-
-    Body: {"code": str, "session_id": str, "grid": list, "prev_grid": list|null}
-    Returns: {"output": str}
-    """
-    if not feature_enabled("server_llm"):
-        return jsonify({"error": "Not available in online mode"}), 403
-    payload = request.get_json(force=True)
-    code = payload.get("code", "")
-    if not code:
-        return jsonify({"error": "code required"}), 400
-    session_id = payload.get("session_id", "anonymous")
-    grid = payload.get("grid", [[]])
-    prev_grid = payload.get("prev_grid")
-    output = _execute_python(session_id, code, grid, prev_grid)
-    return jsonify({"output": output})
-
-
-@app.route("/api/llm/test", methods=["POST"])
-@bot_protection
-def llm_test():
-    """Quick probe: send a tiny prompt to a model, return latency + status.
-
-    Body: {"model": "groq/llama-3.3-70b-versatile"}
-    Returns: {"model", "provider", "latency_ms", "success", "error", "throttle_delay"}
-    """
-    if not feature_enabled("server_llm"):
-        return jsonify({"error": "Not available in online mode"}), 403
-
-    payload = request.get_json(force=True)
-    model_key = payload.get("model", "")
-    if not model_key:
-        return jsonify({"error": "model required"}), 400
-
-    info = MODEL_REGISTRY.get(model_key)
-    provider = info["provider"] if info else "ollama"
-    throttle_delay = PROVIDER_MIN_DELAY.get(provider, 1.0)
-
-    test_prompt = 'Reply with exactly: {"action": 1, "observation": "test", "plan": "test"}'
-
-    t0 = time.time()
-    try:
-        content = _route_model_call(model_key, test_prompt)
-        latency = round((time.time() - t0) * 1000)
-        return jsonify({
-            "model": model_key, "provider": provider,
-            "latency_ms": latency, "success": True,
-            "throttle_delay": throttle_delay,
-            "response_preview": (content[:200] if isinstance(content, str) else str(content)[:200]),
-        })
-    except Exception as e:
-        latency = round((time.time() - t0) * 1000)
-        return jsonify({
-            "model": model_key, "provider": provider,
-            "latency_ms": latency, "success": False,
-            "error": str(e), "throttle_delay": throttle_delay,
-        })
-
-
-@app.route("/api/llm/throttle", methods=["GET", "POST"])
-@bot_protection
-def llm_throttle():
-    """GET: return current throttle config. POST: update delays.
-
-    POST body: {"gemini": 5.0, "groq": 3.0, ...}
-    """
-    if request.method == "GET":
-        return jsonify(PROVIDER_MIN_DELAY)
-
-    if get_mode() != "local":
-        return jsonify({"error": "Throttle config only editable in local mode"}), 403
-
-    updates = request.get_json(force=True)
-    for provider, delay in updates.items():
-        if provider in PROVIDER_MIN_DELAY and isinstance(delay, (int, float)) and delay >= 0:
-            PROVIDER_MIN_DELAY[provider] = float(delay)
-    return jsonify(PROVIDER_MIN_DELAY)
+# LLM routes removed — all LLM calls are now client-side (BYOK/Puter.js)
+# Kept: /api/llm/models (model registry, no LLM call)
 
 
 @app.route("/api/undo", methods=["POST"])
@@ -2721,10 +2400,10 @@ HARD_MEMORY_DEFAULT = """\
 @app.route("/api/memory", methods=["GET", "POST"])
 @bot_protection
 def memory_endpoint():
-    """GET/POST custom system prompt and hard memory (local mode only)."""
+    """GET/POST custom system prompt and hard memory (staging mode only)."""
     global _custom_system_prompt, _custom_hard_memory
-    if get_mode() != "local":
-        return jsonify({"error": "Memory editing only available in local mode"}), 403
+    if get_mode() != "staging":
+        return jsonify({"error": "Memory editing only available in staging mode"}), 403
 
     if request.method == "GET":
         return jsonify({
@@ -2772,27 +2451,33 @@ def import_session():
     steps = payload.get("steps", [])
     if not sess or not sess.get("id") or not sess.get("game_id"):
         return _cors_resp({"error": "session.id and session.game_id required"}, 400)
-    # Reject short sessions — under 20 steps is noise
-    if len(steps) < 20:
-        return _cors_resp({"error": "Session too short (min 20 steps)", "skipped": True})
+    # Reject trivially short sessions
+    if len(steps) < 5:
+        return _cors_resp({"error": "Session too short (min 5 steps)", "skipped": True})
     try:
         prompts_json = json.dumps(sess.get("prompts")) if sess.get("prompts") else None
         timeline_json = json.dumps(sess.get("timeline")) if sess.get("timeline") else None
+        # Tag with authenticated user if present
+        user = get_current_user()
+        user_id = sess.get("user_id") or (user["id"] if user else None)
+        if user_id:
+            sess["user_id"] = user_id
         conn = _get_db()
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json, user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
-                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json)""",
+                 timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json),
+                 user_id = COALESCE(excluded.user_id, sessions.user_id)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json),
+             sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
         )
         for s in steps:
             grid_snapshot = None
@@ -2831,31 +2516,61 @@ def resume_session():
     session_id = payload.get("session_id")
     if not session_id:
         return jsonify({"error": "session_id required"}), 400
-    # Fetch session metadata and step rows from DB
+    # Fetch session metadata and step rows from DB (local SQLite, then Turso fallback)
     try:
         conn = _get_db()
         sess = conn.execute(
             "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
-        if not sess:
-            conn.close()
-            return jsonify({"error": "Session not found"}), 404
+        if sess:
+            sess = dict(sess)
 
-        # For branched sessions, collect parent steps up to branch point first
         parent_rows = []
-        if sess["parent_session_id"] and sess["branch_at_step"] is not None:
-            parent_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                (sess["parent_session_id"], sess["branch_at_step"]),
-            ).fetchall()
+        own_rows = []
 
-        # Then this session's own steps (taken after branching)
-        own_rows = conn.execute(
-            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-            (session_id,),
-        ).fetchall()
+        if sess:
+            if sess.get("parent_session_id") and sess.get("branch_at_step") is not None:
+                parent_rows = conn.execute(
+                    "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                    (sess["parent_session_id"], sess["branch_at_step"]),
+                ).fetchall()
+            own_rows = conn.execute(
+                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                (session_id,),
+            ).fetchall()
         conn.close()
+
+        # Turso fallback: if local SQLite doesn't have this session
+        if not sess or not own_rows:
+            turso_conn = _get_turso_db()
+            if turso_conn:
+                try:
+                    if not sess:
+                        cur = turso_conn.execute(
+                            "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+                            (session_id,),
+                        )
+                        sess = _turso_dict_fetchone(cur)
+                    if sess:
+                        if not own_rows:
+                            cur2 = turso_conn.execute(
+                                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                                (session_id,),
+                            )
+                            own_rows = _turso_dict_fetchall(cur2)
+                        if sess.get("parent_session_id") and sess.get("branch_at_step") is not None and not parent_rows:
+                            cur3 = turso_conn.execute(
+                                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                                (sess["parent_session_id"], sess["branch_at_step"]),
+                            )
+                            parent_rows = _turso_dict_fetchall(cur3)
+                    turso_conn.close()
+                except Exception as e:
+                    app.logger.warning(f"Turso resume fallback failed: {e}")
+
+        if not sess:
+            return jsonify({"error": "Session not found"}), 404
     except Exception as e:
         return jsonify({"error": f"DB error: {e}"}), 500
 
@@ -3018,6 +2733,12 @@ def list_sessions():
                 turso_conn.close()
             except Exception as e:
                 app.logger.warning(f"Turso list_sessions failed: {e}")
+        # If authenticated, also include user's sessions from Turso (cross-device)
+        user = get_current_user()
+        if user:
+            for d in _turso_get_user_sessions(user["id"]):
+                if d["id"] not in sessions_by_id:
+                    sessions_by_id[d["id"]] = d
         # Sort by created_at desc
         merged = sorted(sessions_by_id.values(), key=lambda s: s.get("created_at", 0), reverse=True)
         return jsonify({"sessions": merged[:100]})
@@ -3119,6 +2840,24 @@ def get_session_step(session_id, step_num):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# LLM CALL LOG — universal call log API
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/sessions/<session_id>/calls")
+def session_calls(session_id):
+    """Return all LLM calls for a session, ordered by timestamp."""
+    calls = _get_session_calls(session_id)
+    # Parse response_json back from string
+    for c in calls:
+        if c.get("response_json"):
+            try:
+                c["response_json"] = json.loads(c["response_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return jsonify(calls)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # SHARE — public replay page
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -3189,7 +2928,7 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
             max_depth -= 1
             parent_sess = None
             p_steps = []
-            # Try local SQLite
+            # Try local SQLite first
             conn = _get_db()
             p_row = conn.execute(
                 "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
@@ -3200,10 +2939,31 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
                 (trace_id, trace_step),
             ).fetchall()
             conn.close()
+            # Fall back to Turso if local has no steps
+            if not p_steps_rows and turso_conn:
+                try:
+                    tc = _get_turso_db()
+                    if tc:
+                        if not p_row:
+                            t_row = tc.execute(
+                                "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+                                (trace_id,),
+                            )
+                            p_row_t = _turso_dict_fetchone(t_row)
+                            if p_row_t:
+                                p_row = p_row_t
+                        t_steps = tc.execute(
+                            "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
+                            (trace_id, trace_step),
+                        )
+                        p_steps_rows = _turso_dict_fetchall(t_steps)
+                        tc.close()
+                except Exception:
+                    pass
             if p_row:
-                parent_sess = dict(p_row)
+                parent_sess = dict(p_row) if not isinstance(p_row, dict) else p_row
             for s in p_steps_rows:
-                st = _format_step_row(dict(s))
+                st = _format_step_row(dict(s) if not isinstance(s, dict) else s)
                 st["from_parent"] = True
                 p_steps.append(st)
             # Prepend parent steps (oldest ancestor first)
@@ -3233,6 +2993,15 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
             except Exception:
                 pass
 
+        # Fetch LLM call log for this session
+        call_log = _get_session_calls(session_id)
+        for c in call_log:
+            if c.get("response_json"):
+                try:
+                    c["response_json"] = json.loads(c["response_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
         return render_template(
             "share.html",
             session=sess,
@@ -3242,6 +3011,7 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
             umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
             prompts=prompts,
             timeline=timeline,
+            call_log=call_log,
         )
     except Exception as e:
         app.logger.warning(f"Share page error: {e}")
@@ -3257,6 +3027,7 @@ import numpy as _np
 
 _FD01_PATH = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "fd01.py"
 _CUSTOM_SCENES_FILE = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "custom_scenes.json"
+_CUSTOM_DIFFS_FILE  = Path(__file__).parent / "environment_files" / "fd01" / "00000001" / "custom_diffs.json"
 
 
 def _load_fd01_module():
@@ -3281,31 +3052,58 @@ def _write_custom_scenes(data: dict):
     _CUSTOM_SCENES_FILE.write_text(json.dumps(data))
 
 
+def _read_custom_diffs() -> dict:
+    try:
+        if _CUSTOM_DIFFS_FILE.exists():
+            return json.loads(_CUSTOM_DIFFS_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _write_custom_diffs(data: dict):
+    _CUSTOM_DIFFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CUSTOM_DIFFS_FILE.write_text(json.dumps(data))
+
+
 @app.route("/draw")
 def draw_editor():
     return render_template("draw.html", color_map=COLOR_MAP, color_names=COLOR_NAMES)
+
+
+def _builtin_diffs_to_rects(raw_diffs):
+    """Convert old (dx,dy,rc,side) tuples → {x,y,w,h,color,side} dicts."""
+    return [{"x": d[0] - 1, "y": d[1] - 1, "w": 4, "h": 4, "color": d[2], "side": d[3]}
+            for d in raw_diffs]
 
 
 @app.route("/api/draw/scene/<int:level>")
 def get_draw_scene(level):
     if level < 0 or level >= 5:
         return jsonify({"error": "Invalid level"}), 400
-    custom = _read_custom_scenes()
-    if str(level) in custom:
-        fd01 = _load_fd01_module()
-        diffs = [{"dx": d[0], "dy": d[1], "color": d[2], "side": d[3]}
-                 for d in fd01.DIFFS[level]]
-        return jsonify({"pixels": custom[str(level)],
-                        "width": 30, "height": 62,
-                        "custom": True, "diffs": diffs})
     fd01 = _load_fd01_module()
-    img = _np.zeros((fd01.IMG_H, fd01.IMG_W), dtype=_np.int16)
-    fd01.SCENES[level](img)
-    diffs = [{"dx": d[0], "dy": d[1], "color": d[2], "side": d[3]}
-             for d in fd01.DIFFS[level]]
-    return jsonify({"pixels": img.tolist(),
-                    "width": fd01.IMG_W, "height": fd01.IMG_H,
-                    "custom": False, "diffs": diffs})
+    custom_scenes = _read_custom_scenes()
+    custom_diffs  = _read_custom_diffs()
+
+    if str(level) in custom_scenes:
+        pixels = custom_scenes[str(level)]
+        is_custom_scene = True
+    else:
+        img = _np.zeros((fd01.IMG_H, fd01.IMG_W), dtype=_np.int16)
+        fd01.SCENES[level](img)
+        pixels = img.tolist()
+        is_custom_scene = False
+
+    if str(level) in custom_diffs:
+        diffs = custom_diffs[str(level)]
+        is_custom_diffs = True
+    else:
+        diffs = _builtin_diffs_to_rects(fd01.DIFFS[level])
+        is_custom_diffs = False
+
+    return jsonify({"pixels": pixels, "width": fd01.IMG_W, "height": fd01.IMG_H,
+                    "custom": is_custom_scene, "custom_diffs": is_custom_diffs,
+                    "diffs": diffs})
 
 
 @app.route("/api/draw/save", methods=["POST"])
@@ -3323,6 +3121,21 @@ def save_draw_scene():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/draw/save_diffs", methods=["POST"])
+def save_draw_diffs():
+    data = request.get_json(force=True)
+    level = data.get("level")
+    diffs = data.get("diffs")
+    if level is None or diffs is None:
+        return jsonify({"error": "level and diffs required"}), 400
+    custom = _read_custom_diffs()
+    custom[str(level)] = diffs
+    _write_custom_diffs(custom)
+    global arcade_instance
+    arcade_instance = None
+    return jsonify({"status": "ok"})
+
+
 @app.route("/api/draw/reset", methods=["POST"])
 def reset_draw_scene():
     data = request.get_json(force=True)
@@ -3332,9 +3145,122 @@ def reset_draw_scene():
     custom = _read_custom_scenes()
     custom.pop(str(level), None)
     _write_custom_scenes(custom)
+    custom_d = _read_custom_diffs()
+    custom_d.pop(str(level), None)
+    _write_custom_diffs(custom_d)
     global arcade_instance
     arcade_instance = None
     return jsonify({"status": "ok"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BATCH API — bearer token auth + batch endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+
+BATCH_API_KEYS = set(
+    k.strip() for k in os.environ.get("BATCH_API_KEYS", "").split(",") if k.strip()
+)
+
+
+def _require_batch_auth():
+    """Validate bearer token for batch API. Returns error response or None."""
+    if not BATCH_API_KEYS:
+        return None  # no keys configured = open access (local dev)
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "Missing Authorization header"}), 401
+    token = auth[7:]
+    if token not in BATCH_API_KEYS:
+        return jsonify({"error": "Invalid API key"}), 403
+    return None
+
+
+@app.route("/api/batch/start", methods=["POST"])
+def batch_start():
+    auth_err = _require_batch_auth()
+    if auth_err:
+        return auth_err
+
+    from batch_runner import run_batch, load_config as br_load_config
+    from agent import MODELS
+
+    data = request.get_json(force=True)
+    games = data.get("games", [])
+    model = data.get("model")
+    concurrency = data.get("concurrency", 4)
+    max_steps = data.get("max_steps", 200)
+    repeat = data.get("repeat", 1)
+    upload_turso = data.get("upload_turso", False)
+
+    cfg = br_load_config()
+    if model:
+        if model not in MODELS:
+            return jsonify({"error": f"Unknown model: {model}"}), 400
+        cfg["reasoning"]["executor_model"] = model
+
+    # Resolve game list
+    arcade = get_arcade()
+    available_games = [e.game_id for e in arcade.get_environments()]
+    if games == ["all"] or games == "all":
+        resolved_games = available_games
+    else:
+        resolved_games = []
+        for g in games:
+            matched = [gid for gid in available_games if gid.startswith(g)]
+            resolved_games.extend(matched)
+
+    if not resolved_games:
+        return jsonify({"error": "No matching games found"}), 400
+
+    # Launch batch in background thread
+    import secrets as _secrets
+    batch_id = f"api-{_secrets.token_hex(8)}"
+
+    def _run():
+        run_batch(
+            games=resolved_games, cfg=cfg,
+            concurrency=concurrency, max_steps=max_steps,
+            repeat=repeat, resume_batch_id=batch_id,
+            upload_turso=upload_turso,
+        )
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    return jsonify({"batch_id": batch_id, "games": resolved_games, "status": "started"})
+
+
+@app.route("/api/batch/<batch_id>")
+def batch_status(batch_id):
+    auth_err = _require_batch_auth()
+    if auth_err:
+        return auth_err
+
+    try:
+        conn = _get_db()
+        batch = conn.execute("SELECT * FROM batch_runs WHERE id = ?", (batch_id,)).fetchone()
+        if not batch:
+            conn.close()
+            return jsonify({"error": "Batch not found"}), 404
+
+        games = conn.execute(
+            "SELECT * FROM batch_games WHERE batch_id = ? ORDER BY game_id", (batch_id,)
+        ).fetchall()
+        conn.close()
+
+        return jsonify({
+            "batch_id": batch_id,
+            "status": batch["status"],
+            "total_games": batch["total_games"],
+            "completed_games": batch["completed_games"],
+            "wins": batch["wins"],
+            "failures": batch["failures"],
+            "created_at": batch["created_at"],
+            "finished_at": batch["finished_at"],
+            "games": [dict(g) for g in games],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3343,16 +3269,16 @@ def reset_draw_scene():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ARC-AGI-3 Web Player")
-    parser.add_argument("--mode", choices=["local", "online", "dual"], default="dual",
-                        help="Run mode: local (port 5000), online (port 5001), or dual (both)")
+    parser.add_argument("--mode", choices=["staging", "prod", "dual"], default="dual",
+                        help="Run mode: staging (port 5000), prod (port 5001), or dual (both)")
     parser.add_argument("--port", type=int, default=None,
                         help="Override port (for single-mode)")
-    parser.add_argument("--port-local", type=int, default=5000, help="Local mode port")
-    parser.add_argument("--port-online", type=int, default=5001, help="Online mode port")
+    parser.add_argument("--port-staging", type=int, default=5000, help="Staging mode port")
+    parser.add_argument("--port-prod", type=int, default=5001, help="Prod mode port")
     args = parser.parse_args()
 
-    _server_port_local = args.port_local
-    _server_port_online = args.port_online
+    _server_port_staging = args.port_staging
+    _server_port_prod = args.port_prod
 
     # Initialize SQLite DB
     _init_db()
@@ -3360,29 +3286,29 @@ if __name__ == "__main__":
 
     if args.mode == "dual":
         print(f"\n  ARC-AGI-3 Web Player (dual mode)")
-        print(f"    Local:  http://localhost:{_server_port_local}")
-        print(f"    Online: http://localhost:{_server_port_online}\n")
+        print(f"    Staging: http://localhost:{_server_port_staging}")
+        print(f"    Prod:    http://localhost:{_server_port_prod}\n")
 
-        # Run online port in a background thread
-        def run_online():
+        # Run prod port in a background thread
+        def run_prod():
             from werkzeug.serving import make_server
-            srv = make_server("0.0.0.0", _server_port_online, app)
+            srv = make_server("0.0.0.0", _server_port_prod, app)
             srv.serve_forever()
 
-        t = threading.Thread(target=run_online, daemon=True)
+        t = threading.Thread(target=run_prod, daemon=True)
         t.start()
 
-        # Run local port in main thread
-        app.run(host="0.0.0.0", port=_server_port_local, debug=False)
+        # Run staging port in main thread
+        app.run(host="0.0.0.0", port=_server_port_staging, debug=False)
 
-    elif args.mode == "local":
-        port = args.port or _server_port_local
-        _server_port_local = port
-        print(f"\n  ARC-AGI-3 Web Player (local): http://localhost:{port}\n")
+    elif args.mode == "staging":
+        port = args.port or _server_port_staging
+        _server_port_staging = port
+        print(f"\n  ARC-AGI-3 Web Player (staging): http://localhost:{port}\n")
         app.run(host="0.0.0.0", port=port, debug=False)
 
-    elif args.mode == "online":
-        port = args.port or _server_port_online
-        _server_port_online = port
-        print(f"\n  ARC-AGI-3 Web Player (online): http://localhost:{port}\n")
+    elif args.mode == "prod":
+        port = args.port or _server_port_prod
+        _server_port_prod = port
+        print(f"\n  ARC-AGI-3 Web Player (prod): http://localhost:{port}\n")
         app.run(host="0.0.0.0", port=port, debug=False)

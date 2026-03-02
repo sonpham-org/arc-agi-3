@@ -1,0 +1,16 @@
+## CURRENT STATE
+Game: {game_id} | State: {state} | Levels: {levels_done}/{win_levels} | Step: {step_num}
+Available actions: {action_desc}
+
+{memory_block}
+{history_block}
+{change_map_block}
+{grid_block}
+
+## WORLD MODEL RULES (v{rules_version})
+{rules_doc}
+
+## YOUR TASK
+Plan your next sequence of actions. You can simulate actions to test ideas,
+analyze the grid for more info, or commit a plan when ready.
+Turn {turn_num}/{max_turns} — commit before running out of turns.
