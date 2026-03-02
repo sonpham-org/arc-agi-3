@@ -855,13 +855,13 @@ class Pi01(ARCBaseGame):
             if self.lives <= 0:
                 if self.continues > 0:
                     self.continues -= 1
-                    self.on_set_level(self.levels[self.level_index])
+                    self.on_set_level(self._levels[self.level_index])
                     self.lives = MAX_LIVES
                 else:
                     self.lose()
             else:
                 saved_lives = self.lives
-                self.on_set_level(self.levels[self.level_index])
+                self.on_set_level(self._levels[self.level_index])
                 self.lives = saved_lives
             self.complete_action()
             return
@@ -876,7 +876,7 @@ class Pi01(ARCBaseGame):
             if self.lives <= 0:
                 if self.continues > 0:
                     self.continues -= 1
-                    self.on_set_level(self.levels[self.level_index])
+                    self.on_set_level(self._levels[self.level_index])
                     self.lives = MAX_LIVES
                 else:
                     self.lose()
