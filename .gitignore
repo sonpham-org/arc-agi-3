@@ -36,3 +36,4 @@ test/benchmark_*.json
 
 # Agent observability (runtime)
 .agent_obs/
+agentops.log
