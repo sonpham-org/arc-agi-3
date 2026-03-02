@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 import httpx as _httpx
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, make_response, render_template, request
+from flask import Flask, Response, abort, jsonify, make_response, render_template, request
 
 import arc_agi
 from arcengine import GameAction, GameState
@@ -3264,6 +3264,57 @@ def batch_status(batch_id):
             "finished_at": batch["finished_at"],
             "games": [dict(g) for g in games],
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AGENT OBSERVABILITY DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════
+
+_OBS_DIR = Path(".agent_obs")
+
+
+@app.route("/obs")
+def obs_dashboard():
+    return render_template("obs.html")
+
+
+@app.route("/api/obs/status")
+def obs_status():
+    status_path = _OBS_DIR / "status.json"
+    if not status_path.exists():
+        return jsonify({"error": "No active agent run"}), 404
+    try:
+        return Response(status_path.read_text(), mimetype="application/json")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/obs/events")
+def obs_events():
+    """Return new JSONL events as SSE stream (or JSON array).
+
+    Query params:
+        since: line number offset (0-based, default 0)
+    """
+    events_path = _OBS_DIR / "events.jsonl"
+    if not events_path.exists():
+        return jsonify([])
+
+    since = int(request.args.get("since", 0))
+    try:
+        lines = events_path.read_text().splitlines()
+        new_lines = lines[since:]
+        events = []
+        for line in new_lines:
+            line = line.strip()
+            if line:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+        return jsonify({"events": events, "next_offset": len(lines)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
