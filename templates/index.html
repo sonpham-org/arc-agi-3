@@ -17,13 +17,13 @@
     --bg: #0d1117; --surface: #161b22; --surface2: #1c2129; --border: #30363d;
     --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
     --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
-    --dim: #8b949e;
+    --dim: #8b949e; --cyan: #39c5cf; --orange: #ff8b3d;
   }
   [data-theme="light"] {
     --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2; --border: #d0d7de;
     --text: #1f2328; --text-dim: #656d76; --accent: #0969da;
     --green: #1a7f37; --red: #cf222e; --yellow: #9a6700; --purple: #8250df;
-    --dim: #656d76;
+    --dim: #656d76; --cyan: #1a9aa0; --orange: #c96a1e;
   }
   /* Custom scrollbar — dark/light theme aware */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -262,6 +262,35 @@
   .timeline-block.ts_planner { background: #58a6ff22; color: var(--accent); border-left: 3px solid var(--accent); }
   .timeline-block.ts_monitor { background: #d2992222; color: var(--yellow); border-left: 3px solid var(--yellow); }
   .timeline-block.ts_world_model { background: #bc8cff22; color: var(--purple); border-left: 3px solid var(--purple); }
+
+  /* Agent Spawn Tree Timeline */
+  .as-timeline-container {
+    width: 100%; height: 100%; min-height: 200px; position: relative; overflow: hidden; cursor: grab; flex: 1;
+  }
+  .as-timeline-container.dragging { cursor: grabbing; }
+  .as-timeline-svg { width: 100%; height: 100%; }
+  .as-zoom-controls {
+    position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 10;
+  }
+  .as-zoom-btn {
+    width: 28px; height: 28px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .as-zoom-btn:hover { background: var(--surface2); }
+  .as-tooltip {
+    position: absolute; pointer-events: none; z-index: 20;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; font-size: 11px; max-width: 320px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    color: var(--text); display: none; line-height: 1.5;
+  }
+  .as-tooltip.visible { display: block; }
+  .as-tooltip .as-tt-title { font-weight: 700; margin-bottom: 4px; }
+  .as-tooltip .as-tt-meta { font-size: 10px; color: var(--text-dim); }
+  .as-tooltip .as-tt-body { margin-top: 4px; font-size: 10px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; }
+  .as-legend { position: absolute; bottom: 8px; left: 8px; display: flex; gap: 10px; font-size: 10px; color: var(--text-dim); z-index: 10; }
+  .as-legend-item { display: flex; align-items: center; gap: 4px; }
+  .as-legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
 
   .ad-banner { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--surface); flex-shrink: 0; }
   .ad-banner-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
@@ -4182,6 +4211,35 @@ function _rebuildTimelineFromSteps(steps) {
   let currentEvent = null;
   for (const s of steps) {
     const llm = s.llm_response;
+
+    // Agent Spawn: reconstruct as_* events from stored agent_spawn metadata
+    if (llm && llm.agent_spawn) {
+      const as = llm.agent_spawn;
+      const ts = s.timestamp ? new Date(s.timestamp).getTime() : Date.now();
+      events.push({ type: 'as_orch_start', turn: 0, timestamp: ts });
+
+      for (const log of (as.orchestrator_log || [])) {
+        if (log.type === 'think') {
+          events.push({ type: 'as_orch_think', turn: log.turn, facts: log.facts || 0, hypotheses: log.hypotheses || 0, duration_ms: log.duration_ms || 0, timestamp: ts });
+        } else if (log.type === 'delegate') {
+          events.push({ type: 'as_orch_delegate', turn: log.turn, agent_type: log.agent_type, task: log.task || '', budget: log.budget || 0, duration_ms: log.duration_ms || 0, timestamp: ts });
+          events.push({ type: 'as_sub_start', turn: log.turn, agent_type: log.agent_type, task: log.task || '', budget: log.budget || 0, parentTurn: log.turn, timestamp: ts });
+          // Find matching subagent summary for report event
+          const sub = (as.subagent_summaries || []).find(sm => sm.type === log.agent_type);
+          if (sub) {
+            // Emit act events based on step count
+            for (let si = 0; si < (sub.steps || 0); si++) {
+              events.push({ type: 'as_sub_act', turn: log.turn, agent_type: log.agent_type, action: 0, action_name: `Step ${si + 1}`, step_num: si, duration_ms: 0, timestamp: ts });
+            }
+            events.push({ type: 'as_sub_report', turn: log.turn, agent_type: log.agent_type, findings: 0, summary: sub.summary || '', steps_used: sub.steps || 0, timestamp: ts });
+          }
+        }
+      }
+
+      events.push({ type: 'as_orch_end', totalSteps: as.total_steps || 0, totalSubagents: as.total_subagents || 0, duration_ms: llm.call_duration_ms || 0, timestamp: ts });
+      continue; // skip normal event creation for this step
+    }
+
     if (llm && llm.parsed) {
       callNum++;
       const plan = llm.parsed.plan && Array.isArray(llm.parsed.plan) ? llm.parsed.plan : [{ action: llm.parsed.action }];
@@ -4268,6 +4326,273 @@ function _tlToggleDetail(idx) {
   }
 }
 
+// ── Agent Spawn Tree Timeline (SVG) ──────────────────────────────────────
+const _AS_COLORS = {
+  orchestrator: '#bc8cff', explorer: '#3fb950', theorist: '#39c5cf',
+  tester: '#d29922', solver: '#58a6ff',
+};
+const _AS_LABELS = {
+  as_orch_start: 'Orchestrator Start', as_orch_think: 'Think',
+  as_orch_delegate: 'Delegate', as_orch_end: 'Orchestrator End',
+  as_sub_start: 'Subagent Start', as_sub_tool: 'Tool Call',
+  as_sub_act: 'Action', as_sub_report: 'Report',
+};
+
+let _asZoom = 1.0, _asPanX = 0, _asPanY = 0;
+let _asDragging = false, _asDragStart = { x: 0, y: 0, panX: 0, panY: 0 };
+
+function renderTimelineTree(container, asEvents, allEvents) {
+  // Layout constants
+  const TRUNK_X = 50, TRUNK_W = 24, BRANCH_W = 20;
+  const MIN_H = 30, MAX_H = 200, BRANCH_GAP = 40, BRANCH_COL_W = 80;
+  const PAD_TOP = 30, PAD_BOTTOM = 40;
+
+  // Build tree structure from events
+  const nodes = [];
+  let y = PAD_TOP;
+  let branchCol = 0; // next available branch column
+  const activeBranches = []; // { agent_type, turn, col, startY, nodes: [] }
+
+  for (let i = 0; i < asEvents.length; i++) {
+    const ev = asEvents[i];
+    const h = Math.max(MIN_H, Math.min(MAX_H, (ev.duration_ms || 500) / 100));
+
+    if (ev.type === 'as_orch_start') {
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h: MIN_H, shape: 'rect', color: _AS_COLORS.orchestrator, trunk: true });
+      y += MIN_H + 4;
+    } else if (ev.type === 'as_orch_think') {
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h, shape: 'diamond', color: _AS_COLORS.orchestrator, trunk: true });
+      y += h + 4;
+    } else if (ev.type === 'as_orch_delegate') {
+      const col = branchCol++;
+      const branchX = TRUNK_X + TRUNK_W + BRANCH_GAP + col * BRANCH_COL_W;
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h, shape: 'branch_dot', color: _AS_COLORS[ev.agent_type] || _AS_COLORS.orchestrator, trunk: true, branchX, branchCol: col });
+      activeBranches.push({ agent_type: ev.agent_type, turn: ev.turn, col, startY: y, x: branchX, nodes: [] });
+      y += h + 4;
+    } else if (ev.type === 'as_sub_start') {
+      const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
+      if (branch) {
+        branch.nodes.push({ ...ev, idx: i, shape: 'rect', color: _AS_COLORS[ev.agent_type] || '#888', h: MIN_H });
+      }
+    } else if (ev.type === 'as_sub_tool') {
+      const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
+      if (branch) {
+        branch.nodes.push({ ...ev, idx: i, shape: 'square', color: _AS_COLORS[ev.agent_type] || '#888', h: 20 });
+      }
+    } else if (ev.type === 'as_sub_act') {
+      const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
+      if (branch) {
+        branch.nodes.push({ ...ev, idx: i, shape: 'circle', color: '#3fb950', h: 24 });
+      }
+    } else if (ev.type === 'as_sub_report') {
+      const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
+      if (branch) {
+        branch.nodes.push({ ...ev, idx: i, shape: 'rect', color: _AS_COLORS[ev.agent_type] || '#888', h: MIN_H });
+      }
+    } else if (ev.type === 'as_orch_end') {
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h: MIN_H, shape: 'rect', color: _AS_COLORS.orchestrator, trunk: true });
+      y += MIN_H + 4;
+    }
+  }
+
+  // Layout branch nodes vertically within their branch
+  for (const branch of activeBranches) {
+    let by = branch.startY;
+    for (const n of branch.nodes) {
+      n.x = branch.x;
+      n.y = by;
+      by += n.h + 3;
+    }
+    branch.endY = by;
+  }
+
+  const totalW = Math.max(400, TRUNK_X + TRUNK_W + BRANCH_GAP + (branchCol + 1) * BRANCH_COL_W);
+  const totalH = Math.max(y + PAD_BOTTOM, ...activeBranches.map(b => b.endY + PAD_BOTTOM));
+
+  // Build SVG
+  let svg = `<svg class="as-timeline-svg" viewBox="0 0 ${totalW} ${totalH}" xmlns="http://www.w3.org/2000/svg">`;
+
+  // Orchestrator trunk line
+  const trunkTop = PAD_TOP;
+  const trunkBot = y;
+  svg += `<rect x="${TRUNK_X}" y="${trunkTop}" width="${TRUNK_W}" height="${trunkBot - trunkTop}" fill="${_AS_COLORS.orchestrator}" opacity="0.15" rx="4"/>`;
+  svg += `<line x1="${TRUNK_X + TRUNK_W / 2}" y1="${trunkTop}" x2="${TRUNK_X + TRUNK_W / 2}" y2="${trunkBot}" stroke="${_AS_COLORS.orchestrator}" stroke-width="2" opacity="0.4"/>`;
+
+  // Trunk nodes
+  for (const n of nodes) {
+    const cx = n.x + TRUNK_W / 2;
+    if (n.shape === 'diamond') {
+      const s = 8;
+      svg += `<polygon points="${cx},${n.y} ${cx + s},${n.y + n.h / 2} ${cx},${n.y + n.h} ${cx - s},${n.y + n.h / 2}" fill="${n.color}" opacity="0.85" data-event-idx="${n.idx}"/>`;
+      svg += `<text x="${cx + 14}" y="${n.y + n.h / 2 + 4}" fill="${n.color}" font-size="10" font-weight="600">Think</text>`;
+    } else if (n.shape === 'branch_dot') {
+      svg += `<circle cx="${cx}" cy="${n.y + n.h / 2}" r="6" fill="${n.color}" data-event-idx="${n.idx}"/>`;
+      // Connector line to branch
+      svg += `<line x1="${cx + 6}" y1="${n.y + n.h / 2}" x2="${n.branchX}" y2="${n.y + n.h / 2}" stroke="${n.color}" stroke-width="2" stroke-dasharray="4,3" opacity="0.5"/>`;
+      svg += `<text x="${cx + 14}" y="${n.y + n.h / 2 + 4}" fill="${n.color}" font-size="10" font-weight="600">${_tlEsc(n.agent_type || 'delegate')}</text>`;
+    } else {
+      // rect (start/end)
+      svg += `<rect x="${n.x}" y="${n.y}" width="${TRUNK_W}" height="${n.h}" rx="4" fill="${n.color}" opacity="0.6" data-event-idx="${n.idx}"/>`;
+      const lbl = n.type === 'as_orch_start' ? 'START' : (n.type === 'as_orch_end' ? 'END' : '');
+      if (lbl) svg += `<text x="${cx}" y="${n.y + n.h / 2 + 4}" fill="#fff" font-size="8" font-weight="700" text-anchor="middle">${lbl}</text>`;
+    }
+  }
+
+  // Branch bars and nodes
+  for (const branch of activeBranches) {
+    if (!branch.nodes.length) continue;
+    const bx = branch.x;
+    const bTop = branch.startY;
+    const bBot = branch.endY || bTop + 30;
+    // Branch background bar
+    const bColor = _AS_COLORS[branch.agent_type] || '#888';
+    svg += `<rect x="${bx}" y="${bTop}" width="${BRANCH_W}" height="${bBot - bTop}" fill="${bColor}" opacity="0.1" rx="3"/>`;
+    svg += `<line x1="${bx + BRANCH_W / 2}" y1="${bTop}" x2="${bx + BRANCH_W / 2}" y2="${bBot}" stroke="${bColor}" stroke-width="1.5" opacity="0.3"/>`;
+
+    for (const n of branch.nodes) {
+      const ncx = n.x + BRANCH_W / 2;
+      if (n.shape === 'circle') {
+        svg += `<circle cx="${ncx}" cy="${n.y + n.h / 2}" r="8" fill="${n.color}" opacity="0.85" data-event-idx="${n.idx}"/>`;
+        const aName = n.action_name || ACTION_NAMES?.[n.action] || `A${n.action}`;
+        svg += `<text x="${ncx + 14}" y="${n.y + n.h / 2 + 3}" fill="${n.color}" font-size="9">${_tlEsc(aName)}</text>`;
+      } else if (n.shape === 'square') {
+        svg += `<rect x="${ncx - 5}" y="${n.y + 5}" width="10" height="10" rx="2" fill="${n.color}" opacity="0.7" data-event-idx="${n.idx}"/>`;
+        svg += `<text x="${ncx + 10}" y="${n.y + 14}" fill="${n.color}" font-size="9" opacity="0.7">${_tlEsc(n.tool_name || 'tool')}</text>`;
+      } else {
+        // rect (start/report)
+        const label = n.type === 'as_sub_report' ? 'REPORT' : n.agent_type;
+        svg += `<rect x="${n.x}" y="${n.y}" width="${BRANCH_W}" height="${n.h}" rx="3" fill="${n.color}" opacity="0.5" data-event-idx="${n.idx}"/>`;
+        svg += `<text x="${ncx}" y="${n.y + n.h / 2 + 3}" fill="#fff" font-size="8" font-weight="600" text-anchor="middle">${_tlEsc(label).substring(0, 6)}</text>`;
+      }
+    }
+  }
+
+  svg += '</svg>';
+
+  // Build container HTML
+  container.innerHTML = `
+    <div class="as-timeline-container" id="asTreeContainer">
+      <div class="as-zoom-controls">
+        <button class="as-zoom-btn" id="asZoomIn" title="Zoom in">+</button>
+        <button class="as-zoom-btn" id="asZoomOut" title="Zoom out">-</button>
+        <button class="as-zoom-btn" id="asZoomReset" title="Reset view">R</button>
+      </div>
+      ${svg}
+      <div class="as-tooltip" id="asTooltip"></div>
+      <div class="as-legend">
+        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.orchestrator}"></div>Orch</div>
+        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.explorer}"></div>Explorer</div>
+        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.theorist}"></div>Theorist</div>
+        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.tester}"></div>Tester</div>
+        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.solver}"></div>Solver</div>
+      </div>
+    </div>`;
+
+  // Set up interactions
+  const ctr = document.getElementById('asTreeContainer');
+  const svgEl = ctr?.querySelector('svg');
+  const tooltip = document.getElementById('asTooltip');
+  if (!ctr || !svgEl) return;
+
+  // Reset zoom/pan state
+  _asZoom = 1.0; _asPanX = 0; _asPanY = 0;
+  _updateAsTransform(svgEl, ctr);
+
+  // Zoom with scroll wheel
+  ctr.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = ctr.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) / rect.width;
+    const my = (e.clientY - rect.top) / rect.height;
+    const oldZoom = _asZoom;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    _asZoom = Math.max(0.2, Math.min(5, _asZoom * delta));
+    // Adjust pan to zoom toward cursor
+    const vw = ctr.clientWidth / oldZoom;
+    const vh = ctr.clientHeight / oldZoom;
+    const nvw = ctr.clientWidth / _asZoom;
+    const nvh = ctr.clientHeight / _asZoom;
+    _asPanX += (vw - nvw) * mx;
+    _asPanY += (vh - nvh) * my;
+    _updateAsTransform(svgEl, ctr);
+  }, { passive: false });
+
+  // Drag to pan
+  ctr.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.as-zoom-btn')) return;
+    _asDragging = true;
+    _asDragStart = { x: e.clientX, y: e.clientY, panX: _asPanX, panY: _asPanY };
+    ctr.classList.add('dragging');
+  });
+  ctr.addEventListener('mousemove', (e) => {
+    if (!_asDragging) return;
+    const dx = (e.clientX - _asDragStart.x) / _asZoom;
+    const dy = (e.clientY - _asDragStart.y) / _asZoom;
+    _asPanX = _asDragStart.panX - dx;
+    _asPanY = _asDragStart.panY - dy;
+    _updateAsTransform(svgEl, ctr);
+  });
+  const endDrag = () => { _asDragging = false; ctr.classList.remove('dragging'); };
+  ctr.addEventListener('mouseup', endDrag);
+  ctr.addEventListener('mouseleave', endDrag);
+
+  // Zoom buttons
+  document.getElementById('asZoomIn')?.addEventListener('click', () => {
+    _asZoom = Math.min(5, _asZoom * 1.3); _updateAsTransform(svgEl, ctr);
+  });
+  document.getElementById('asZoomOut')?.addEventListener('click', () => {
+    _asZoom = Math.max(0.2, _asZoom / 1.3); _updateAsTransform(svgEl, ctr);
+  });
+  document.getElementById('asZoomReset')?.addEventListener('click', () => {
+    _asZoom = 1.0; _asPanX = 0; _asPanY = 0; _updateAsTransform(svgEl, ctr);
+  });
+
+  // Hover tooltip
+  svgEl.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-event-idx]');
+    if (!el || !tooltip) return;
+    const idx = parseInt(el.getAttribute('data-event-idx'));
+    const ev = asEvents[idx];
+    if (!ev) return;
+    let html = `<div class="as-tt-title">${_tlEsc(_AS_LABELS[ev.type] || ev.type)}</div>`;
+    html += `<div class="as-tt-meta">`;
+    if (ev.agent_type) html += `<span>Agent: ${_tlEsc(ev.agent_type)}</span> `;
+    if (ev.duration_ms) html += `<span>${(ev.duration_ms / 1000).toFixed(1)}s</span>`;
+    html += `</div>`;
+    if (ev.type === 'as_orch_think') {
+      html += `<div class="as-tt-body">Facts: ${ev.facts || 0}, Hypotheses: ${ev.hypotheses || 0}</div>`;
+    } else if (ev.type === 'as_orch_delegate') {
+      html += `<div class="as-tt-body">Task: ${_tlEsc(ev.task || '')}\nBudget: ${ev.budget || 0} steps</div>`;
+    } else if (ev.type === 'as_sub_act') {
+      html += `<div class="as-tt-body">${_tlEsc(ev.action_name || '')}${ev.reasoning ? '\n' + _tlEsc(ev.reasoning) : ''}</div>`;
+    } else if (ev.type === 'as_sub_report') {
+      html += `<div class="as-tt-body">${_tlEsc(ev.summary || '')}\nFindings: ${ev.findings || 0}, Steps: ${ev.steps_used || 0}</div>`;
+    } else if (ev.type === 'as_sub_tool') {
+      html += `<div class="as-tt-body">Tool: ${_tlEsc(ev.tool_name || '')}</div>`;
+    } else if (ev.type === 'as_orch_end') {
+      html += `<div class="as-tt-body">Total: ${ev.totalSteps || 0} steps, ${ev.totalSubagents || 0} subagents\n${(ev.duration_ms / 1000).toFixed(1)}s</div>`;
+    }
+    tooltip.innerHTML = html;
+    tooltip.classList.add('visible');
+  });
+  svgEl.addEventListener('mousemove', (e) => {
+    if (!tooltip || !tooltip.classList.contains('visible')) return;
+    const rect = ctr.getBoundingClientRect();
+    tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+    tooltip.style.top = (e.clientY - rect.top + 12) + 'px';
+  });
+  svgEl.addEventListener('mouseout', (e) => {
+    const el = e.target.closest('[data-event-idx]');
+    if (el && tooltip) tooltip.classList.remove('visible');
+  });
+}
+
+function _updateAsTransform(svg, container) {
+  const w = container.clientWidth / _asZoom;
+  const h = container.clientHeight / _asZoom;
+  svg.setAttribute('viewBox', `${_asPanX} ${_asPanY} ${w} ${h}`);
+}
+
 function renderTimeline(ss) {
   const container = document.getElementById('timelineContent');
   if (!container) return;
@@ -4276,6 +4601,14 @@ function renderTimeline(ss) {
   if (!events.length && typeof replayData !== 'undefined' && replayData && replayData.steps) {
     events = _rebuildTimelineFromSteps(replayData.steps);
   }
+
+  // Agent Spawn tree view — if as_* events exist, render tree
+  const asEvents = events.filter(e => e.type && e.type.startsWith('as_'));
+  if (asEvents.length > 0) {
+    renderTimelineTree(container, asEvents, events);
+    return;
+  }
+
   if (!events.length && !(ss && ss.waitingForLLM)) {
     container.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Timeline will populate as LLM calls are made.</div>';
     return;
@@ -4984,8 +5317,8 @@ async function askLLM(ss) {
     // Attach call duration
     if (resp) resp.call_duration_ms = Math.round(performance.now() - _callStart);
 
-    // Push reasoning event to timeline
-    if (resp && resp.call_duration_ms && _callSession && _callSession.timelineEvents) {
+    // Push reasoning event to timeline (skip for Agent Spawn — it pushes granular as_* events)
+    if (resp && resp.call_duration_ms && _callSession && _callSession.timelineEvents && !resp._alreadyExecuted) {
       const _tlPlan = resp.parsed?.plan && Array.isArray(resp.parsed.plan) ? resp.parsed.plan : (resp.parsed ? [{ action: resp.parsed.action }] : []);
       const _tlActions = _tlPlan.map(p => p.action);
       _callSession.timelineEvents.push({
@@ -7685,6 +8018,18 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
   let totalStepsExecuted = 0;
   let totalSubagents = 0;
 
+  // Timeline event helper — push granular as_* events for tree view
+  const _asSess = sessions.get(_cur.sessionId);
+  const _asTlEvents = _asSess ? _asSess.timelineEvents : null;
+  function _asPushTl(ev) {
+    if (!_asTlEvents) return;
+    ev.timestamp = Date.now();
+    _asTlEvents.push(ev);
+    if (isActiveFn() && _asSess) renderTimeline(_asSess);
+  }
+
+  _asPushTl({ type: 'as_orch_start', turn: 0 });
+
   // Helper: build current context from _cur (re-read each time for fresh state)
   function _buildContext() {
     const grid = _cur.currentState.grid || [];
@@ -7793,6 +8138,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
       for (const h of hypotheses) mem.addHypothesis(h);
       if (parsed.reasoning) mem.add(parsed.reasoning, '', 'orchestrator');
       orchestratorLog.push({ turn, type: 'think', facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs });
+      _asPushTl({ type: 'as_orch_think', turn, facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs });
       continue;
     }
 
@@ -7806,7 +8152,9 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
       const budget = _makeBoundedBudget(budgetLimit);
 
       orchestratorLog.push({ turn, type: 'delegate', agent_type: agentType, task: task.substring(0, 100), budget: budgetLimit, duration_ms: durMs });
+      _asPushTl({ type: 'as_orch_delegate', turn, agent_type: agentType, task: task.substring(0, 80), budget: budgetLimit, duration_ms: durMs });
       totalSubagents++;
+      _asPushTl({ type: 'as_sub_start', turn, agent_type: agentType, task: task.substring(0, 80), budget: budgetLimit, parentTurn: turn });
 
       // Update wait label
       if (label) {
@@ -7872,6 +8220,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           const summary = subParsed.summary || findings.join('; ');
           mem.add(summary, findings.join('\n'), agentType);
           subagentSummaries.push({ type: agentType, task: task.substring(0, 60), steps: subActions.length, summary });
+          _asPushTl({ type: 'as_sub_report', turn, agent_type: agentType, findings: findings.length, hypotheses: hypotheses.length, summary: summary.substring(0, 120), steps_used: subActions.length });
           break;
         }
 
@@ -7882,6 +8231,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           const prevGrid = _cur.previousGrid || null;
           const result = _asDispatchFrameTool(toolName, subCtx.grid, prevGrid, toolArgs);
           toolResults = `Tool: ${toolName}\n${result}`;
+          _asPushTl({ type: 'as_sub_tool', turn, agent_type: agentType, tool_name: toolName });
           continue; // Don't count as action, loop again
         }
 
@@ -7917,6 +8267,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           }
 
           totalStepsExecuted++;
+          const actDurMs = Math.round(performance.now() - t0);
 
           // Build observation for the subagent
           const changeSummary = _asChangeSummary(stepResult.prevGrid, stepResult.newGrid);
@@ -7927,6 +8278,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
             reasoning: subParsed.reasoning || '',
             result: `${changeSummary}, levels=${stepResult.data.levels_completed}`,
           });
+          _asPushTl({ type: 'as_sub_act', turn, agent_type: agentType, action: actionId, action_name: actionName, reasoning: (subParsed.reasoning || '').substring(0, 100), step_num: _cur.stepCount, duration_ms: actDurMs });
 
           // Clear tool results, the new state will be in the next prompt
           toolResults = `Last action: ${actionName} → ${changeSummary}`;
@@ -7974,6 +8326,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
   // ── Return ──
   // Steps are already executed, return empty plan
   const totalDur = Math.round(performance.now() - t0Total);
+  _asPushTl({ type: 'as_orch_end', totalSteps: totalStepsExecuted, totalSubagents, duration_ms: totalDur });
 
   return {
     raw: '', thinking: null,
