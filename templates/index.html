@@ -2686,10 +2686,17 @@ _frame_data = _game_instance.perform_action(_action_input, raw=True)
 
           const stateJson = pyodide.runPython(\`
 import json
-_frame = _frame_data.frame[-1].tolist() if _frame_data.frame else []
+_all_frames = [f.tolist() for f in _frame_data.frame] if _frame_data.frame else []
+# Thin to at most 120 frames so postMessage payload stays small
+_step = max(1, len(_all_frames) // 120)
+_frames_out = _all_frames[::_step]
+if _all_frames and _frames_out[-1] is not _all_frames[-1]:
+    _frames_out.append(_all_frames[-1])
+_frame = _frames_out[-1] if _frames_out else []
 _avail = list(_frame_data.available_actions)
 json.dumps({
     "grid": _frame,
+    "frames": _frames_out,
     "state": _frame_data.state.value if hasattr(_frame_data.state, "value") else str(_frame_data.state),
     "levels_completed": _frame_data.levels_completed,
     "win_levels": _frame_data.win_levels,
@@ -2934,6 +2941,16 @@ async function pyodideStep(actionId, actionData) {
     action: actionId,
     data: (actionData && Object.keys(actionData).length > 0) ? actionData : null,
   });
+  // Animate intermediate physics frames before returning final state
+  if (state.frames && state.frames.length > 1) {
+    const fps = (currentState && currentState.default_fps) || 20;
+    const delay = Math.max(16, Math.round(1000 / fps));
+    for (let i = 0; i < state.frames.length - 1; i++) {
+      renderGrid(state.frames[i]);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  delete state.frames;
   state.action_labels = {};
   (state.available_actions || []).forEach(a => {
     const names = {0:'RESET',1:'ACTION1',2:'ACTION2',3:'ACTION3',4:'ACTION4',5:'ACTION5',6:'ACTION6',7:'ACTION7'};
