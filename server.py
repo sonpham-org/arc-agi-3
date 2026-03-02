@@ -1926,7 +1926,7 @@ def game_source(game_id):
     py_file = local_dir / f"{bare_id}.py"
     if not py_file.exists():
         return jsonify({"error": f"Source file not found for {game_id}"}), 404
-    source = py_file.read_text()
+    source = py_file.read_text(encoding="utf-8")
     return jsonify({
         "source": source,
         "class_name": env_info.class_name,

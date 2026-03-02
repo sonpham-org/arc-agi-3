@@ -1,12 +1,12 @@
 """
-ab01 – Angry Birds  (ARC-AGI-3 game)
+ab01 - Angry Birds  (ARC-AGI-3 game)
 
 Controls
 --------
-ACTION1 (↑): Aim higher
-ACTION2 (↓): Aim lower
-ACTION3 (←): Reduce power
-ACTION4 (→): Increase power
+ACTION1 (^): Aim higher
+ACTION2 (v): Aim lower
+ACTION3 (<-): Reduce power
+ACTION4 (->): Increase power
 ACTION5    : Fire / trigger bird ability (auto-triggers in-flight)
 
 Five levels with increasing difficulty.  Fully deterministic.
@@ -17,7 +17,7 @@ import math
 import numpy as np
 from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay
 
-# ─── ARC colour palette ──────────────────────────────────────────────────────
+# --- ARC colour palette ------------------------------------------------------
 #  0=black  1=dark-blue  2=green   3=dark-gray  4=yellow   5=gray
 #  6=pink   7=orange     8=azure   9=blue      11=bright-yellow
 # 12=red   14=lime       15=white
@@ -47,12 +47,12 @@ TRAIL_C = 15   # white trail
 
 AIM_DOT = 15   # white aim dots
 
-# ─── Game constants ───────────────────────────────────────────────────────────
+# --- Game constants -----------------------------------------------------------
 GW, GH   = 64, 64
 GROUND_Y = 44          # first row of ground (rows 44-63 = dirt)
 SLING_X  = 10          # slingshot x
 SLING_Y  = 39          # launch point y
-GRAV     = 0.30        # pixels per frame² downward
+GRAV     = 0.30        # pixels per frame- downward
 BIRD_R   = 2           # bird radius in pixels
 PIG_R    = 3           # pig radius
 
@@ -66,10 +66,10 @@ ABILITY_FRAME = {'red': -1, 'blue': 10, 'yellow': -2, 'black': 38, 'green': 22}
 HP_MAP  = {'wood': 3, 'stone': 7, 'ice': 1}
 DMG_MULT = {'wood': 1.0, 'stone': 0.45, 'ice': 2.5}
 
-# ─── Level definitions ────────────────────────────────────────────────────────
+# --- Level definitions --------------------------------------------------------
 # block: (type, x, y, w, h)     pig: (cx, cy, hp)
 _LEVELS = [
-    {   # ── Level 1 : Tutorial tower ──────────────────────────────────────────
+    {   # -- Level 1 : Tutorial tower ------------------------------------------
         'name':   'Wooden Keep',
         'birds':  ['red', 'red', 'red'],
         'blocks': [
@@ -79,7 +79,7 @@ _LEVELS = [
         ],
         'pigs': [(41, 26, 1)],
     },
-    {   # ── Level 2 : Stone & Ice ─────────────────────────────────────────────
+    {   # -- Level 2 : Stone & Ice ---------------------------------------------
         'name':   'Stone Bridge',
         'birds':  ['red', 'red', 'blue'],
         'blocks': [
@@ -91,7 +91,7 @@ _LEVELS = [
         ],
         'pigs': [(29, 20, 1), (38, 19, 1), (48, 27, 2)],
     },
-    {   # ── Level 3 : Three Towers ────────────────────────────────────────────
+    {   # -- Level 3 : Three Towers --------------------------------------------
         'name':   'Triple Spire',
         'birds':  ['red', 'yellow', 'yellow', 'blue'],
         'blocks': [
@@ -109,7 +109,7 @@ _LEVELS = [
         ],
         'pigs': [(27, 12, 1), (37, 18, 1), (49, 15, 2), (37, 30, 1)],
     },
-    {   # ── Level 4 : Castle ─────────────────────────────────────────────────
+    {   # -- Level 4 : Castle -------------------------------------------------
         'name':   'Stone Castle',
         'birds':  ['red', 'yellow', 'black', 'blue', 'blue'],
         'blocks': [
@@ -135,7 +135,7 @@ _LEVELS = [
             (31, 32, 1), (55, 34, 1),
         ],
     },
-    {   # ── Level 5 : Ultimate Fortress ───────────────────────────────────────
+    {   # -- Level 5 : Ultimate Fortress ---------------------------------------
         'name':   'Iron Fortress',
         'birds':  ['red', 'yellow', 'black', 'black', 'green', 'blue'],
         'blocks': [
@@ -171,7 +171,7 @@ levels = [
 ]
 
 
-# ─── Pixel helpers ───────────────────────────────────────────────────────────
+# --- Pixel helpers -----------------------------------------------------------
 
 def _fill(frame, x, y, w, h, color):
     """Fill a rectangle (clipped to frame bounds)."""
@@ -197,7 +197,7 @@ def _pset(frame, x, y, color):
         frame[y, x] = color
 
 
-# ─── Display ─────────────────────────────────────────────────────────────────
+# --- Display -----------------------------------------------------------------
 
 class Ab01Display(RenderableUserDisplay):
     def __init__(self, game: "Ab01"):
@@ -207,7 +207,7 @@ class Ab01Display(RenderableUserDisplay):
         g = self.game
         frame[:] = SKY_C
 
-        # ── Background ────────────────────────────────────────────────────────
+        # -- Background --------------------------------------------------------
         # Sun
         _circle(frame, 56, 7, 5, SUN_C)
         _pset(frame, 56, 2, 11); _pset(frame, 56, 12, 11)
@@ -231,7 +231,7 @@ class Ab01Display(RenderableUserDisplay):
         _fill(frame, 0, GROUND_Y, GW, GH - GROUND_Y, GND_C)
         frame[GROUND_Y, :] = GRASS_C
 
-        # ── Slingshot ─────────────────────────────────────────────────────────
+        # -- Slingshot ---------------------------------------------------------
         sx, sy = SLING_X, SLING_Y
         # Trunk
         _fill(frame, sx - 1, sy + 1, 3, GROUND_Y - sy, SLING_C)
@@ -255,7 +255,7 @@ class Ab01Display(RenderableUserDisplay):
                 ey = int((sy - 5) * (1 - tt) + by * tt)
                 _pset(frame, ex, ey, SLING_C)
 
-        # ── Aim trajectory preview (AIMING state) ─────────────────────────────
+        # -- Aim trajectory preview (AIMING state) -----------------------------
         if g.state == 'AIMING' and g.bird_type is not None:
             a = math.radians(g.aim_angle)
             pvx = g.aim_power * math.cos(a)
@@ -270,7 +270,7 @@ class Ab01Display(RenderableUserDisplay):
                 if step_i % 4 < 2:  # dotted pattern
                     _pset(frame, ix, iy, AIM_DOT)
 
-        # ── Blocks ────────────────────────────────────────────────────────────
+        # -- Blocks ------------------------------------------------------------
         for blk in g.blocks:
             if blk['destroyed']:
                 continue
@@ -294,7 +294,7 @@ class Ab01Display(RenderableUserDisplay):
                 my = by + bh // 2
                 _fill(frame, bx, my, bw, 1, 0)
 
-        # ── Pigs ──────────────────────────────────────────────────────────────
+        # -- Pigs --------------------------------------------------------------
         for pig in g.pigs:
             if pig['destroyed']:
                 if pig['die_timer'] > 0:
@@ -308,11 +308,11 @@ class Ab01Display(RenderableUserDisplay):
             # Eyes
             _pset(frame, cx - 1, cy - 1, PIG_EYE)
             _pset(frame, cx + 1, cy - 1, PIG_EYE)
-            # Helmet for hp≥2
+            # Helmet for hp-2
             if pig['max_hp'] >= 2:
                 _fill(frame, cx - 2, cy - PIG_R - 1, 5, 2, STON_C)
 
-        # ── Birds in flight / on slingshot ────────────────────────────────────
+        # -- Birds in flight / on slingshot ------------------------------------
         # Trail
         for tx, ty in g.trail:
             _pset(frame, tx, ty, TRAIL_C)
@@ -331,7 +331,7 @@ class Ab01Display(RenderableUserDisplay):
                 spk = (g.flight_frame // 3) % 2
                 _pset(frame, bx, by - BIRD_R - 1, 15 if spk else 11)
 
-        # ── HUD ───────────────────────────────────────────────────────────────
+        # -- HUD ---------------------------------------------------------------
         # Level number dots (top-left)
         li = g.level_index
         for i in range(5):
@@ -372,7 +372,7 @@ class Ab01Display(RenderableUserDisplay):
         return frame
 
 
-# ─── Game ────────────────────────────────────────────────────────────────────
+# --- Game --------------------------------------------------------------------
 
 class Ab01(ARCBaseGame):
     def __init__(self):
@@ -404,7 +404,7 @@ class Ab01(ARCBaseGame):
             [1, 2, 3, 4, 5],
         )
 
-    # ── Level setup ──────────────────────────────────────────────────────────
+    # -- Level setup ----------------------------------------------------------
 
     def on_set_level(self, level: Level) -> None:
         d = _LEVELS[self.level_index]
@@ -443,7 +443,7 @@ class Ab01(ARCBaseGame):
             self.bird_x    = None
             self.bird_y    = None
 
-    # ── Step ─────────────────────────────────────────────────────────────────
+    # -- Step -----------------------------------------------------------------
 
     def step(self) -> None:
         aid = self.action.id.value
@@ -458,7 +458,7 @@ class Ab01(ARCBaseGame):
             elif aid == 4:
                 self.aim_power = min(MAX_POWER, self.aim_power + POWER_STEP)
             elif aid == 5 and self.bird_type is not None:
-                # Fire the bird – keep action open to animate flight
+                # Fire the bird - keep action open to animate flight
                 a = math.radians(self.aim_angle)
                 self.bird_vx = self.aim_power * math.cos(a)
                 self.bird_vy = -self.aim_power * math.sin(a)
@@ -466,7 +466,7 @@ class Ab01(ARCBaseGame):
                 self.bird_ability_used = False
                 self.trail = []
                 self.state = 'FLYING'
-                return   # do NOT complete_action — start animation
+                return   # do NOT complete_action - start animation
             self.complete_action()
 
         elif self.state == 'FLYING':
@@ -489,7 +489,7 @@ class Ab01(ARCBaseGame):
                     self.lose()
             self.complete_action()
 
-    # ── Physics ───────────────────────────────────────────────────────────────
+    # -- Physics ---------------------------------------------------------------
 
     def _physics_tick(self):
         self.bird_vy += GRAV
@@ -622,7 +622,7 @@ class Ab01(ARCBaseGame):
         # Move bird off-screen (spent)
         self.bird_y = GROUND_Y + 10
 
-    # ── Win / lose detection ─────────────────────────────────────────────────
+    # -- Win / lose detection -------------------------------------------------
 
     def _flight_done(self) -> bool:
         # Off the right/left/bottom edges
