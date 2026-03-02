@@ -60,6 +60,7 @@ def orchestrator_decide(
         model, prompt, cfg, role="planner",
         tools_enabled=True, session_id=session_id,
         grid=grid, prev_grid=prev_grid,
+        thinking_budget=8000,
     )
 
     # Log LLM call

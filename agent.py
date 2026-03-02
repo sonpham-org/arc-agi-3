@@ -468,7 +468,7 @@ def _call_anthropic(model: str, messages: list, system: str,
 
 def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: int,
                   tools_enabled: bool = False, session_id: str = "",
-                  grid=None, prev_grid=None) -> dict:
+                  grid=None, prev_grid=None, thinking_budget: int = 0) -> dict:
     from google import genai
     import re as _re
     api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -480,7 +480,8 @@ def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: i
     is_thinking = bool(_re.search(r"2\.5|3-pro|3-flash|3\.1", model_name))
     thinking_cfg = None
     if is_thinking:
-        thinking_cfg = genai.types.ThinkingConfig(thinking_budget=1024)
+        budget = thinking_budget if thinking_budget > 0 else 1024
+        thinking_cfg = genai.types.ThinkingConfig(thinking_budget=budget)
 
     config = genai.types.GenerateContentConfig(
         temperature=temperature,
@@ -614,7 +615,7 @@ def _call_cloudflare(model: str, messages: list, temperature: float, max_tokens:
 
 def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
                tools_enabled: bool = False, session_id: str = "",
-               grid=None, prev_grid=None) -> dict:
+               grid=None, prev_grid=None, thinking_budget: int = 0) -> dict:
     """Route to the right provider. Returns dict with {text, input_tokens, output_tokens}.
 
     Optional kwargs for Gemini tool calling:
@@ -646,7 +647,8 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
     if provider == "gemini":
         return _call_gemini(api_model, prompt, temp, max_tok,
                             tools_enabled=tools_enabled, session_id=session_id,
-                            grid=grid, prev_grid=prev_grid)
+                            grid=grid, prev_grid=prev_grid,
+                            thinking_budget=thinking_budget)
     if provider == "anthropic":
         return _call_anthropic(api_model, [{"role": "user", "content": prompt}],
                                 SYSTEM_MSG, temp, max_tok)
@@ -663,14 +665,16 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
 def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str = "executor",
                               retries: int = 2,
                               tools_enabled: bool = False, session_id: str = "",
-                              grid=None, prev_grid=None) -> LLMResult:
+                              grid=None, prev_grid=None,
+                              thinking_budget: int = 0) -> LLMResult:
     """Call LLM with retries, returning full metadata (tokens, timing, errors)."""
     t0 = time.time()
     for attempt in range(retries + 1):
         try:
             result = call_model(model_key, prompt, cfg, role,
                                 tools_enabled=tools_enabled, session_id=session_id,
-                                grid=grid, prev_grid=prev_grid)
+                                grid=grid, prev_grid=prev_grid,
+                                thinking_budget=thinking_budget)
             duration_ms = int((time.time() - t0) * 1000)
             return LLMResult(
                 text=result["text"],

@@ -73,10 +73,13 @@ def run_subagent(
     """
     budget = min(budget, 10)  # hard cap
     is_theorist = (agent_type == "theorist")
-    # Theorist, tester, and solver use the stronger planner model; explorers use executor
-    use_planner = agent_type in ("theorist", "tester", "solver")
-    model = effective_model(cfg, "planner") if use_planner else effective_model(cfg, "executor")
+    # All subagents use the planner model
+    model = effective_model(cfg, "planner")
     system_prompt = SYSTEM_PROMPTS.get(agent_type, EXPLORER_SYSTEM)
+
+    # Per-agent thinking budgets
+    THINKING_BUDGETS = {"theorist": 8000, "solver": 8000, "tester": 4000, "explorer": 1024}
+    thinking_budget = THINKING_BUDGETS.get(agent_type, 1024)
 
     session_actions = []
     tool_results = []  # accumulates frame tool results across iterations
@@ -137,6 +140,7 @@ def run_subagent(
             model, prompt, cfg, role="executor",
             tools_enabled=True, session_id=session_id,
             grid=grid, prev_grid=prev_grid,
+            thinking_budget=thinking_budget,
         )
         llm_calls += 1
         total_input_tokens += result.input_tokens
