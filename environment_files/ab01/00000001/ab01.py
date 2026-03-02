@@ -495,9 +495,15 @@ class Ab01(ARCBaseGame):
     # -- Physics ---------------------------------------------------------------
 
     def _physics_tick(self):
-        self.bird_vy += GRAV
-        self.bird_x  += self.bird_vx
-        self.bird_y  += self.bird_vy
+        # Sub-step to prevent tunnelling through thin blocks at high speed
+        SUB = 3
+        for _ in range(SUB):
+            self.bird_vy += GRAV / SUB
+            self.bird_x  += self.bird_vx / SUB
+            self.bird_y  += self.bird_vy / SUB
+            self._check_bird_block()
+            self._check_bird_pig()
+
         self.flight_frame += 1
 
         # Trail (keep last 10 points)
@@ -513,12 +519,6 @@ class Ab01(ARCBaseGame):
                 self._use_ability()
             elif af == -2 and self.bird_vy >= 0:
                 self._use_ability()
-
-        # Bird vs blocks
-        self._check_bird_block()
-
-        # Bird vs pigs
-        self._check_bird_pig()
 
         # Block physics (knocked blocks)
         for blk in self.blocks:
@@ -540,31 +540,43 @@ class Ab01(ARCBaseGame):
             self.bird_vx *= 0.70
 
     def _check_bird_block(self):
-        bx, by = self.bird_x, self.bird_y
         for blk in self.blocks:
             if blk['destroyed']:
                 continue
-            # Nearest point on rect to circle centre
-            nx = max(blk['x'], min(bx, blk['x'] + blk['w']))
-            ny = max(blk['y'], min(by, blk['y'] + blk['h']))
-            dx, dy = bx - nx, by - ny
-            if dx * dx + dy * dy >= BIRD_R * BIRD_R:
+            bx, by = self.bird_x, self.bird_y
+            # Nearest point on AABB to circle centre
+            cx = max(blk['x'], min(bx, blk['x'] + blk['w']))
+            cy = max(blk['y'], min(by, blk['y'] + blk['h']))
+            dx, dy = bx - cx, by - cy
+            dist2 = dx * dx + dy * dy
+            if dist2 >= BIRD_R * BIRD_R:
                 continue
 
-            spd = math.sqrt(self.bird_vx ** 2 + self.bird_vy ** 2)
-            dmg = max(1, int(spd * DMG_MULT[blk['type']] * 0.45))
-            blk['hp'] -= dmg
-            if blk['hp'] <= 0:
-                blk['destroyed'] = True
+            # Push bird out so it sits on the block surface
+            dist = math.sqrt(dist2) if dist2 > 0.0001 else 0.01
+            nx_n, ny_n = dx / dist, dy / dist
+            overlap = BIRD_R - dist
+            self.bird_x += nx_n * overlap
+            self.bird_y += ny_n * overlap
 
-            # Impulse on block
-            blk['vx'] += self.bird_vx * 0.28
-            blk['vy'] += self.bird_vy * 0.28
+            # Damage based on impact speed along the collision normal
+            impact = self.bird_vx * nx_n + self.bird_vy * ny_n
+            if impact < 0:   # only when moving INTO the block
+                dmg = max(1, int(abs(impact) * DMG_MULT[blk['type']] * 0.9))
+                blk['hp'] -= dmg
+                if blk['hp'] <= 0:
+                    blk['destroyed'] = True
 
-            # Blue bird pierces (less slowdown); others bounce hard
-            slow = 0.65 if self.bird_type == 'blue' else 0.45
-            self.bird_vx *= slow
-            self.bird_vy *= slow
+                # Impulse on block
+                blk['vx'] += self.bird_vx * 0.28
+                blk['vy'] += self.bird_vy * 0.28
+
+                # Reflect normal component (bounce) + dampen tangential (friction)
+                restitution = 0.35 if self.bird_type == 'blue' else 0.15
+                self.bird_vx -= (1 + restitution) * impact * nx_n
+                self.bird_vy -= (1 + restitution) * impact * ny_n
+                self.bird_vx *= 0.80
+                self.bird_vy *= 0.80
 
     def _check_bird_pig(self):
         bx, by = self.bird_x, self.bird_y
