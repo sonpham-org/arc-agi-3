@@ -73,7 +73,9 @@ def run_subagent(
     """
     budget = min(budget, 10)  # hard cap
     is_theorist = (agent_type == "theorist")
-    model = effective_model(cfg, "planner") if is_theorist else effective_model(cfg, "executor")
+    # Theorist, tester, and solver use the stronger planner model; explorers use executor
+    use_planner = agent_type in ("theorist", "tester", "solver")
+    model = effective_model(cfg, "planner") if use_planner else effective_model(cfg, "executor")
     system_prompt = SYSTEM_PROMPTS.get(agent_type, EXPLORER_SYSTEM)
 
     session_actions = []
