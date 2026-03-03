@@ -6855,8 +6855,7 @@ function _parseRlmClientOutput(finalAnswer, iterationsLog, planHorizon) {
 }
 
 async function callLLM(messages, model, { maxTokens = 16384, thinkingLevel = 'off', onChunk = null } = {}) {
-  const MAX_RETRIES = 4;
-  const BACKOFF_MS = [5000, 15000, 30000, 60000]; // 5s, 15s, 30s, 60s
+  const MAX_RETRIES = 10;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -6866,8 +6865,9 @@ async function callLLM(messages, model, { maxTokens = 16384, thinkingLevel = 'of
       const isRateLimit = msg.includes('429') || msg.includes('rate') || msg.includes('quota')
         || msg.includes('resource_exhausted') || msg.includes('too many requests');
       if (!isRateLimit || attempt >= MAX_RETRIES) throw e;
-      const wait = BACKOFF_MS[attempt] || 60000;
-      console.warn(`[callLLM] Rate limited (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${wait / 1000}s...`, e.message);
+      // Exponential backoff: 10s, 20s, 40s, 80s, 120s, 120s... (capped at 120s)
+      const wait = Math.min(10000 * Math.pow(2, attempt), 120000);
+      console.warn(`[callLLM] Rate limited (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${wait / 1000}s...`, e.message);
       await new Promise(r => setTimeout(r, wait));
     }
   }

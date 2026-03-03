@@ -73,13 +73,14 @@ def run_subagent(
     """
     budget = min(budget, 10)  # hard cap
     is_theorist = (agent_type == "theorist")
-    # All subagents use the planner model
-    model = effective_model(cfg, "planner")
+    # Per-agent-type model override (e.g. explorer_model), fallback to planner model
+    agent_model = cfg["reasoning"].get(f"{agent_type}_model")
+    model = agent_model if agent_model else effective_model(cfg, "planner")
     system_prompt = SYSTEM_PROMPTS.get(agent_type, EXPLORER_SYSTEM)
 
     # Per-agent thinking budgets
-    THINKING_BUDGETS = {"theorist": 8000, "solver": 8000, "tester": 4000, "explorer": 1024}
-    thinking_budget = THINKING_BUDGETS.get(agent_type, 1024)
+    THINKING_BUDGETS = {"theorist": 16000, "solver": 16000, "tester": 8000, "explorer": 4000}
+    thinking_budget = THINKING_BUDGETS.get(agent_type, 4000)
 
     session_actions = []
     tool_results = []  # accumulates frame tool results across iterations
@@ -226,16 +227,6 @@ def run_subagent(
                          if action_id == 6 and action_data else "")
             print(f"      [{agent_type}] step {step_num}: {aname}{coord_str} — {reasoning[:50]}")
 
-            if observer:
-                observer.subagent_act(
-                    agent_type, step_num, f"{aname}{coord_str}",
-                    state="ACTING",
-                    reasoning=reasoning,
-                    input_tokens=result.input_tokens,
-                    output_tokens=result.output_tokens,
-                    duration_ms=result.duration_ms,
-                )
-
             frame = env.step(action, data=action_data or None, reasoning=reasoning)
             if frame is None:
                 print(f"      [{agent_type}] env.step returned None")
@@ -245,8 +236,18 @@ def run_subagent(
             new_grid = frame.frame[-1].tolist() if frame.frame else grid
             state_str = frame.state.value if hasattr(frame.state, "value") else str(frame.state)
 
-            # Update grid in dashboard immediately after action
+            # Update grid and log action in dashboard immediately after env.step
             if observer:
+                observer.subagent_act(
+                    agent_type, step_num, f"{aname}{coord_str}",
+                    state=state_str,
+                    reasoning=reasoning,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    duration_ms=result.duration_ms,
+                    grid=new_grid,
+                    response=result.text or "",
+                )
                 observer.update_grid(new_grid)
 
             # Record observation

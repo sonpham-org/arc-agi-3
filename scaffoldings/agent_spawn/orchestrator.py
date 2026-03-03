@@ -60,7 +60,7 @@ def orchestrator_decide(
         model, prompt, cfg, role="planner",
         tools_enabled=True, session_id=session_id,
         grid=grid, prev_grid=prev_grid,
-        thinking_budget=8000,
+        thinking_budget=16000,
     )
 
     # Log LLM call
@@ -121,4 +121,5 @@ def orchestrator_decide(
         }
 
     parsed.update(meta)
+    parsed["raw_response"] = result.text or ""
     return parsed

@@ -286,5 +286,14 @@
     "levels_completed": 0,
     "win_levels": 7,
     "executor_model": "gemini-3-flash"
+  },
+  {
+    "timestamp": "2026-03-03T06:28:12.829400",
+    "game_id": "ls20-cb3b57cc",
+    "result": "NOT_FINISHED",
+    "steps": 30,
+    "levels_completed": 0,
+    "win_levels": 7,
+    "executor_model": "gemini-3-pro"
   }
 ]

@@ -1521,14 +1521,15 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
         headers.update(extra_headers)
     body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": max_tokens}
 
-    # Retry with backoff on 429 (rate limit) — up to 3 attempts
+    # Retry with exponential backoff on 429 (rate limit) — up to 10 attempts
     last_exc = None
-    for attempt in range(3):
+    for attempt in range(10):
         resp = httpx.post(url, headers=headers, json=body, timeout=90.0)
         if resp.status_code == 429:
-            retry_after = float(resp.headers.get("retry-after", 2 ** attempt))
-            app.logger.info(f"Rate limited by {url}, retrying in {retry_after}s (attempt {attempt+1}/3)")
-            time.sleep(min(retry_after, 30))
+            retry_after = float(resp.headers.get("retry-after", min(10 * (2 ** attempt), 120)))
+            retry_after = min(retry_after, 120)
+            app.logger.info(f"Rate limited by {url}, retrying in {retry_after}s (attempt {attempt+1}/10)")
+            time.sleep(retry_after)
             last_exc = httpx.HTTPStatusError(
                 f"429 Too Many Requests", request=resp.request, response=resp)
             continue

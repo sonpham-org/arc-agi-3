@@ -608,6 +608,14 @@ def main():
         print(f"No games found. Available: {', '.join(available_games)}")
         sys.exit(1)
 
+    # Each batch run gets its own timestamped DB file
+    import db as _db_module
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _db_module.DB_PATH = Path(__file__).parent / "data" / f"sessions_{ts}.db"
+    _db_module._init_db()
+    print(f"  DB: {_db_module.DB_PATH}")
+
     run_batch(
         games=games,
         cfg=cfg,

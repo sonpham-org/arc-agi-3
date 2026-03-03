@@ -104,7 +104,7 @@ class AgentObserver:
     def orchestrator_decide(self, turn: int, step: int, command: str,
                             agent_type: str = "", task: str = "",
                             input_tokens: int = 0, output_tokens: int = 0,
-                            duration_ms: int = 0):
+                            duration_ms: int = 0, response: str = ""):
         """Log an orchestrator decision."""
         self.update_status(
             turn=turn,
@@ -118,6 +118,7 @@ class AgentObserver:
             agent_type=agent_type, task=task[:120],
             input_tokens=input_tokens, output_tokens=output_tokens,
             duration_ms=duration_ms,
+            response=response,
         )
 
     def subagent_start(self, agent_type: str, task: str, budget: int, step: int):
@@ -134,15 +135,20 @@ class AgentObserver:
     def subagent_act(self, agent_type: str, step: int, action: str,
                      state: str, reasoning: str = "",
                      input_tokens: int = 0, output_tokens: int = 0,
-                     duration_ms: int = 0):
+                     duration_ms: int = 0, grid=None, response: str = ""):
         """Log a subagent game action."""
         self.update_status(step=step)
+        extra = {}
+        if grid is not None:
+            extra["grid"] = grid
         self.event(
             "act",
             agent=agent_type, step=step, action=action, state=state,
-            reasoning=reasoning[:80],
+            reasoning=reasoning,
             input_tokens=input_tokens, output_tokens=output_tokens,
             duration_ms=duration_ms,
+            response=response,
+            **extra,
         )
 
     def subagent_frame_tool(self, agent_type: str, tool_name: str):

@@ -663,11 +663,15 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
 
 
 def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str = "executor",
-                              retries: int = 2,
+                              retries: int = 10,
                               tools_enabled: bool = False, session_id: str = "",
                               grid=None, prev_grid=None,
                               thinking_budget: int = 0) -> LLMResult:
-    """Call LLM with retries, returning full metadata (tokens, timing, errors)."""
+    """Call LLM with retries, returning full metadata (tokens, timing, errors).
+
+    Retries up to `retries` times (default 10) with exponential backoff.
+    Rate-limit (429) waits scale from 15s to 120s; server errors use shorter waits.
+    """
     t0 = time.time()
     for attempt in range(retries + 1):
         try:
@@ -686,12 +690,12 @@ def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str =
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                wait = 10 * (attempt + 1)
-                print(f"  [Rate limited] waiting {wait}s...")
+                wait = min(10 * (2 ** attempt), 120)  # exponential: 10, 20, 40, 80, 120, 120...
+                print(f"  [Rate limited] attempt {attempt+1}/{retries+1}, waiting {wait}s...")
                 time.sleep(wait)
             elif e.response.status_code in (500, 502, 503, 529) and attempt < retries:
-                wait = 5 * (attempt + 1)
-                print(f"  [HTTP {e.response.status_code}] retrying in {wait}s...")
+                wait = min(5 * (2 ** attempt), 60)  # exponential: 5, 10, 20, 40, 60...
+                print(f"  [HTTP {e.response.status_code}] attempt {attempt+1}/{retries+1}, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 duration_ms = int((time.time() - t0) * 1000)
@@ -700,9 +704,10 @@ def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str =
         except Exception as e:
             err_str = str(e).lower()
             # Retry on transient errors (quota, timeout, server errors)
-            if attempt < retries and any(k in err_str for k in ("429", "quota", "rate", "timeout", "503", "500", "overloaded")):
-                wait = 5 * (attempt + 1)
-                print(f"  [LLM error] {e} — retrying in {wait}s...")
+            if attempt < retries and any(k in err_str for k in ("429", "quota", "rate", "timeout", "503", "500", "overloaded", "resource_exhausted")):
+                is_rate_limit = any(k in err_str for k in ("429", "quota", "rate", "resource_exhausted"))
+                wait = min(10 * (2 ** attempt), 120) if is_rate_limit else min(5 * (2 ** attempt), 60)
+                print(f"  [LLM error] {e} — attempt {attempt+1}/{retries+1}, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 duration_ms = int((time.time() - t0) * 1000)
@@ -713,7 +718,7 @@ def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str =
 
 
 def call_model_with_retry(model_key: str, prompt: str, cfg: dict, role: str = "executor",
-                           retries: int = 2) -> str | None:
+                           retries: int = 10) -> str | None:
     """Thin wrapper: returns just the text (or None). For backward compatibility."""
     result = call_model_with_metadata(model_key, prompt, cfg, role, retries)
     return result.text

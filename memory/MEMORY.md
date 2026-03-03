@@ -38,6 +38,10 @@
 ## vc33
 
 ## ls20-cb3b57cc
+- The puzzle consists of 7 levels, none of which were completed in 30 steps using basic action cycling.
+- Alternating sequences of ACTION3 and ACTION4 are ineffective for solving the current level.
+- Repeated execution of ACTION2 (up to 4 times) or ACTION3 (up to 5 times) does not advance the game state.
+- Level 0 is not solvable by single applications of ACTION1, ACTION2, ACTION3, or ACTION4.
 - Directional actions (1-4) control the yellow/red UI bar and blocks in the middle-right area.
 - ACTION3/4 control the bottom UI bar; testing ACTION2 to see its effect on the central objects.
 - Directional actions move blocks (colors 9, 12) in the gray region (rows 45-49) and update the bottom UI bar.

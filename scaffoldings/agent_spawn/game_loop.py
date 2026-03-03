@@ -35,7 +35,14 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
     print(f"\n{'='*65}")
     print(f"  PLAYING (agent-spawn scaffold): {game_id}")
     print(f"  Orchestrator: {effective_model(cfg, 'planner')}")
-    print(f"  Subagents:    {effective_model(cfg, 'executor')}")
+    # Show per-agent-type model overrides if any
+    rcfg = cfg.get("reasoning", {})
+    for atype in ("explorer", "theorist", "tester", "solver"):
+        override = rcfg.get(f"{atype}_model")
+        if override:
+            print(f"  {atype:12s}: {override}")
+        else:
+            print(f"  {atype:12s}: {effective_model(cfg, 'planner')}")
     print(f"{'='*65}\n")
 
     env = arcade.make(game_id)
@@ -152,6 +159,7 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 input_tokens=decision.get("input_tokens", 0),
                 output_tokens=decision.get("output_tokens", 0),
                 duration_ms=decision.get("duration_ms", 0),
+                response=decision.get("raw_response", ""),
             )
             obs.update_level(frame.levels_completed, frame.win_levels)
 
