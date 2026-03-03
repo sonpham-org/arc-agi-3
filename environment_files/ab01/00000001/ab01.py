@@ -367,7 +367,57 @@ class Ab01Display(RenderableUserDisplay):
             _fill(frame, 27, 30,  4, 4, 0)  # I
             _fill(frame, 32, 30,  4, 4, 0)  # N
         elif g.state == 'LOST':
-            _fill(frame, 18, 28, 28, 8, 12)
+            _fill(frame, 10, 23, 44, 18, 7)   # orange background
+            # "GAME" row — y=26, letters at x=25,29,33,37 (3×5 black pixel font)
+            # G
+            _fill(frame, 26, 26, 2, 1, 0)
+            _pset(frame, 25, 27, 0)
+            _fill(frame, 25, 28, 3, 1, 0)
+            _pset(frame, 25, 29, 0); _pset(frame, 27, 29, 0)
+            _fill(frame, 26, 30, 2, 1, 0)
+            # A
+            _pset(frame, 30, 26, 0)
+            _pset(frame, 29, 27, 0); _pset(frame, 31, 27, 0)
+            _fill(frame, 29, 28, 3, 1, 0)
+            _pset(frame, 29, 29, 0); _pset(frame, 31, 29, 0)
+            _pset(frame, 29, 30, 0); _pset(frame, 31, 30, 0)
+            # M
+            _pset(frame, 33, 26, 0); _pset(frame, 35, 26, 0)
+            _fill(frame, 33, 27, 3, 1, 0)
+            _pset(frame, 33, 28, 0); _pset(frame, 35, 28, 0)
+            _pset(frame, 33, 29, 0); _pset(frame, 35, 29, 0)
+            _pset(frame, 33, 30, 0); _pset(frame, 35, 30, 0)
+            # E
+            _fill(frame, 37, 26, 3, 1, 0)
+            _pset(frame, 37, 27, 0)
+            _fill(frame, 37, 28, 2, 1, 0)
+            _pset(frame, 37, 29, 0)
+            _fill(frame, 37, 30, 3, 1, 0)
+            # "OVER" row — y=33, letters at x=25,29,33,37
+            # O
+            _pset(frame, 26, 33, 0)
+            _pset(frame, 25, 34, 0); _pset(frame, 27, 34, 0)
+            _pset(frame, 25, 35, 0); _pset(frame, 27, 35, 0)
+            _pset(frame, 25, 36, 0); _pset(frame, 27, 36, 0)
+            _pset(frame, 26, 37, 0)
+            # V
+            _pset(frame, 29, 33, 0); _pset(frame, 31, 33, 0)
+            _pset(frame, 29, 34, 0); _pset(frame, 31, 34, 0)
+            _pset(frame, 29, 35, 0); _pset(frame, 31, 35, 0)
+            _pset(frame, 30, 36, 0)
+            _pset(frame, 30, 37, 0)
+            # E
+            _fill(frame, 33, 33, 3, 1, 0)
+            _pset(frame, 33, 34, 0)
+            _fill(frame, 33, 35, 2, 1, 0)
+            _pset(frame, 33, 36, 0)
+            _fill(frame, 33, 37, 3, 1, 0)
+            # R
+            _fill(frame, 37, 33, 2, 1, 0)
+            _pset(frame, 37, 34, 0); _pset(frame, 39, 34, 0)
+            _fill(frame, 37, 35, 2, 1, 0)
+            _pset(frame, 37, 36, 0); _pset(frame, 39, 36, 0)
+            _pset(frame, 37, 37, 0); _pset(frame, 39, 37, 0)
 
         return frame
 
