@@ -180,6 +180,20 @@ def _init_db():
             PRIMARY KEY (batch_id, game_id)
         );
     """)
+    # Observability events table (client-side obs screen events synced to server)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS obs_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            event_idx INTEGER NOT NULL,
+            event_json TEXT NOT NULL,
+            timestamp REAL NOT NULL
+        )
+    """)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_obs_session ON obs_events(session_id, event_idx)")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -432,6 +446,20 @@ def _init_turso_db():
                 used INTEGER DEFAULT 0
             );
         """)
+        # Observability events table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS obs_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                event_idx INTEGER NOT NULL,
+                event_json TEXT NOT NULL,
+                timestamp REAL NOT NULL
+            )
+        """)
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_obs_session ON obs_events(session_id, event_idx)")
+        except Exception:
+            pass
         conn.commit()
         conn.sync()
         conn.close()

@@ -2631,6 +2631,33 @@ def log_session_event(session_id):
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/sessions/<session_id>/obs-events", methods=["POST"])
+@bot_protection
+def save_obs_events(session_id):
+    """Save observability events from the client-side obs screen."""
+    if not feature_enabled("session_db"):
+        return jsonify({"error": "Session DB not enabled"}), 400
+    payload = request.get_json(force=True)
+    events = payload.get("events", [])
+    cursor = payload.get("cursor", 0)
+    if not events:
+        return jsonify({"ok": True, "cursor": cursor})
+    try:
+        conn = _get_db()
+        now = time.time()
+        for i, ev in enumerate(events):
+            conn.execute(
+                "INSERT OR IGNORE INTO obs_events (session_id, event_idx, event_json, timestamp) VALUES (?, ?, ?, ?)",
+                (session_id, cursor + i, json.dumps(ev), now))
+        conn.commit()
+        conn.close()
+        new_cursor = cursor + len(events)
+        return jsonify({"ok": True, "cursor": new_cursor})
+    except Exception as e:
+        app.logger.warning(f"Obs events save failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/sessions/branch", methods=["POST"])
 @bot_protection
 @turnstile_required

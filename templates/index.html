@@ -292,6 +292,80 @@
   .as-legend-item { display: flex; align-items: center; gap: 4px; }
   .as-legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
 
+  /* ── Observability Screen ────────────────────────────────────────────── */
+  .obs-screen { display: none; flex: 1; overflow: hidden; background: var(--bg); }
+  .obs-left { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .obs-right { width: 400px; min-width: 400px; border-left: 1px solid var(--border); background: var(--surface);
+    display: flex; flex-direction: column; overflow: hidden; }
+  .obs-right h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 8px 12px 4px; }
+  .obs-right .obs-grid-info { font-size: 10px; color: var(--text-dim); padding: 0 12px 6px; }
+  .obs-right .obs-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 8px; }
+  .obs-right .obs-transport { padding: 8px 12px; border-top: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: center; justify-content: center; }
+
+  .obs-status-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .obs-stat { padding: 6px 10px; background: var(--surface); }
+  .obs-stat .obs-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .obs-stat .obs-value { font-size: 14px; font-weight: 600; color: var(--text); margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .obs-swimlane-section { border-bottom: 1px solid var(--border); padding: 8px 12px;
+    background: var(--surface); min-height: 60px; max-height: 300px; overflow: hidden; flex-shrink: 0; }
+  .obs-swimlane-section h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 6px; }
+  .obs-swimlane-container { position: relative; overflow-x: auto; overflow-y: auto; max-height: 260px; }
+  .obs-swimlane-canvas { position: relative; min-width: 100%; }
+  .obs-swimlane-wrap { display: flex; overflow: hidden; }
+  .obs-swimlane-labels { flex-shrink: 0; width: 80px; z-index: 3; background: var(--surface); }
+  .obs-swimlane-label { height: 22px; margin-bottom: 2px; font-size: 10px; text-align: right;
+    padding: 3px 8px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .obs-swimlane-tracks-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; min-width: 0; }
+  .obs-swimlane-tracks-canvas { position: relative; min-width: 100%; }
+  .obs-swimlane-row { position: relative; height: 22px; margin-bottom: 2px; }
+  .obs-event-block { position: absolute; height: 18px; top: 2px; border-radius: 2px;
+    cursor: pointer; min-width: 4px; transition: opacity 0.15s; }
+  .obs-event-block:hover { opacity: 0.8; outline: 1px solid rgba(255,255,255,0.3); }
+
+  .obs-log-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .obs-log-header { display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .obs-log-header h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .obs-log-wrap { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  table.obs-log { width: 100%; border-collapse: collapse; font-size: 11px; }
+  table.obs-log thead th { position: sticky; top: 0; background: var(--surface); padding: 4px 8px;
+    text-align: left; font-weight: 600; color: var(--text-dim); text-transform: uppercase;
+    font-size: 10px; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); z-index: 5; }
+  table.obs-log tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--border) 30%, transparent); cursor: pointer; }
+  table.obs-log tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  table.obs-log td { padding: 4px 8px; vertical-align: top; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+  table.obs-log td.obs-details { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 500px; cursor: pointer; transition: background 0.15s; }
+  table.obs-log td.obs-details:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  table.obs-log td.obs-details.expanded { white-space: normal; word-break: break-word;
+    overflow: visible; text-overflow: unset; max-width: none; }
+  .obs-response-detail { display: none; margin-top: 6px; padding: 8px 10px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    max-height: 400px; overflow-y: auto; color: var(--text-dim); font-family: inherit; }
+  .obs-details.expanded .obs-response-detail { display: block; }
+  .obs-agent-badge { display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 11px; font-weight: 600; color: #fff; }
+  .obs-tok { color: var(--text-dim); }
+  .obs-dur { color: var(--text-dim); }
+  .obs-tooltip { display: none; position: fixed; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 10px; font-size: 11px; line-height: 1.5; z-index: 100;
+    max-width: 350px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .obs-tooltip.visible { display: block; }
+  .obs-tooltip .tt-agent { font-weight: 600; }
+  .obs-tooltip .tt-dim { color: var(--text-dim); }
+  table.obs-log tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .obs-grid-mode-label { font-size: 10px; color: var(--accent); padding: 0 12px 4px; display: none; }
+  .obs-grid-mode-label.active { display: block; }
+
   .ad-banner { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--surface); flex-shrink: 0; }
   .ad-banner-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
   .ad-support-msg { font-size: 9px; color: var(--dim); font-style: italic; }
@@ -835,16 +909,14 @@
       <!-- ── Right panel ───────────────────────────────────────────── -->
       <div class="right-panel">
 
-          <!-- Tab bar: Agent Setting | Graphics | Memory | Reasoning -->
+          <!-- Tab bar: Agent Setting | Prompts | Graphics -->
           <div class="subtab-bar">
             <button class="active" onclick="switchSubTab('settings')">Agent Settings</button>
             <button onclick="switchSubTab('prompts')">Prompts</button>
             <button onclick="switchSubTab('graphics')">Graphics</button>
-            <button onclick="switchSubTab('reasoning')">
-              Reasoning <span id="llmSpinner" style="display:none;margin-left:4px;"><span class="spinner"></span></span>
-            </button>
-            <button onclick="switchSubTab('timeline')">Timeline</button>
           </div>
+          <!-- Hidden spinner (referenced by LLM code) -->
+          <span id="llmSpinner" style="display:none;"><span class="spinner"></span></span>
 
           <!-- ── Settings subtab ── -->
           <div class="subtab-pane active" id="subtabSettings" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
@@ -879,41 +951,29 @@
             </div>
           </div>
 
-          <!-- ── Reasoning subtab ── -->
-          <div class="subtab-pane" id="subtabReasoning">
-            <!-- countdownDisplay removed -->
-            <div class="reasoning-scroll" id="reasoningContent">
-              <div class="empty-state" style="height:auto;font-size:12px;">
-                Start a game and enable LLM reasoning to see analysis here.
-              </div>
+          <!-- ── Reasoning (hidden, kept for DOM references) ── -->
+          <div id="subtabReasoning" style="display:none;">
+            <div class="reasoning-scroll" id="reasoningContent"></div>
+          </div>
+          <!-- ── Timeline (hidden, kept for DOM references) ── -->
+          <div id="subtabTimeline" style="display:none;">
+            <div class="timeline-scroll" id="timelineContent"></div>
+          </div>
+          <!-- Ad banner (moved to settings pane area) -->
+          <div id="adBanner" class="ad-banner">
+            <div class="ad-banner-header">
+              <span class="ad-support-msg">Support this project</span>
+              <button class="ad-close-btn" onclick="toggleAdBanner()" title="Hide">&times;</button>
             </div>
-            <div class="reasoning-toolbar" style="display:flex;justify-content:flex-end;padding:4px 10px;border-top:1px solid var(--border);flex-shrink:0;">
-              <button class="btn" style="font-size:10px;padding:2px 8px;" onclick="copyReasoningLog()">Copy Log</button>
-            </div>
-            <div id="adBanner" class="ad-banner">
-              <div class="ad-banner-header">
-                <span class="ad-support-msg">Support this project</span>
-                <button class="ad-close-btn" onclick="toggleAdBanner()" title="Hide">&times;</button>
-              </div>
-              <div class="bmc-slot">
-                <a href="https://buymeacoffee.com/sonphamnet" target="_blank" rel="noopener" class="bmc-link">
-                  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="bmc-img">
-                </a>
-                <div class="bmc-text">Enjoy the project? A coffee helps keep the development going.</div>
-              </div>
-            </div>
-            <div class="ad-show-btn" id="adShowBtn">
-              <button onclick="toggleAdBanner()">Support this project</button>
+            <div class="bmc-slot">
+              <a href="https://buymeacoffee.com/sonphamnet" target="_blank" rel="noopener" class="bmc-link">
+                <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="bmc-img">
+              </a>
+              <div class="bmc-text">Enjoy the project? A coffee helps keep the development going.</div>
             </div>
           </div>
-
-          <!-- ── Timeline subtab ── -->
-          <div class="subtab-pane" id="subtabTimeline">
-            <div class="timeline-scroll" id="timelineContent">
-              <div class="empty-state" style="height:auto;font-size:12px;">
-                Timeline will populate as LLM calls are made.
-              </div>
-            </div>
+          <div class="ad-show-btn" id="adShowBtn">
+            <button onclick="toggleAdBanner()">Support this project</button>
           </div>
 
         <!-- Hidden history elements (used by replay JS) -->
@@ -925,6 +985,72 @@
       </div>
 
     </div>
+
+    <!-- ── Observability Screen (hidden by default, replaces game-area during autoplay) ── -->
+    <div class="obs-screen" id="obsScreen">
+      <div class="obs-left">
+        <!-- Status bar -->
+        <div class="obs-status-bar" id="obsStatusBar">
+          <div class="obs-stat"><div class="obs-label">Game</div><div class="obs-value" id="obsGame">--</div></div>
+          <div class="obs-stat"><div class="obs-label">Step</div><div class="obs-value" id="obsStep">--</div></div>
+          <div class="obs-stat"><div class="obs-label">Turn</div><div class="obs-value" id="obsTurn">--</div></div>
+          <div class="obs-stat"><div class="obs-label">Calls</div><div class="obs-value" id="obsCalls">--</div></div>
+          <div class="obs-stat"><div class="obs-label">Tokens</div><div class="obs-value" id="obsTokens">--</div></div>
+          <div class="obs-stat"><div class="obs-label">Cost</div><div class="obs-value" id="obsCost">--</div></div>
+          <div class="obs-stat"><div class="obs-label">Elapsed</div><div class="obs-value" id="obsElapsed">--</div></div>
+        </div>
+        <!-- Swimlane timeline -->
+        <div class="obs-swimlane-section">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <h3 style="margin:0">Timeline</h3>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span id="obsZoomLabel" style="font-size:10px;color:var(--text-dim)">1.0x</span>
+              <button class="btn" style="font-size:10px;padding:2px 8px;" onclick="obsTimelineZoom=1;obsTimelineAutoScroll=true;renderObsSwimlane();document.getElementById('obsZoomLabel').textContent='1.0x'">Reset</button>
+            </div>
+          </div>
+          <div class="obs-swimlane-container" id="obsSwimlaneContainer">
+            <div class="obs-swimlane-canvas" id="obsSwimlaneCanvas"></div>
+          </div>
+        </div>
+        <!-- Event log -->
+        <div class="obs-log-section">
+          <div class="obs-log-header">
+            <h3>Event Log</h3>
+            <button class="btn active" id="obsAutoScrollBtn" style="font-size:10px;padding:2px 8px;" onclick="obsAutoScroll=!obsAutoScroll;this.classList.toggle('active',obsAutoScroll)">Auto-scroll</button>
+          </div>
+          <div class="obs-log-wrap" id="obsLogWrap">
+            <table class="obs-log">
+              <thead>
+                <tr>
+                  <th style="width:70px">Time</th>
+                  <th style="width:50px">+s</th>
+                  <th style="width:85px">Agent</th>
+                  <th style="width:100px">Event</th>
+                  <th>Details</th>
+                  <th style="width:90px">Tokens</th>
+                  <th style="width:60px">Dur</th>
+                </tr>
+              </thead>
+              <tbody id="obsLogBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- Right: game canvas + controls -->
+      <div class="obs-right">
+        <h3>Game State</h3>
+        <div class="obs-grid-info" id="obsGridInfo">--</div>
+        <div class="obs-grid-mode-label" id="obsGridModeLabel">Showing historical state</div>
+        <div class="obs-canvas-wrap" id="obsCanvasHost"></div>
+        <div class="obs-transport">
+          <button class="btn" id="obsPauseBtn" onclick="toggleAutoPlay()">Pause</button>
+          <button class="btn" id="obsBackBtn" onclick="exitObsMode()">Back to Settings</button>
+        </div>
+      </div>
+    </div>
+    <!-- Tooltip for obs -->
+    <div class="obs-tooltip" id="obsTooltip"></div>
+
   </div>
 </div><!-- /mainLayout -->
 </div><!-- /sessionViewHost -->
@@ -2137,6 +2263,10 @@ class SessionState {
     this.timelineEvents = [];  // [{type, duration, turn, model?, callNum?}]
     this._rlmNamespace = {};  // Persistent RLM REPL variables (survives across turns within session)
     this._tsState = null;     // Three-System state (rules, observations, snapshots) — initialized on first use
+    // Observability
+    this._obsEvents = [];     // Obs screen events [{event, agent, t, elapsed_s, ...}]
+    this._obsStartTime = null;
+    this._obsSyncCursor = 0;
     // Detach/attach: per-session DOM + settings snapshot
     this._viewEl = null;       // Detached DOM element for this session
     this._settings = null;     // Snapshot of DOM settings for background reads
@@ -2305,9 +2435,9 @@ function restoreSessionFromState(s) {
   updatePanelBlur();
   updateGameListLock();
 
-  // Re-render timeline if that tab is active
-  if (document.getElementById('subtabTimeline')?.classList.contains('active')) {
-    renderTimeline(s);
+  // Re-render obs swimlane if obs mode is active
+  if (document.getElementById('obsScreen')?.style.display === 'flex') {
+    updateObsStatus(s);
   }
 
   // Highlight the matching game card in the sidebar
@@ -3035,20 +3165,21 @@ function toggleInterruptSettings() {
 
 function switchTopTab(tab) {
   // History tab removed — this is now a no-op kept for compat with resume/branch code
-  if (tab === 'agent') switchSubTab('reasoning');
+  if (tab === 'agent') switchSubTab('settings');
 }
 
 function switchSubTab(tab) {
+  // Reasoning/timeline tabs removed — redirect to settings
+  if (tab === 'reasoning' || tab === 'timeline') tab = 'settings';
   document.querySelectorAll('.subtab-bar button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.subtab-pane').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
-  const tabMap = { settings: 'subtabSettings', prompts: 'subtabPrompts', graphics: 'subtabGraphics', reasoning: 'subtabReasoning', timeline: 'subtabTimeline' };
+  const tabMap = { settings: 'subtabSettings', prompts: 'subtabPrompts', graphics: 'subtabGraphics' };
   const buttons = document.querySelectorAll('.subtab-bar button');
-  const idx = { settings: 0, prompts: 1, graphics: 2, reasoning: 3, timeline: 4 }[tab] || 0;
+  const idx = { settings: 0, prompts: 1, graphics: 2 }[tab] || 0;
   if (buttons[idx]) buttons[idx].classList.add('active');
   const pane = document.getElementById(tabMap[tab]);
   if (pane) { pane.classList.add('active'); pane.style.display = 'flex'; }
   if (tab === 'prompts') renderPromptsTab();
-  if (tab === 'timeline') renderTimeline(getActiveSession());
 }
 
 function toggleAdBanner() {
@@ -3984,6 +4115,7 @@ async function checkInterrupt(expected, grid, changeMap) {
     const _intSs = getActiveSession();
     if (_intSs && _intSs.timelineEvents) {
       _intSs.timelineEvents.push({ type: 'interrupt', call_type: 'interrupt', duration: _intDur, turn: _intSs.llmCallCount, response_preview: rawResult });
+      emitObsEvent(_intSs, { event: 'interrupt', agent: 'interrupt', duration_ms: _intDur, summary: (rawResult || '').slice(0, 200) });
     }
     if (_intResult !== undefined) return _intResult;
   } catch (e) {
@@ -4055,6 +4187,7 @@ Progress: Level ${_ss.currentState.levels_completed || 0}/${_ss.currentState.win
       const _tlTarget = ss || getActiveSession();
       if (_tlTarget && _tlTarget.timelineEvents) {
         _tlTarget.timelineEvents.push({ type: 'compact', call_type: 'compact', duration: _compactDur, turn: _ss.llmCallCount, response_preview: (summary || '').slice(0, 500) });
+        emitObsEvent(_tlTarget, { event: 'compact', agent: 'compact', duration_ms: _compactDur, summary: (summary || '').slice(0, 200) });
       }
       _ss._cachedCompactSummary = `## COMPACT CONTEXT (LLM-summarized game knowledge)\n${summary}`;
       _ss._compactSummaryAtCall = _ss.llmCallCount;
@@ -5413,6 +5546,15 @@ async function askLLM(ss) {
         error: resp.error, attempt: resp.retries || 0,
       });
       if (isActive()) renderTimeline(_callSession);
+      // Emit obs event
+      emitObsEvent(_callSession, {
+        event: 'llm_call', agent: 'executor', model: resp.model || model,
+        duration_ms: resp.call_duration_ms,
+        input_tokens: resp.usage?.prompt_tokens || 0,
+        output_tokens: resp.usage?.candidates_tokens || 0,
+        cost: resp.cost || 0,
+        summary: (resp.raw || '').slice(0, 200),
+      });
     }
 
     // Collect observation for compact context
@@ -5907,6 +6049,12 @@ async function executePlan(plan, resp, entry, expected, ss) {
       const btn = planSteps[i].querySelector('.action-btn');
       if (btn) { btn.style.background = 'var(--green)'; btn.style.color = '#000'; btn.style.borderColor = 'var(--green)'; }
     }
+    // Emit obs act event
+    const _obsAgent = resp?.scaffolding === 'three_system' || resp?.scaffolding === 'two_system' ? 'planner' : 'executor';
+    emitObsEvent(_ss || getActiveSession(), {
+      event: 'act', agent: _obsAgent, action: ACTION_NAMES[step.action] || `A${step.action}`,
+      grid: data.grid || null,
+    });
 
     // ── Three-system: record observation and run monitor client-side ──
     if (resp?.scaffolding === 'three_system' || resp?.scaffolding === 'two_system') {
@@ -6216,6 +6364,9 @@ async function toggleAutoPlay() {
     updateScaffoldingNodeState('interrupt', 'idle');
     updateScaffoldingNodeState('root_lm', 'idle');
     renderSessionTabs();
+    // Update obs pause button text
+    const _obsPB = document.getElementById('obsPauseBtn');
+    if (_obsPB) _obsPB.textContent = 'Resume';
     return;
   }
   if (!sessionId) { alert('Start a game first'); return; }
@@ -6241,6 +6392,8 @@ async function toggleAutoPlay() {
     }
   }
   renderSessionTabs();
+  // Enter observability mode
+  enterObsMode(ss);
 
   try {
   while (ss ? ss.autoPlaying : autoPlaying) {
@@ -7132,6 +7285,12 @@ if 'SHOW_VARS' not in dir():
       repl_outputs: replOutputs.map(o => o.substring(0, 1000)),
       sub_calls: 0,
     });
+    // Emit obs events for RLM
+    const _rlmSs = sessions.get(_cur.sessionId);
+    emitObsEvent(_rlmSs, { event: 'llm_call', agent: 'executor', model, summary: responseText.slice(0, 200) });
+    if (codeBlocks.length > 0) {
+      emitObsEvent(_rlmSs, { event: 'repl_exec', agent: 'repl', summary: `${codeBlocks.length} code block(s)` });
+    }
 
     // Check for FINAL() in response text (outside code blocks)
     finalAnswer = _rlmFindFinal(responseText);
@@ -7383,6 +7542,9 @@ async function _tsRunWmUpdate(tsState, context, settings, waitEl, isActive) {
       break;
     }
     const durMs = Math.round(performance.now() - t0);
+    // Emit obs event for WM call
+    emitObsEvent(getActiveSession(), { event: 'wm_update', agent: 'world_model', model: wmModel, duration_ms: durMs, summary: (raw || '').slice(0, 200) });
+
     const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.type) {
@@ -7476,6 +7638,8 @@ async function _tsMonitorCheck(step, expected, changeData, gameState, settings, 
       });
     }
 
+    // Emit obs event for monitor
+    emitObsEvent(getActiveSession(), { event: 'monitor_call', agent: 'monitor', model: monitorModel, duration_ms: durMs, summary: `${verdict}${parsed.reason ? ': ' + parsed.reason : ''}` });
     return {verdict, reason: parsed.reason || '', discovery: parsed.discovery || null, duration_ms: durMs, replan_suppressed: suppressed};
   } catch (e) {
     console.error('[ts_monitor] failed:', e);
@@ -7614,6 +7778,9 @@ async function askLLMThreeSystem(_cur, model, modelInfo, waitEl, isActiveFn, his
       break;
     }
     const durMs = Math.round(performance.now() - t0);
+    // Emit obs event for planner call
+    emitObsEvent(getActiveSession(), { event: 'planner_call', agent: 'planner', model: plannerModel, duration_ms: durMs, summary: (raw || '').slice(0, 200) });
+
     const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.type) {
@@ -8125,6 +8292,17 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
     ev.timestamp = Date.now();
     _asTlEvents.push(ev);
     if (isActiveFn() && _asSess) renderTimeline(_asSess);
+    // Map agent spawn events to obs events
+    const _asTypeMap = { as_orch_start: 'orchestrator', as_orch_decide: 'orchestrator',
+      as_subagent_start: null, as_subagent_report: null, as_step: null };
+    const agentType = ev.agent_type || ev.current_agent || 'orchestrator';
+    const obsEvent = ev.type?.startsWith('as_') ? ev.type.replace('as_', '') : ev.type;
+    emitObsEvent(_asSess, {
+      event: obsEvent || ev.type, agent: agentType.toLowerCase(),
+      model: ev.model, duration_ms: ev.duration_ms,
+      input_tokens: ev.input_tokens, output_tokens: ev.output_tokens,
+      cost: ev.cost, summary: ev.task || ev.summary || '',
+    });
   }
 
   _asPushTl({ type: 'as_orch_start', turn: 0 });
@@ -10771,6 +10949,406 @@ function updateThemeBtn() {
   if (!btn) return;
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   btn.textContent = isLight ? '\u263C' : '\u263E';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OBSERVABILITY SCREEN
+// ═══════════════════════════════════════════════════════════════════════════
+
+const OBS_AGENT_COLORS = {
+  executor: '#58a6ff', planner: '#58a6ff', monitor: '#d29922',
+  world_model: '#bc8cff', repl: '#3fb950', compact: '#bc8cff',
+  interrupt: '#d29922', orchestrator: '#3b82f6', explorer: '#22c55e',
+  theorist: '#a855f7', tester: '#f97316', solver: '#ef4444',
+};
+const OBS_DEFAULT_COLOR = '#6b7280';
+
+let obsAutoScroll = true;
+let obsTimelineZoom = 1.0;
+let obsTimelineAutoScroll = true;
+let _obsSyncTimer = null;
+let _obsElapsedTimer = null;
+
+function obsAgentColor(agent) {
+  if (!agent) return OBS_DEFAULT_COLOR;
+  return OBS_AGENT_COLORS[agent.toLowerCase()] || OBS_DEFAULT_COLOR;
+}
+
+function obsAgentBadge(agent) {
+  if (!agent) return '<span style="color:var(--text-dim)">--</span>';
+  const c = obsAgentColor(agent);
+  return `<span class="obs-agent-badge" style="background:${c}">${agent}</span>`;
+}
+
+function obsFmtK(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function obsHexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function obsEscHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Event model ──
+
+function emitObsEvent(ss, partial) {
+  if (!ss || !ss._obsEvents) return;
+  const t0 = ss._obsStartTime || performance.now();
+  const ev = {
+    t: new Date().toISOString(),
+    elapsed_s: (performance.now() - t0) / 1000,
+    step_num: ss.stepCount || 0,
+    turn: ss.turnCounter || 0,
+    ...partial,
+  };
+  ss._obsEvents.push(ev);
+  // Update UI if obs screen is visible
+  if (document.getElementById('obsScreen')?.style.display === 'flex') {
+    appendObsLogRow(ev, ss._obsEvents.length - 1);
+    renderObsSwimlane(ss);
+    updateObsStatus(ss);
+  }
+}
+
+// ── Enter / exit obs mode ──
+
+function enterObsMode(ss) {
+  if (!ss) ss = getActiveSession();
+  if (!ss) return;
+  ss._obsStartTime = ss._obsStartTime || performance.now();
+  ss._obsEvents = ss._obsEvents || [];
+  ss._obsSyncCursor = ss._obsSyncCursor || 0;
+
+  // Hide game area + sidebar, show obs screen
+  const gameArea = document.querySelector('.game-area');
+  if (gameArea) gameArea.style.display = 'none';
+  const sidebar = document.getElementById('gameSidebar');
+  if (sidebar) sidebar.style.display = 'none';
+  const rightPanel = document.querySelector('.right-panel');
+  if (rightPanel) rightPanel.style.display = 'none';
+  const obsScreen = document.getElementById('obsScreen');
+  obsScreen.style.display = 'flex';
+
+  // Move the game canvas into the obs right panel
+  const canvasEl = document.getElementById('gameCanvas');
+  const obsHost = document.getElementById('obsCanvasHost');
+  if (canvasEl && obsHost) {
+    obsHost.appendChild(canvasEl);
+    canvasEl.style.display = '';
+    canvasEl.style.maxWidth = '100%';
+    canvasEl.style.maxHeight = '100%';
+  }
+
+  // Update pause button
+  const pauseBtn = document.getElementById('obsPauseBtn');
+  if (pauseBtn) pauseBtn.textContent = (ss.autoPlaying) ? 'Pause' : 'Resume';
+
+  // Re-render from existing events
+  renderObsScreen(ss);
+  startObsSync(ss);
+
+  // Start elapsed timer
+  _obsElapsedTimer = setInterval(() => updateObsElapsed(ss), 1000);
+}
+
+function exitObsMode() {
+  stopObsSync();
+  if (_obsElapsedTimer) { clearInterval(_obsElapsedTimer); _obsElapsedTimer = null; }
+
+  const obsScreen = document.getElementById('obsScreen');
+  obsScreen.style.display = 'none';
+
+  // Move canvas back
+  const canvasEl = document.getElementById('gameCanvas');
+  const canvasCenter = document.querySelector('.canvas-center');
+  if (canvasEl && canvasCenter) {
+    canvasCenter.appendChild(canvasEl);
+  }
+
+  // Show game area + sidebar + right panel
+  const gameArea = document.querySelector('.game-area');
+  if (gameArea) gameArea.style.display = '';
+  const sidebar = document.getElementById('gameSidebar');
+  if (sidebar) sidebar.style.display = '';
+  const rightPanel = document.querySelector('.right-panel');
+  if (rightPanel) rightPanel.style.display = '';
+  unlockSettings();
+}
+
+// ── Full re-render ──
+
+function renderObsScreen(ss) {
+  if (!ss) return;
+  // Clear log body
+  document.getElementById('obsLogBody').innerHTML = '';
+  // Re-render all existing events
+  const events = ss._obsEvents || [];
+  for (let i = 0; i < events.length; i++) {
+    appendObsLogRow(events[i], i);
+  }
+  renderObsSwimlane(ss);
+  updateObsStatus(ss);
+}
+
+// ── Status bar update ──
+
+function updateObsStatus(ss) {
+  if (!ss) ss = getActiveSession();
+  if (!ss) return;
+  const events = ss._obsEvents || [];
+  const gameId = ss.gameId || ss.currentState?.game_id || currentState?.game_id || '--';
+  document.getElementById('obsGame').textContent = gameId;
+  document.getElementById('obsStep').textContent = ss.stepCount || 0;
+  document.getElementById('obsTurn').textContent = ss.turnCounter || 0;
+  document.getElementById('obsCalls').textContent = ss.llmCallCount || 0;
+
+  // Token totals from obs events
+  let tokIn = 0, tokOut = 0, cost = 0;
+  for (const ev of events) {
+    tokIn += ev.input_tokens || 0;
+    tokOut += ev.output_tokens || 0;
+    cost += ev.cost || 0;
+  }
+  document.getElementById('obsTokens').textContent = `${obsFmtK(tokIn)} / ${obsFmtK(tokOut)}`;
+  const costEl = document.getElementById('obsCost');
+  if (cost < 0.01) costEl.textContent = cost > 0 ? '<$0.01' : '$0.00';
+  else costEl.textContent = '$' + cost.toFixed(2);
+  costEl.style.color = cost > 1 ? '#ef4444' : cost > 0.10 ? '#f59e0b' : '#22c55e';
+
+  updateObsElapsed(ss);
+
+  // Grid info
+  const gridInfo = document.getElementById('obsGridInfo');
+  gridInfo.textContent = `Step ${ss.stepCount || 0}`;
+}
+
+function updateObsElapsed(ss) {
+  if (!ss || !ss._obsStartTime) return;
+  const elapsedSec = (performance.now() - ss._obsStartTime) / 1000;
+  const el = document.getElementById('obsElapsed');
+  if (!el) return;
+  if (elapsedSec < 60) el.textContent = `${Math.round(elapsedSec)}s`;
+  else if (elapsedSec < 3600) el.textContent = `${(elapsedSec / 60).toFixed(1)}m`;
+  else el.textContent = `${(elapsedSec / 3600).toFixed(1)}h`;
+}
+
+// ── Log table ──
+
+function appendObsLogRow(ev, evIdx) {
+  const tbody = document.getElementById('obsLogBody');
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  const agent = ev.agent || '';
+  const c = obsAgentColor(agent);
+  tr.style.borderLeft = `3px solid ${c}`;
+
+  const time = ev.t ? ev.t.split('T')[1]?.split('.')[0] || ev.t : '';
+  const elapsed = ev.elapsed_s != null ? `+${ev.elapsed_s.toFixed(0)}` : '';
+  const tokIn = ev.input_tokens || '';
+  const tokOut = ev.output_tokens || '';
+  const dur = ev.duration_ms ? `${ev.duration_ms}ms` : '';
+
+  let details = obsEscHtml(obsBuildDetails(ev));
+  let expandHtml = '';
+  if (ev.summary || ev.error || ev.response_preview) {
+    const parts = [];
+    if (ev.response_preview) parts.push(obsEscHtml(ev.response_preview));
+    if (ev.error) parts.push(`<span style="color:var(--red)">Error: ${obsEscHtml(ev.error)}</span>`);
+    if (ev.summary) parts.push(obsEscHtml(ev.summary));
+    expandHtml = `<div class="obs-response-detail">${parts.join('\n')}</div>`;
+  }
+
+  tr.innerHTML = `
+    <td>${time}</td>
+    <td class="obs-dur">${elapsed}</td>
+    <td>${obsAgentBadge(agent)}</td>
+    <td>${ev.event || ''}</td>
+    <td class="obs-details" title="Click to expand">${details}${expandHtml}</td>
+    <td class="obs-tok">${tokIn ? obsFmtK(tokIn) + '/' + obsFmtK(tokOut) : ''}</td>
+    <td class="obs-dur">${dur}</td>
+  `;
+  const detailsCell = tr.querySelector('.obs-details');
+  if (detailsCell) {
+    detailsCell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      detailsCell.classList.toggle('expanded');
+    });
+  }
+  tbody.appendChild(tr);
+
+  if (obsAutoScroll) {
+    const wrap = document.getElementById('obsLogWrap');
+    if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  }
+}
+
+function obsBuildDetails(ev) {
+  switch (ev.event) {
+    case 'llm_call': return `model: ${ev.model || '?'}${ev.summary ? ' — ' + ev.summary : ''}`;
+    case 'act': return ev.action || '';
+    case 'compact': return 'context compacted';
+    case 'interrupt': return ev.summary || 'interrupt check';
+    case 'repl_exec': return ev.summary || 'REPL execution';
+    case 'monitor_call': return ev.summary || 'monitor check';
+    case 'wm_update': return ev.summary || 'world model update';
+    case 'planner_call': return ev.summary || 'planner REPL';
+    default:
+      const skip = new Set(['t','elapsed_s','event','agent','grid','input_tokens','output_tokens','duration_ms','cost','step_num','turn','model','summary','error','response_preview','action']);
+      const extra = Object.entries(ev).filter(([k]) => !skip.has(k) && ev[k] != null);
+      return extra.map(([k,v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
+  }
+}
+
+// ── Swimlane renderer (simplified universal version) ──
+
+function renderObsSwimlane(ss) {
+  if (!ss) ss = getActiveSession();
+  const events = ss?._obsEvents || [];
+  if (events.length === 0) {
+    document.getElementById('obsSwimlaneCanvas').innerHTML = '<div style="color:var(--text-dim);font-size:11px;padding:8px;">Waiting for events...</div>';
+    return;
+  }
+
+  const canvas = document.getElementById('obsSwimlaneCanvas');
+  const container = document.getElementById('obsSwimlaneContainer');
+
+  const t0 = events[0].elapsed_s || 0;
+  const tMax = events[events.length - 1].elapsed_s || 1;
+  const duration = Math.max(tMax - t0, 1);
+
+  const containerW = container.clientWidth - 90;
+  const basePxPerSec = Math.max(containerW / duration, 2);
+  const pxPerSec = basePxPerSec * obsTimelineZoom;
+  const totalW = Math.max(Math.ceil(duration * pxPerSec), containerW);
+
+  // Build lanes dynamically from unique agent values
+  const laneMap = new Map(); // agent -> { events: [{ev, idx}] }
+  for (let i = 0; i < events.length; i++) {
+    const agent = events[i].agent || 'system';
+    if (!laneMap.has(agent)) laneMap.set(agent, []);
+    laneMap.get(agent).push({ ev: events[i], idx: i });
+  }
+
+  let labelsHtml = '';
+  let tracksHtml = '';
+
+  for (const [agent, entries] of laneMap) {
+    const c = obsAgentColor(agent);
+    labelsHtml += `<div class="obs-swimlane-label" style="color:${c}">${agent}</div>`;
+    tracksHtml += '<div class="obs-swimlane-row">';
+
+    for (const { ev, idx } of entries) {
+      const evT = ev.elapsed_s || 0;
+      const evDur = ev.duration_ms ? ev.duration_ms / 1000 : 0;
+      const left = (evT - t0) * pxPerSec;
+      const w = Math.max((evDur || 0.1) * pxPerSec, 4);
+      let opacity = '0.6';
+      if (ev.event === 'act') opacity = '0.8';
+      if (ev.event === 'compact' || ev.event === 'interrupt') opacity = '0.4';
+      tracksHtml += `<div class="obs-event-block" style="left:${left}px;width:${w}px;background:${c};opacity:${opacity}" data-obs-idx="${idx}"></div>`;
+    }
+
+    tracksHtml += '</div>';
+  }
+
+  const tracksCanvasW = totalW + 10;
+  canvas.innerHTML =
+    `<div class="obs-swimlane-wrap">` +
+      `<div class="obs-swimlane-labels">${labelsHtml}</div>` +
+      `<div class="obs-swimlane-tracks-scroll" id="obsSwimlaneScroll">` +
+        `<div class="obs-swimlane-tracks-canvas" style="width:${tracksCanvasW}px">${tracksHtml}</div>` +
+      `</div>` +
+    `</div>`;
+
+  // Auto-scroll
+  if (obsTimelineAutoScroll) {
+    const scrollEl = document.getElementById('obsSwimlaneScroll');
+    if (scrollEl) scrollEl.scrollLeft = scrollEl.scrollWidth;
+  }
+
+  // Tooltips
+  canvas.querySelectorAll('.obs-event-block[data-obs-idx]').forEach(el => {
+    el.addEventListener('mouseenter', (e) => {
+      const idx = parseInt(e.target.dataset.obsIdx);
+      const ev = events[idx];
+      if (!ev) return;
+      const agent = ev.agent || '';
+      const c = obsAgentColor(agent);
+      let html = `<div class="tt-agent" style="color:${c}">${agent || 'system'}</div>`;
+      html += `<div>${ev.event || ''}</div>`;
+      if (ev.elapsed_s != null) html += `<div class="tt-dim">t = +${ev.elapsed_s.toFixed(1)}s</div>`;
+      if (ev.duration_ms) html += `<div>Duration: ${ev.duration_ms}ms</div>`;
+      if (ev.input_tokens) html += `<div>Tokens: ${obsFmtK(ev.input_tokens)} in / ${obsFmtK(ev.output_tokens || 0)} out</div>`;
+      if (ev.action) html += `<div>Action: ${ev.action}</div>`;
+      if (ev.model) html += `<div>Model: ${ev.model}</div>`;
+      const tt = document.getElementById('obsTooltip');
+      tt.innerHTML = html;
+      tt.classList.add('visible');
+      const pad = 12;
+      tt.style.left = Math.max(0, e.clientX + pad) + 'px';
+      tt.style.top = Math.max(0, e.clientY + pad) + 'px';
+    });
+    el.addEventListener('mouseleave', () => {
+      document.getElementById('obsTooltip').classList.remove('visible');
+    });
+  });
+}
+
+// Ctrl+Scroll zoom on swimlane
+document.addEventListener('DOMContentLoaded', () => {
+  const container = document.getElementById('obsSwimlaneContainer');
+  if (container) {
+    container.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.25 : 0.8;
+      obsTimelineZoom = Math.max(0.1, Math.min(100, obsTimelineZoom * factor));
+      obsTimelineAutoScroll = false;
+      document.getElementById('obsZoomLabel').textContent = obsTimelineZoom.toFixed(1) + 'x';
+      const ss = getActiveSession();
+      renderObsSwimlane(ss);
+    }, { passive: false });
+  }
+});
+
+// ── Server sync (POST new events every 5s) ──
+
+function startObsSync(ss) {
+  stopObsSync();
+  _obsSyncTimer = setInterval(() => syncObsEvents(ss), 5000);
+}
+
+function stopObsSync() {
+  if (_obsSyncTimer) { clearInterval(_obsSyncTimer); _obsSyncTimer = null; }
+}
+
+async function syncObsEvents(ss) {
+  if (!ss || !ss._obsEvents || !ss.sessionId) return;
+  const cursor = ss._obsSyncCursor || 0;
+  const events = ss._obsEvents.slice(cursor);
+  if (events.length === 0) return;
+  try {
+    const resp = await fetch(`/api/sessions/${ss.sessionId}/obs-events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events, cursor }),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      ss._obsSyncCursor = data.cursor || (cursor + events.length);
+    }
+  } catch (e) {
+    console.warn('[obsSync] Failed:', e);
+  }
 }
 </script>
 </body>
