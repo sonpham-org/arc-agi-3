@@ -217,6 +217,24 @@ def get_session_full(session_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/sessions/<session_id>")
+def get_session(session_id):
+    try:
+        conn = _get_db()
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify({"session": dict(row)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/share/<session_id>")
+def share_session(session_id):
+    return render_template("obs.html", share_session_id=session_id)
+
+
 def start_obs_server() -> int:
     """Start obs server on a random available port in a daemon thread. Returns the port."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
