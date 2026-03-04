@@ -51,6 +51,8 @@ FEATURES = {
 # Games hidden in prod mode (non-foundation games)
 HIDDEN_GAMES = ["fd01", "fy01", "pt01"]
 
+DEV_SECRET = os.environ.get("DEV_SECRET", "arc-dev-2026")
+
 # Will be set by CLI args; default to staging
 _server_mode = "staging"
 _server_port_staging = 5000
@@ -2066,6 +2068,50 @@ def reset_game():
     state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(reset)"}
     with session_lock:
         session_grids[session_id] = state.get("grid", [])
+    return jsonify(state)
+
+
+@app.route("/api/dev/jump-level", methods=["POST"])
+def dev_jump_level():
+    if not DEV_SECRET or request.headers.get("X-Dev-Secret", "") != DEV_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id")
+    target_level = payload.get("level")
+    if session_id is None or target_level is None:
+        return jsonify({"error": "session_id and level required"}), 400
+    with session_lock:
+        env = game_sessions.get(session_id)
+    if env is None:
+        return jsonify({"error": "Session not found"}), 404
+    try:
+        from arcengine import FrameDataRaw
+        game = env._game
+        target_level = int(target_level)
+        # Restore clean level state and jump
+        game._levels[target_level] = game._clean_levels[target_level].clone()
+        game.set_level(target_level)  # calls on_set_level
+        game._score = target_level
+        game._state = GameState.NOT_FINISHED
+        # Render current frame without consuming a game step
+        frame = game.camera.render(game.current_level.get_sprites())
+        frame_raw = FrameDataRaw(
+            game_id=game._game_id,
+            state=game._state,
+            levels_completed=game._score,
+            win_levels=game._win_score,
+            guid=getattr(env, "_guid", None),
+            available_actions=game._available_actions,
+        )
+        frame_raw.frame = [frame]
+        env._last_response = frame_raw
+    except (IndexError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+    state = env_state_dict(env, frame_raw)
+    state["session_id"] = session_id
+    with session_lock:
+        session_grids[session_id] = state.get("grid", [])
+        session_snapshots[session_id] = []
     return jsonify(state)
 
 

@@ -11524,5 +11524,21 @@ async function syncObsEvents(ss) {
   }
 }
 </script>
+
+<!-- Dev panel (developer-only level selector) -->
+<div id="devPanel" style="display:none;position:fixed;bottom:16px;right:16px;z-index:9999;
+  background:var(--surface);border:2px solid var(--accent);border-radius:8px;
+  padding:12px 14px;box-shadow:0 4px 16px rgba(0,0,0,0.5);min-width:200px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <span style="font-size:11px;font-weight:600;color:var(--accent);letter-spacing:0.5px;">DEV — JUMP TO LEVEL</span>
+    <button onclick="document.getElementById('devPanel').style.display='none'"
+      style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;">&times;</button>
+  </div>
+  <div id="devLevelBtns" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+  <div style="margin-top:10px;display:flex;gap:6px;">
+    <button class="btn" style="font-size:10px;padding:2px 8px;" onclick="localStorage.removeItem('arc_dev_secret');alert('[DEV] Secret cleared.')">Clear secret</button>
+  </div>
+</div>
+
 </body>
 </html>
