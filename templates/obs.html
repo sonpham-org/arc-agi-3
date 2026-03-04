@@ -821,6 +821,23 @@ function estimateCost() {
   return total;
 }
 
+// Normalize event names to canonical form used by the renderer.
+// Client emits short names (orch_delegate, sub_start) but renderer expects
+// longer names (orchestrator_decide, subagent_start, etc.)
+function normalizeEvent(ev) {
+  const map = {
+    orch_delegate: 'orchestrator_decide', orch_think: 'orchestrator_decide',
+    orch_start: 'orchestrator_decide', orch_end: 'orchestrator_decide',
+    sub_start: 'subagent_start',
+    sub_report: 'subagent_report',
+    sub_act: 'act', sub_tool: 'frame_tool',
+  };
+  if (map[ev.event]) ev.event = map[ev.event];
+  // Ensure agent_type is set for subagent events
+  if (!ev.agent_type && ev.agent) ev.agent_type = ev.agent;
+  return ev;
+}
+
 function trackEventTokens(ev) {
   const inTok = ev.input_tokens || 0;
   const outTok = ev.output_tokens || 0;
@@ -896,6 +913,7 @@ async function fetchEvents() {
     }
     nextOffset = data.next_offset;
     if (data.events && data.events.length > 0) {
+      data.events.forEach(normalizeEvent);
       allEvents.push(...data.events);
       renderNewEvents(data.events);
       renderTimeline();
@@ -2006,6 +2024,7 @@ async function loadSession(sessionId, gameId) {
     if (!r.ok) { console.error('Failed to load session obs events'); return; }
     const data = await r.json();
     if (data.events && data.events.length > 0) {
+      data.events.forEach(normalizeEvent);
       allEvents = data.events;
 
       // Compute status summary from events
@@ -2015,7 +2034,7 @@ async function loadSession(sessionId, gameId) {
         if (ev.input_tokens) totalIn += ev.input_tokens;
         if (ev.output_tokens) totalOut += ev.output_tokens;
         if (ev.cost) totalCost += ev.cost;
-        if (ev.event === 'llm_call') { totalCalls++; if (ev.model) model = ev.model; }
+        if (ev.event === 'llm_call' || ev.event === 'orchestrator_decide') { totalCalls++; if (ev.model) model = ev.model; }
         if (ev.step_num != null && ev.step_num > maxStep) maxStep = ev.step_num;
         trackEventTokens(ev);
       }
@@ -2062,7 +2081,24 @@ function returnToLive() {
 }
 
 // ── Init ──
-poll();
+const shareSessionId = {{ share_session_id | tojson if share_session_id is defined else 'null' }};
+if (shareSessionId) {
+  // Share mode: fetch session metadata for game_id, then auto-load
+  (async () => {
+    let gameId = '';
+    try {
+      const r = await fetch(`/api/sessions/${shareSessionId}`);
+      if (r.ok) {
+        const d = await r.json();
+        gameId = d.session?.game_id || '';
+      }
+    } catch {}
+    document.title = gameId ? `${gameId} — Observatory` : 'Observatory';
+    loadSession(shareSessionId, gameId);
+  })();
+} else {
+  poll();
+}
 </script>
 </body>
 </html>

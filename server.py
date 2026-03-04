@@ -306,6 +306,7 @@ from db import (
     DB_PATH, _init_db, _get_db, _compress_grid, _decompress_grid,
     _db_insert_session, _db_insert_step, _db_update_session,
     _log_llm_call, _get_session_calls, _read_session_from_file,
+    _list_file_sessions,
 )
 
 def _reconstruct_session(game_id: str, actions: list[dict], capture_per_step: bool = False):
@@ -2554,11 +2555,79 @@ def import_session():
                  json.dumps(s.get("llm_response")) if s.get("llm_response") else None,
                  s.get("timestamp", time.time())),
             )
+        # Extract timeline events into llm_calls rows
+        calls_imported = 0
+        timeline = sess.get("timeline") or []
+        if isinstance(timeline, str):
+            try:
+                timeline = json.loads(timeline)
+            except Exception:
+                timeline = []
+
+        # Build step_num→timestamp lookup for deriving call timestamps
+        step_ts = {}
+        for s in steps:
+            sn = s.get("step_num")
+            if sn is not None:
+                step_ts[sn] = s.get("timestamp", 0)
+
+        # Map timeline event types to llm_calls rows
+        # Supported: reasoning, compact, interrupt (linear/RLM scaffolds)
+        #            as_orch_*, as_sub_* (agent_spawn scaffold)
+        for ev in timeline:
+            etype = ev.get("type", "")
+            # Determine call_type
+            if etype in ("reasoning", "compact", "interrupt"):
+                call_type = ev.get("call_type", etype)
+            elif etype.startswith("as_"):
+                call_type = etype  # e.g. as_orch_delegate, as_sub_result
+            else:
+                continue  # skip non-LLM events (act, game state, etc.)
+
+            # Derive timestamp: explicit > from step > from session start
+            ts = ev.get("timestamp") or 0
+            if not ts:
+                step_num = ev.get("stepStart") or ev.get("step_num")
+                if step_num and step_num in step_ts:
+                    ts = step_ts[step_num]
+            if not ts:
+                ts = sess.get("created_at", time.time())
+
+            # Build response_preview from available fields
+            preview = (ev.get("response_preview") or ev.get("response")
+                       or ev.get("reasoning") or ev.get("summary") or "")
+            if len(preview) > 1000:
+                preview = preview[:1000]
+
+            conn.execute(
+                """INSERT OR IGNORE INTO llm_calls
+                   (session_id, call_type, step_num, turn_num, model,
+                    prompt_preview, prompt_length, response_preview,
+                    input_tokens, output_tokens, cost, duration_ms,
+                    thinking_level, cache_active, error, attempt, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sess["id"], call_type,
+                 ev.get("stepStart") or ev.get("step_num"),
+                 ev.get("turn") or ev.get("parentTurn"),
+                 ev.get("model", ""),
+                 (ev.get("task") or "")[:500],  # use task as prompt_preview for agent_spawn
+                 ev.get("prompt_length", 0),
+                 preview,
+                 ev.get("input_tokens", 0), ev.get("output_tokens", 0),
+                 ev.get("cost", 0),
+                 ev.get("duration") or ev.get("duration_ms") or 0,
+                 ev.get("thinking_level"),
+                 int(bool(ev.get("cache_active"))),
+                 ev.get("error"), ev.get("attempt", 0), ts),
+            )
+            calls_imported += 1
+
         conn.commit()
         conn.close()
         # Also persist to Turso for durable shared replays
         _turso_import_session(payload)
-        return _cors_resp({"status": "ok", "session_id": sess["id"], "steps_imported": len(steps)})
+        return _cors_resp({"status": "ok", "session_id": sess["id"],
+                           "steps_imported": len(steps), "calls_imported": calls_imported})
     except Exception as e:
         app.logger.warning(f"Session import failed: {e}")
         return _cors_resp({"error": str(e)}, 500)
@@ -2684,30 +2753,174 @@ def log_session_event(session_id):
     return jsonify({"status": "ok"})
 
 
-@app.route("/api/sessions/<session_id>/obs-events", methods=["POST"])
+@app.route("/api/sessions/<session_id>/obs-events", methods=["GET", "POST"])
 @bot_protection
-def save_obs_events(session_id):
-    """Save observability events from the client-side obs screen."""
-    if not feature_enabled("session_db"):
-        return jsonify({"error": "Session DB not enabled"}), 400
-    payload = request.get_json(force=True)
-    events = payload.get("events", [])
-    cursor = payload.get("cursor", 0)
-    if not events:
-        return jsonify({"ok": True, "cursor": cursor})
+def session_obs_events(session_id):
+    """GET: reconstruct obs events for replay. POST: save events from client."""
+    if request.method == "POST":
+        if not feature_enabled("session_db"):
+            return jsonify({"error": "Session DB not enabled"}), 400
+        payload = request.get_json(force=True)
+        events = payload.get("events", [])
+        cursor = payload.get("cursor", 0)
+        if not events:
+            return jsonify({"ok": True, "cursor": cursor})
+        try:
+            conn = _get_db()
+            now = time.time()
+            for i, ev in enumerate(events):
+                conn.execute(
+                    "INSERT OR IGNORE INTO obs_events (session_id, event_idx, event_json, timestamp) VALUES (?, ?, ?, ?)",
+                    (session_id, cursor + i, json.dumps(ev), now))
+            conn.commit()
+            conn.close()
+            new_cursor = cursor + len(events)
+            return jsonify({"ok": True, "cursor": new_cursor})
+        except Exception as e:
+            app.logger.warning(f"Obs events save failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # GET — reconstruct events from DB for replay
     try:
         conn = _get_db()
-        now = time.time()
-        for i, ev in enumerate(events):
-            conn.execute(
-                "INSERT OR IGNORE INTO obs_events (session_id, event_idx, event_json, timestamp) VALUES (?, ?, ?, ?)",
-                (session_id, cursor + i, json.dumps(ev), now))
-        conn.commit()
+        # Try stored obs_events first
+        stored = conn.execute(
+            "SELECT event_json FROM obs_events WHERE session_id = ? ORDER BY event_idx",
+            (session_id,),
+        ).fetchall()
+        if stored:
+            conn.close()
+            events = [json.loads(r["event_json"]) for r in stored]
+            return jsonify({"events": events})
+
+        # Reconstruct from llm_calls + session_steps
+        calls = conn.execute(
+            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY timestamp",
+            (session_id,),
+        ).fetchall()
+        steps = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+
+        # Fallback: if no llm_calls rows, reconstruct from timeline_json
+        if not calls:
+            sess_row = conn.execute(
+                "SELECT timeline_json FROM sessions WHERE id = ?", (session_id,),
+            ).fetchone()
+            if sess_row and sess_row["timeline_json"]:
+                try:
+                    timeline = json.loads(sess_row["timeline_json"])
+                except Exception:
+                    timeline = []
+                # Build step_num→timestamp lookup
+                step_ts = {}
+                for s in steps:
+                    sd = dict(s)
+                    sn = sd.get("step_num")
+                    if sn is not None:
+                        step_ts[sn] = sd.get("timestamp", 0)
+                # Convert timeline events to pseudo-call dicts
+                calls = []
+                for ev in timeline:
+                    etype = ev.get("type", "")
+                    if etype in ("reasoning", "compact", "interrupt") or etype.startswith("as_"):
+                        ts = ev.get("timestamp") or 0
+                        if not ts:
+                            sn = ev.get("stepStart") or ev.get("step_num")
+                            if sn and sn in step_ts:
+                                ts = step_ts[sn]
+                        preview = (ev.get("response_preview") or ev.get("response")
+                                   or ev.get("reasoning") or ev.get("summary") or "")
+                        calls.append({
+                            "timestamp": ts,
+                            "call_type": ev.get("call_type", etype),
+                            "model": ev.get("model", ""),
+                            "input_tokens": ev.get("input_tokens", 0),
+                            "output_tokens": ev.get("output_tokens", 0),
+                            "cost": ev.get("cost", 0),
+                            "duration_ms": ev.get("duration") or ev.get("duration_ms") or 0,
+                            "step_num": ev.get("stepStart") or ev.get("step_num"),
+                            "turn_num": ev.get("turn") or ev.get("parentTurn"),
+                            "thinking_level": ev.get("thinking_level"),
+                            "response_preview": preview[:1000] if preview else "",
+                            "prompt_preview": (ev.get("task") or "")[:500],
+                        })
+
         conn.close()
-        new_cursor = cursor + len(events)
-        return jsonify({"ok": True, "cursor": new_cursor})
+
+        raw_events = []
+        for c in [dict(c) if not isinstance(c, dict) else c for c in calls]:
+            raw_events.append({
+                "ts": c.get("timestamp", 0),
+                "agent": c.get("call_type", "planner"),
+                "event": "llm_call",
+                "model": c.get("model", ""),
+                "input_tokens": c.get("input_tokens", 0),
+                "output_tokens": c.get("output_tokens", 0),
+                "cost": c.get("cost", 0),
+                "duration_ms": c.get("duration_ms", 0),
+                "step_num": c.get("step_num"),
+                "turn_num": c.get("turn_num"),
+                "thinking_level": c.get("thinking_level"),
+                "response": c.get("response_preview", ""),
+                "prompt_preview": c.get("prompt_preview", ""),
+            })
+        for s in [dict(s) for s in steps]:
+            grid = None
+            if s.get("grid_snapshot"):
+                try:
+                    grid = json.loads(_decompress_grid(s["grid_snapshot"]))
+                except Exception:
+                    pass
+            action_id = s.get("action", 0)
+            try:
+                action_name = GameAction.from_id(int(action_id)).name
+            except Exception:
+                action_name = str(action_id)
+            data = {}
+            if s.get("data_json"):
+                try:
+                    data = json.loads(s["data_json"]) if isinstance(s["data_json"], str) else s["data_json"]
+                except Exception:
+                    pass
+            if data and "x" in data and "y" in data:
+                action_name = f"{action_name}@({data['x']},{data['y']})"
+            raw_events.append({
+                "ts": s.get("timestamp", 0),
+                "agent": "executor",
+                "event": "act",
+                "action": action_name,
+                "step_num": s.get("step_num", 0),
+                "grid": grid,
+            })
+
+        if not raw_events:
+            return jsonify({"events": []})
+
+        raw_events.sort(key=lambda e: e.get("ts", 0))
+        t0 = raw_events[0]["ts"]
+        from datetime import datetime, timezone
+        events = []
+        for ev in raw_events:
+            ts = ev.pop("ts", 0)
+            ev["t"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            ev["elapsed_s"] = round(ts - t0, 2)
+            events.append(ev)
+
+        return jsonify({"events": events})
     except Exception as e:
-        app.logger.warning(f"Obs events save failed: {e}")
+        app.logger.warning(f"GET obs-events failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/browse")
+def browse_sessions():
+    """List sessions from per-session file exports (meta.json)."""
+    try:
+        sessions = _list_file_sessions()
+        return jsonify({"sessions": sessions})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
@@ -2957,165 +3170,42 @@ def session_calls(session_id):
 
 @app.route("/share/<session_id>")
 def share_session(session_id):
-    """Public replay page for a session — no auth required.
-    Reads from Turso first (persistent), falls back to local SQLite.
-    For branched sessions, traces back through parents to include full history."""
+    """Public replay page — renders the observatory view with auto-loaded session.
+    Verifies session exists (Turso → local DB → file), then serves obs.html."""
+    # Quick existence check (don't load all data — obs.html fetches via API)
+    found = False
     try:
-        sess = None
-        step_list = []
-
-        # Try Turso first (durable shared DB)
         turso_conn = _get_turso_db()
         if turso_conn:
             try:
-                cur = turso_conn.execute(
-                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
-                    "parent_session_id, branch_at_step, prompts_json, timeline_json "
-                    "FROM sessions WHERE id = ?",
-                    (session_id,),
-                )
-                sess = _turso_dict_fetchone(cur)
-                if sess:
-                    cur2 = turso_conn.execute(
-                        "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-                        (session_id,),
-                    )
-                    steps_rows = _turso_dict_fetchall(cur2)
-                    step_list = [_format_step_row(s) for s in steps_rows]
+                cur = turso_conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+                if _turso_dict_fetchone(cur):
+                    found = True
                 turso_conn.close()
-            except Exception as e:
-                app.logger.warning(f"Turso share read failed, falling back to local: {e}")
-                sess = None
-
-        # Fall back to local SQLite
-        if not sess:
+            except Exception:
+                pass
+        if not found:
             conn = _get_db()
-            sess_row = conn.execute(
-                "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
-                "parent_session_id, branch_at_step, prompts_json, timeline_json "
-                "FROM sessions WHERE id = ?",
-                (session_id,),
-            ).fetchone()
-            if not sess_row:
-                conn.close()
-                # Fall back to per-session file
-                file_data = _read_session_from_file(session_id)
-                if not file_data:
-                    return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
+            if conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone():
+                found = True
+            conn.close()
+        if not found:
+            file_data = _read_session_from_file(session_id)
+            if file_data:
+                found = True
+    except Exception:
+        pass
+
+    if not found:
+        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
 <style>body{background:#0d1117;color:#c9d1d9;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
 .box{text-align:center;padding:40px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:400px;}
 h1{color:#f85149;font-size:24px;margin-bottom:12px;}p{color:#8b949e;margin-bottom:20px;}
 a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style></head>
 <body><div class="box"><h1>Session Not Found</h1><p>This session doesn't exist or hasn't been shared yet.</p>
 <a href="/">&#9654; Play ARC-AGI-3</a></div></body></html>""", 404
-                sess = file_data["session"]
-                step_list = [_format_step_row(s) for s in file_data["steps"]]
-            else:
-                sess = dict(sess_row)
-                steps_rows = conn.execute(
-                    "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-                    (session_id,),
-                ).fetchall()
-                conn.close()
-                step_list = [_format_step_row(dict(s)) for s in steps_rows]
 
-        # Trace back through parent sessions to build full history
-        parent_steps = []
-        trace_id = sess.get("parent_session_id")
-        trace_step = sess.get("branch_at_step")
-        max_depth = 10  # prevent infinite loops
-        while trace_id and trace_step is not None and max_depth > 0:
-            max_depth -= 1
-            parent_sess = None
-            p_steps = []
-            # Try local SQLite first
-            conn = _get_db()
-            p_row = conn.execute(
-                "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
-                (trace_id,),
-            ).fetchone()
-            p_steps_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                (trace_id, trace_step),
-            ).fetchall()
-            conn.close()
-            # Fall back to Turso if local has no steps
-            if not p_steps_rows and turso_conn:
-                try:
-                    tc = _get_turso_db()
-                    if tc:
-                        if not p_row:
-                            t_row = tc.execute(
-                                "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
-                                (trace_id,),
-                            )
-                            p_row_t = _turso_dict_fetchone(t_row)
-                            if p_row_t:
-                                p_row = p_row_t
-                        t_steps = tc.execute(
-                            "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                            (trace_id, trace_step),
-                        )
-                        p_steps_rows = _turso_dict_fetchall(t_steps)
-                        tc.close()
-                except Exception:
-                    pass
-            if p_row:
-                parent_sess = dict(p_row) if not isinstance(p_row, dict) else p_row
-            for s in p_steps_rows:
-                st = _format_step_row(dict(s) if not isinstance(s, dict) else s)
-                st["from_parent"] = True
-                p_steps.append(st)
-            # Prepend parent steps (oldest ancestor first)
-            parent_steps = p_steps + parent_steps
-            # Continue tracing
-            if parent_sess:
-                trace_id = parent_sess.get("parent_session_id")
-                trace_step = parent_sess.get("branch_at_step")
-            else:
-                break
-
-        # Combine: parent steps first, then own steps
-        if parent_steps:
-            step_list = parent_steps + step_list
-
-        # Parse prompts and timeline from session metadata
-        prompts = None
-        timeline = None
-        if sess.get("prompts_json"):
-            try:
-                prompts = json.loads(sess["prompts_json"]) if isinstance(sess["prompts_json"], str) else sess["prompts_json"]
-            except Exception:
-                pass
-        if sess.get("timeline_json"):
-            try:
-                timeline = json.loads(sess["timeline_json"]) if isinstance(sess["timeline_json"], str) else sess["timeline_json"]
-            except Exception:
-                pass
-
-        # Fetch LLM call log for this session
-        call_log = _get_session_calls(session_id)
-        for c in call_log:
-            if c.get("response_json"):
-                try:
-                    c["response_json"] = json.loads(c["response_json"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-        return render_template(
-            "share.html",
-            session=sess,
-            steps=step_list,
-            color_map=COLOR_MAP,
-            branch_at_step=len(parent_steps) if parent_steps else 0,
-            umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
-            prompts=prompts,
-            timeline=timeline,
-            call_log=call_log,
-        )
-    except Exception as e:
-        app.logger.warning(f"Share page error: {e}")
-        return f"<h1>Error</h1><p>{e}</p>", 500
+    return render_template("obs.html", share_session_id=session_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
