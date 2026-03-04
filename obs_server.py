@@ -230,6 +230,11 @@ def get_session(session_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/live/")
+def live_dashboard():
+    return render_template("obs.html")
+
+
 @app.route("/share/<session_id>")
 def share_session(session_id):
     return render_template("obs.html", share_session_id=session_id)

@@ -754,6 +754,10 @@ const AGENT_COLORS = {
   theorist:     '#a855f7',
   tester:       '#f97316',
   solver:       '#ef4444',
+  reasoner:     '#3b82f6',
+  executor:     '#22c55e',
+  compactor:    '#f59e0b',
+  planner:      '#8b5cf6',
 };
 const DEFAULT_COLOR = '#6b7280';
 
@@ -835,6 +839,14 @@ function normalizeEvent(ev) {
   if (map[ev.event]) ev.event = map[ev.event];
   // Ensure agent_type is set for subagent events
   if (!ev.agent_type && ev.agent) ev.agent_type = ev.agent;
+  // Alias step_num → step so findNearestGrid/selectLogRow work for reconstructed events
+  if (ev.step_num != null && ev.step == null) ev.step = ev.step_num;
+  // Map basic-agent call_types to meaningful role names
+  const agentMap = {
+    reasoning: 'reasoner', compact: 'compactor',
+    interrupt: 'executor', planner: 'planner',
+  };
+  if (ev.agent && agentMap[ev.agent]) ev.agent = agentMap[ev.agent];
   return ev;
 }
 
