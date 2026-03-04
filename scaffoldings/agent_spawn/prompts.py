@@ -10,8 +10,9 @@ GAME_REFERENCE = """\
 ## Grid Encoding
 The game world is a 2D grid (up to 64x64 cells). Each cell contains a color
 value from 0-15. Colors are mapped to names for readability:
-  0=black, 1=blue, 2=red, 3=green, 4=yellow, 5=grey, 6=magenta, 7=orange,
-  8=cyan, 9=brown, 10=white, 11=pink, 12=lime, 13=teal, 14=lavender, 15=maroon
+  0=White, 1=LightGray, 2=Gray, 3=DarkGray, 4=VeryDarkGray, 5=Black,
+  6=Magenta, 7=LightMagenta, 8=Red, 9=Blue, 10=LightBlue, 11=Yellow,
+  12=Orange, 13=Maroon, 14=Green, 15=Purple
 
 Rows are displayed with row numbers. Values may be RLE-compressed for long
 uniform runs (e.g. "3x black" instead of "black black black").
@@ -158,6 +159,7 @@ Decide your next move. You MUST respond with exactly one JSON object:
 Option A — Delegate to a subagent:
 {{
   "command": "delegate",
+  "reasoning": "why this delegation is the right next step",
   "agent_type": "explorer" | "theorist" | "tester" | "solver",
   "task": "clear description of what the subagent should do",
   "budget": <max steps for subagent, 1-10>
@@ -166,6 +168,7 @@ Option A — Delegate to a subagent:
 Option B — Record a finding and continue thinking:
 {{
   "command": "think",
+  "reasoning": "analysis of current situation and what you've learned",
   "facts": ["fact1", ...],
   "hypotheses": ["hypothesis1", ...],
   "next": "what to do next"

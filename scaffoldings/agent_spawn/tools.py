@@ -10,9 +10,10 @@ from agent import ACTION_NAMES, compress_row, compute_change_map
 # ═══════════════════════════════════════════════════════════════════════════
 
 COLOR_NAMES = {
-    0: "black", 1: "blue", 2: "red", 3: "green", 4: "yellow",
-    5: "grey", 6: "magenta", 7: "orange", 8: "cyan", 9: "brown",
-    10: "white", 11: "pink", 12: "lime", 13: "teal", 14: "lavender", 15: "maroon",
+    0: "White", 1: "LightGray", 2: "Gray", 3: "DarkGray",
+    4: "VeryDarkGray", 5: "Black", 6: "Magenta", 7: "LightMagenta",
+    8: "Red", 9: "Blue", 10: "LightBlue", 11: "Yellow",
+    12: "Orange", 13: "Maroon", 14: "Green", 15: "Purple",
 }
 
 

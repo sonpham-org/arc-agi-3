@@ -38,6 +38,27 @@
 ## vc33
 
 ## ls20-cb3b57cc
+- The player is represented by a 1x1 white (0) pixel.
+- The game environment is a maze-like structure with dark gray (4) walls and gray (3) pathways.
+- ACTION2 and ACTION3 are used for observing and describing the grid state, player position, and colors; they do not appear to modify the grid.
+- White pixel (color 0) is the player. Light gray pixel (color 1) is a target or collectible. DarkGray (color 3) seems to be traversable ground. VeryDarkGray (color 4) and Black (color 5) are walls.
+- Directional keys move the orange/blue blocks at the bottom, not the player character.
+- Directional actions move the colored blocks at the bottom (rows 45-49) rather than the player character.
+- Directional keys control blocks at (45-49, 45-49) instead of the player character.
+- Directional keys control the colored blocks (9, 12) at the bottom, not the player character (0, 1).
+- Directional actions may control distant objects (orange/blue blocks) rather than the player character directly.
+- Directional actions move blocks at rows 40-49 instead of the player character at (17, 31).
+- Directional actions affect the colored blocks in rows 40-49 even if the player character at (17, 31) doesn't move.
+- Standard directional keys (1-4) consume energy but don't move the character at (17, 31-33) yet.
+- Character at (17, 31) in gray structure; status bar at bottom tracks moves/energy.
+- Character at (17, 31) appears stationary despite directional inputs; status bar at bottom tracks moves/energy.
+- Directional actions (1-4) consume energy/moves but haven't moved the character at (17, 31) yet; checking for obstacles or specific movement rules.
+- Movement seems restricted; directional actions consume energy/moves without visible displacement yet.
+- Movement might be restricted by specific collision or requires navigating a specific path within the gray structure.
+- Movement (ACTION4/ACTION1) failed to move character at (17, 31); testing other directions.
+- Character is at (17, 31). Goal is likely to reach the colored blocks to the right or the blue shape above.
+- Character at (17, 31) inside gray structure; ACTION4 didn't move it, testing ACTION1 (UP).
+- The player character is likely the white/gray object at (17, 31).
 - The puzzle consists of 7 levels, none of which were completed in 30 steps using basic action cycling.
 - Alternating sequences of ACTION3 and ACTION4 are ineffective for solving the current level.
 - Repeated execution of ACTION2 (up to 4 times) or ACTION3 (up to 5 times) does not advance the game state.
@@ -225,6 +246,23 @@
 - Clicking a Green block (14) in the bottom section changes DarkGray blocks (3) in the top section to Yellow (11) and transforms the Green blocks (14) into a Green/Gray (14/2) pattern.
 
 ## ft09-9ab2447a
+- Target BR(i,j) is Blue(9) if any input TL, TR, BL at (i,j) is Blue(9), else Red(8) or combined pattern.
+- Target grid (BR) logic appears to be a majority vote of the three input grids (TL, TR, BL) for each 6x6 block.
+- The logic for the 3x3 grid combination is likely an OR-like operation where Blue (9) or patterns override Red (8).
+- Logic: If Top-Left == Top-Right, Bottom-Right = Top-Left. Else, Bottom-Right = Bottom-Left.
+- Logic: BR(x,y) is 9 if any input is 9, else 8. If input is a pattern, BR is that pattern. Cycle BR blocks to match.
+- Target grid (BR) likely follows a majority or specific color priority logic (9 > 8) based on TL, TR, and BL inputs.
+- The target grid (BR) is likely the majority color/pattern of the three input grids (TL, TR, BL) at each 3x3 position.
+- The target grid (BR) seems to be the majority vote of the three input grids (TL, TR, BL) for each 6x6 block.
+- Target grid in BR is a logical combination of TL, TR, and BL input grids; clicking cycles block patterns.
+- Logic: If Top-Left == Top-Right, then Bottom-Right = Top-Left. Else, Bottom-Right = Bottom-Left.
+- Target area (BR) blocks cycle on click. Goal is likely a logic combination of TL, TR, and BL patterns.
+- The target grid (BR) likely follows a majority rule logic based on the three input grids (TL, TR, BL).
+- Target area is a 3x3 grid of 6x6 blocks in the bottom-right; clicking a block cycles its pattern/color.
+- Clicking blocks in the bottom-right 3x3 grid cycles their patterns; goal is likely to match a combination of the other three 3x3 grids.
+- Clicking blocks in the bottom-right 3x3 grid (rows 32-61, cols 32-61) changes their pattern/color.
+- Bottom-right area (32-61, 32-61) is likely the interactive workspace for solving the puzzle.
+- Investigating if clicking on internal patterns (0, 2, 8) within the 6x6 blocks triggers a response.
 - None of the observed actions (ACTION1-ACTION6) appear to be the correct initial step to advance from level 0.
 - Repeatedly applying ACTION5 does not advance the level or finish the game.
 - Actions ACTION1, ACTION2, ACTION3, ACTION4, ACTION5, and ACTION6 individually do not complete level 0.
@@ -244,3 +282,259 @@
 - Clicking on specific cells within 2x2/0x2/8x2 patterns seems to be the primary interaction. These patterns are likely switches or state-changing elements.
 
 - Small gray/white patterns within red blocks are likely interactive elements. Clicking on them might change their state or move them.
+
+## pi01-00000001
+- The grid involves multi-colored components, specifically orange and gray, which define the composition of the primary static structures.
+- Level advancement requires a sequence of state-altering actions beyond repetitive observation, as 200 steps of ACTION4 resulted in zero progress.
+- Static structures located at specific coordinates, such as 16,17, are persistent features that likely require interaction or navigation rather than simple observation.
+- ACTION4 provides descriptive feedback about grid structures but does not advance game levels or modify the grid state.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases a progress bar at the bottom right (row 61-62).
+- Moving right (ACTION4) increases a progress bar at the bottom right and shifts small blocks across the grid.
+- Moving right (ACTION4) increases the progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the progress bar at the bottom right.
+- Moving right (ACTION4) shifts small blocks and increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the progress bar at the bottom right.
+- Directional actions move small blocks; ACTION4 (RIGHT) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) shifts small blocks and increases the yellow progress bar at the bottom right.
+- ACTION4 (RIGHT) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) shifts small blocks and increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving blocks right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) shifts small blocks and increases the yellow progress bar at the bottom right.
+- Moving blocks right (ACTION4) increases the yellow progress bar at the bottom right.
+- Directional actions move small blocks; moving right (ACTION4) increases the progress bar at the bottom right.
+- Moving right (ACTION4) shifts small blocks and increases the progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) shifts small blocks and increases the progress bar at the bottom right.
+- Moving right (ACTION4) increases the progress bar at the bottom right (row 61-62).
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving right (ACTION4) increases the yellow progress bar at the bottom right.
+- Moving small blocks to the right increases the yellow progress bar at the bottom.
+- Directional actions move small blocks; yellow bars at the bottom may represent progress or a limit.
+- Directional actions move small colored blocks relative to static large structures.
+- Directional actions move small colored blocks (6, 15, 5, 4) relative to static large structures.
+- Directional actions move small scattered blocks (6, 15, 5, 4) relative to static large structures (A, B).
+- Directional actions move small blocks (6, 15, 5, 3/4) relative to static large structures and background.
+- Directional actions (1-4) move small scattered blocks; large structures and yellow bars are static.
+- Directional actions (1-4) move small colored blocks across the blue background.
+- Movement (ACTION1) shifted multiple small colored blocks; need to identify which object is the player.
+- Initial exploration: testing directional movement to identify the player character.
+- Extensive movement of player-controlled pixels without level progression (0/9) suggests that the goal requires interacting with specific environmental triggers rather than just reaching a coordinate threshold.
+- Movement via ACTION3 allows for both large jumps (increments of 10) and fine adjustments (increments of 2), indicating non-linear or momentum-based physics.
+- Multiple magenta objects move in perfect synchronization, maintaining a fixed relative distance (e.g., 20 units apart) while their shared coordinate axis changes.
+- ACTION3 triggers movement of magenta (6) pixels, but coordinate updates in the log appear only every 5-10 steps, suggesting a cooldown or multi-step animation.
+- Align controlled objects (magenta pixels, purple/gray blocks) with static structures at (16, 15) and (44, 40).
+- Align controlled objects (magenta pixels and purple block) with static structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40).
+- Align controlled objects (magenta pixels and purple/gray block) with static structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40) using directional inputs.
+- Align magenta pixels and purple/gray blocks with the static structures at (16, 15) and (44, 40) using directional inputs.
+- Controlled objects move in unison; goal is likely alignment with static structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple block with the two large structures at (16, 15) and (44, 40).
+- Controlled objects (magenta pixels and purple/gray block) move in unison to align with static structures.
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40) using directional keys.
+- Controlled objects (magenta pixels and purple block) move in unison; goal is likely alignment with static structures.
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40).
+- Align controlled magenta pixels and purple blocks with the static gray/dark gray structures.
+- Align magenta pixels (6) and purple blocks (15) with the gray/dark gray structures to progress.
+- Align magenta pixels and the purple block with the two large structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the two main structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the two large structures at (16, 15) and (44, 40).
+- Controlled objects (magenta pixels and purple/dark gray block) move in unison to align with static structures.
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40) using directional inputs.
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40) using directional keys.
+- Align magenta pixels and purple blocks with the two large structures at (16, 15) and (44, 40).
+- Align magenta pixels and purple blocks with the static structures at (16, 15) and (44, 40) to progress.
+- Aligning controlled objects (magenta pixels and purple blocks) with static structures seems to be the objective.
+- Align magenta pixels and purple/gray blocks with the large structures at (16, 15) and (44, 40) using directional movement.
+- Align movable magenta and purple/gray blocks with the two static structures at (16, 15) and (44, 40).
+- Align magenta pixels (6) and purple blocks (15) with the large structures at (16, 15) and (44, 40) using directional keys.
+- Controlled objects (magenta pixels and purple/dark gray blocks) move in unison with directional inputs.
+- Directional inputs move multiple objects (magenta pixels and purple/gray blocks) simultaneously; yellow bars track progress/energy.
+- Controlled objects (magenta pixels and purple/gray block) move in unison; progress bar increases with movement.
+- Controlled objects (magenta pixels and purple/gray block) move in unison; moving right increases the yellow progress bar.
+- Controlled objects (magenta pixels and purple/gray block) move in unison; ACTION4 moves them right towards structures.
+- Multiple objects move simultaneously with directional inputs; goal involves aligning them with structures.
+- The yellow bar at the bottom is a progress meter that increases as the player moves right.
+- Moving right (ACTION4) advances multiple player-controlled objects and increases the yellow progress bar at the bottom.
+- The yellow bar at the bottom is a progress meter that increases as the player-controlled objects move right.
+- Multiple objects move in sync; ACTION4 increases the bottom yellow progress bar.
+- ACTION4 moves magenta and purple/gray blocks right and increases the yellow progress bar at the bottom.
+- ACTION4 moves magenta pixels and purple/gray blocks right; increases yellow progress bar at bottom.
+- Magenta (6) pixels and purple/gray blocks move with directional inputs; yellow bars are likely meters.
+- Magenta (6) and purple/gray (15/3) blocks move in sync with directional inputs 1-4.
+- Magenta (6) pixels and other small blocks move in response to directional actions; they are likely the player or controlled objects.
+- Magenta (6) and other small blocks move when directional actions are taken; yellow bars may represent energy or progress.
+- Initial exploration: moving up to identify the player character and observe grid dynamics.
+- Structures in this task are identified by coordinate pairs (e.g., 16, 15), suggesting a large or high-resolution grid system.
+- Relying solely on spatial analysis (ACTION4) without executing state-changing actions results in a loop that fails to progress the game.
+- The game environment uses specific color codes such as 9 (blue) for background, 6 (magenta), and 15 (purple) for objects.
+- ACTION4 is a descriptive or analytical action that does not modify the grid state or advance game levels.
+- ACTION4 (RIGHT) moves magenta and purple blocks and extends the bottom progress bar.
+- ACTION4 (RIGHT) moves magenta and purple blocks and extends the progress bar at the bottom.
+- ACTION4 consistently moves magenta and purple blocks right and extends the bottom progress bar.
+- Moving colored blocks (magenta/purple) horizontally with ACTION3/4 and vertically with ACTION1/2 affects the progress bar.
+- ACTION4 (RIGHT) shifts magenta and purple blocks horizontally and advances the bottom progress bar.
+- Moving right (ACTION4) shifts magenta and purple blocks and extends the progress bar at the bottom.
+- Moving RIGHT (ACTION4) shifts magenta and purple blocks and extends the bottom progress bar.
+- Moving right (ACTION4) consistently extends the progress bar and shifts colored blocks.
+- ACTION4 (RIGHT) moves magenta blocks (row 10-11) and purple blocks (row 32-35) while extending the bottom progress bar.
+- Moving right (ACTION4) shifts magenta (6) and purple (15) blocks and extends the bottom progress bar.
+- ACTION4 (RIGHT) moves magenta and purple blocks and fills the progress bar at the bottom.
+- Moving right (ACTION4) shifts magenta and purple blocks and extends the progress bar at the bottom.
+- Moving right (ACTION4) consistently advances the progress bar and shifts colored blocks.
+- The progress bar at the bottom (rows 61-62) extends and changes color as the magenta and purple blocks are moved horizontally.
+- Moving right (ACTION4) shifts magenta and purple blocks and extends the bottom progress bar.
+- ACTION4 moves magenta and purple blocks right and extends the progress bar.
+- Consistent directional movement (ACTION4) shifts specific colored blocks and advances the progress bar at the bottom.
+- Moving right (ACTION4) consistently advances the progress bar and shifts colored blocks.
+- ACTION4 moves magenta blocks right and purple blocks right while extending the yellow progress bar.
+- ACTION4 (RIGHT) shifts magenta (6) and purple (15) blocks and extends the yellow progress bar.
+- Continuous movement in one direction (ACTION4) extends the progress bar at the bottom.
+- ACTION4 (RIGHT) moves magenta and purple blocks and extends the bottom progress bar.
+- ACTION4 (RIGHT) moves magenta and purple blocks and extends the progress bar at the bottom.
+- ACTION4 (RIGHT) moves magenta and purple blocks and extends the progress bar at the bottom.
+- ACTION4 (RIGHT) moves magenta blocks (row 10-11) and purple blocks (row 32-35) right and extends the bottom progress bar.
+- ACTION4 (RIGHT) moves magenta and purple blocks and advances the progress bar at the bottom.
+- Moving right (ACTION4) consistently shifts magenta and purple blocks and advances the bottom progress bar.
+- Moving right (ACTION4) extends the progress bar at the bottom and shifts colored blocks.
+- Moving right (ACTION4) consistently shifts magenta and purple blocks and extends the bottom progress bar.
+- Moving right (ACTION4) shifts magenta and purple blocks and fills the progress bar at the bottom.
+- Moving right (ACTION4) shifts magenta and purple blocks and extends the yellow progress bar at the bottom.
+- ACTION4 (RIGHT) moves magenta and purple blocks and extends the yellow progress bar.
+- ACTION4 (RIGHT) moves magenta and purple blocks right and extends the yellow progress bar at the bottom.
+- Moving right (ACTION4) shifts magenta and purple blocks and extends the yellow progress bar at the bottom.
+- Moving right (ACTION4) shifts magenta and purple blocks and extends the yellow progress bar.
+- Moving right (ACTION4) shifts magenta and purple blocks right and extends the yellow progress bar.
+- ACTION4 (RIGHT) moves magenta and purple blocks right and increases the yellow progress bar.
+- ACTION4 moves magenta blocks (rows 10-11) and purple blocks (rows 32-35) to the right.
+- Directional actions (1-4) shift specific colored blocks (magenta, purple) and components of the two main structures.
+- Directional actions (1-4) shift specific colored blocks (magenta, purple) and parts of the main structures.
+- Directional actions (1-4) shift specific colored blocks (magenta, purple) and components of the larger structures.
+- Directional actions (1-4) shift specific rows/columns containing small colored blocks and parts of the main structures.
+- Directional actions (1-4) shift specific rows/columns of the structures and blocks.
+- Directional actions move specific colored blocks (magenta, purple) and parts of the structures; yellow bar at bottom tracks progress/energy.
+- Directional actions (1-4) move specific colored blocks and structure components; yellow bar at bottom tracks progress or energy.
+- Directional actions move components of the two main structures and affect the yellow progress bar.
+- Directional actions (1-4) shift components within the two main structures and the yellow progress bar.
+- Directional actions (1-4) cause shifts in the internal components of the two main structures and the yellow progress bar.
+- The yellow bar at the bottom (rows 61-62) acts as a move or energy meter, changing with actions.
+- Vertical movement (ACTION1/2) shifts components of the two main structures and affects edge bars.
+- ACTION1 caused changes in rows 10-11, 30-37, and 61-62, suggesting these are dynamic elements.
+- Initial exploration: testing movement with ACTION1 (UP) to identify the player character.
+- Magenta pixels (6) are the player character and move with directional actions (1-4).
+- Magenta pixels (6) at (10, y) and (11, y) move according to directional inputs (1-4).
+- Magenta pixels (6) at (10, y) and (11, y) move in all four directions based on ACTION1-4.
+- Magenta pixels (6) move in response to directional inputs (ACTION1-4).
+- Magenta pixels (6) at (10, 30) move with directional keys; likely player-controlled or a cursor.
+- Magenta pixels (6) at (10, 36) move with directional keys; likely the player character.
+- Magenta pixels (6) move in the direction of the player's movement (UP, DOWN, LEFT, RIGHT).
+- Magenta pixels (6) move in the direction of input. Two main structures exist at (16, 15) and (44, 40).
+- Directional actions move specific colored pixels (like magenta) and shift the overall grid state.
+- Magenta pixels move right with ACTION4; reached edge at step 17. Switching to ACTION2 to explore vertical movement.
+- Magenta pixels at (10, y) and (11, y) move right in sync with ACTION4.
+- Magenta pixels (6) at rows 10-11 move right when ACTION4 is used.
+- Moving right (ACTION4) causes magenta pixels (6) and other small shapes to shift right across the blue background.
+- ACTION4 (RIGHT) triggers movement or updates in multiple objects across the grid, including magenta and purple shapes.
+
+- Initial exploration: moving right to identify the player character and movement mechanics.
+
+## vc33-9851e02b
+- The large gray area (0-31, 1-63) might be an interactive canvas for placing or drawing shapes.
+- Row 0 is a move/energy limit; every click reduces the magenta (7) bar.
+- Row 0 is a move counter (magenta decreases). Clicking the large gray area (x=0-31) hasn't worked yet.
+- Row 0 is a resource meter; clicking it consumes the magenta color.
+- Clicking Row 0 changes the magenta/dark gray ratio; the large gray area (0-31, 1-63) remains unexplored.
+- Row 0 is a status bar; clicking it changes the count of magenta (7) vs dark gray (4) pixels.
+- Clicking Row 0 (status bar) changes its color composition, suggesting it's an interactive element.
+- Clicking Row 0 changes the status bar composition, but its purpose is still unclear.
+- Row 0 is a status bar that reacts to clicks; its state might be linked to level progression.
+- Clicking the obvious colored objects on the right hasn't worked; exploring the large gray region or its boundary.
+- Clicking objects on the right and the status bar doesn't advance the level; exploring the large gray area.
+- The large gray area (x=0-31) might be the main interaction zone; testing clicks inside it.
+- Row 0 is a status bar that reacts to clicks; clicking it might be necessary to progress or reset elements.
+- Row 0 appears to be a status or interaction bar; clicking its elements might be necessary.
+- Clicking objects on the right (blue squares, yellow rectangle, complex shape) did not advance the level; exploring the gray area.
+- Interacting with the complex shape at (44-49, 44-49) to see if it triggers progress.
+- Clicking blue squares at (60, 24) and (60, 32) had no immediate effect on level progress.
+- Blue squares at (60, 24) and (60, 32) might be buttons or toggles.
+
+- The game only allows ACTION6 (CLICK). Blue and yellow objects are likely interactive.
+
+## lp85-00d0f9f4
+- Try clicking different colored blocks to see if the selection frame moves.
+- Clicking a different colored block might move the selection frame.
+- Try clicking different colored blocks to see if the selection frame moves.
+- Clicking a different colored block might move the selection frame.
+- Clicking a different colored block might move the selection frame.
+- Investigating if clicking other colored blocks moves the yellow selection frame.
+- Test if ACTION6 at a different block's coordinates moves the selection frame.
+- Clicking other colored blocks might move the yellow selection frame.
+- Clicking a different colored block might move the selection frame.
+- Clicking a different colored block might move the selection frame.
+- Try clicking different colored blocks to see if the selection frame (yellow 2x2 blocks) moves.
+- Clicking a different 4x4 block might move the yellow selection frame.
+- Clicking a different colored block might move the selection frame.
+- Clicking a different 4x4 block might move the yellow selection frame.
+- To move a selected block, try clicking one of the target slots at the top of the grid.
+- Clicking a block might select it; yellow 2x2 blocks indicate the current selection.
+- Clicking a framed 4x4 block might move it to the top slots or change the selection state.
+- Yellow 2x2 blocks at (17,10), (17,16), (23,10), (23,16) frame a 4x4 block at (19,12).
+
+- Yellow 2x2 blocks seem to frame the target 4x4 block. Clicking the framed block might progress the level.
+
+## ab01-00000001
+- Level advancement (0/5) is not achieved by simple repositioning or observation actions within the first 17 steps.
+- Repeated use of ACTION1 and ACTION4 without specific spatial triggers or sequence completion leads to a GAME_OVER state at Step 17.
+- The game 'ab01-00000001' involves a 64x64 grid divided horizontally into blue (9) and gray (2) halves, containing a 5x5 green-bordered object.
+- ACTION1, ACTION2, ACTION3, and ACTION5 appear to be movement or transformation commands that do not trigger level advancement when applied to the 5x5 object in a 64x64 split-color grid.
+- Orange block at (61, 57-61) is a meter that fills with movement; ACTION5 may be a primary interaction.
+- ACTION5 might be a toggle or interaction key; the orange meter at (61, 57-61) tracks total actions.
+- The orange block at (61, 57-61) is a progress/energy meter that increases with movement.
+- Directional actions move purple pixels in the upper half; orange block at (61, 57) is a meter.
+- Orange block at (61, 56-61) is a progress/energy meter that increases with movement.
+- Purple pixels (15) in the upper half shift or change state based on directional inputs.
+- Orange bar at (61, 56-61) grows with movement; ACTION5 might be needed to interact with the 5x5 object.
+- Directional actions (1-4) cause specific row-based changes in the grid, likely moving or shifting the large shapes.
+- Player character is likely the 5x5 green/purple object at (39, 24).
+- The 5x5 object at (39, 24) is likely the player; testing vertical movement with ACTION2.
+
+- The player character is likely the 5x5 green/purple object at (39, 24).
+
+## pt01-00000001
+- The player character (color 5) can navigate through the blue space (color 9) but must avoid or interact with distinct colored objects to progress.
+- Level advancement is not triggered by simple movement; specific interaction with colored clusters or reaching designated coordinates is required.
+- The game environment consists of a blue background (color 9) with static colored pixel clusters acting as obstacles or targets.
+- ACTION1 through ACTION4 correspond to directional movement (Up, Down, Left, Right) for the black pixel (color 5) on the 64x64 grid.
+- The black pixel (5) is the player; movement consumes energy/moves shown in the bottom UI.
+- The black pixel (5) is the player; orange (12) and light blue (10) blocks are likely collectibles or targets.
+- The black pixel (color 5) is the player character; UI at bottom tracks moves/energy.
+- The player is likely the central cluster; UI at bottom tracks state/moves.
+- Player is likely the black pixel at (31, 26). Goal involves interacting with colored blocks.
+- Movement actions in this environment appear to advance the player's position by 2 units per step along the vertical axis.
+- The background is predominantly blue (9) with a grid-like structure containing orange (12) and light blue (10) objects.
+- Horizontal light blue (10) bars act as recurring structural elements or potential barriers located at specific row intervals (e.g., rows 41, 43, 45).
+- The player object (5) moves vertically through a 64x64 grid by incrementing its row coordinate (from 32 to 44) in response to repeated actions.
+- Player (5) is at (44, 31), approaching a multicolored structure (10, 15, 3, 15, 10) at row 45.
+- Player (5) is moving towards a multi-colored structure (10, 15, 3, 15, 10) at row 43.
+- Player is at (40, 31), approaching a multi-colored block structure at (41, 29-33).
+- The player (5) moves towards colored blocks; ACTION2 moves the player down.
+- The player (5) moves within a grid of light gray (1) lines on a blue (9) background.
+
+- Player is black pixel (5) at (31, 26). Background is blue (9). Orange bars at bottom may be energy.

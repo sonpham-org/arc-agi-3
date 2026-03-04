@@ -121,7 +121,9 @@ class AgentObserver:
             response=response,
         )
 
-    def subagent_start(self, agent_type: str, task: str, budget: int, step: int):
+    def subagent_start(self, agent_type: str, task: str, budget: int, step: int,
+                       available_actions: str = "", level: str = "",
+                       memory_summary: str = ""):
         """Log subagent spawn."""
         self.update_status(
             current_agent=agent_type,
@@ -129,7 +131,10 @@ class AgentObserver:
         )
         self.event(
             "subagent_start",
-            agent_type=agent_type, task=task[:120], budget=budget, step=step,
+            agent_type=agent_type, task=task[:200], budget=budget, step=step,
+            available_actions=available_actions,
+            level=level,
+            memory_summary=memory_summary[:500] if memory_summary else "",
         )
 
     def subagent_act(self, agent_type: str, step: int, action: str,

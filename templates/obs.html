@@ -422,9 +422,8 @@
     max-width: 400px;
   }
   table.log td.details {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: pre-wrap;
+    word-break: break-word;
     max-width: 500px;
     cursor: pointer;
     transition: background 0.15s;
@@ -696,6 +695,7 @@
   <div class="log-section">
     <div class="log-header">
       <h2>Call Log</h2>
+      <button onclick="copyObsLogs()" style="background:#222;border:1px solid #333;color:#aaa;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;margin-right:6px;">Copy logs</button>
       <button id="autoScrollBtn" class="active" onclick="toggleAutoScroll()">Auto-scroll</button>
     </div>
     <div class="log-table-wrap" id="logWrap">
@@ -1007,26 +1007,62 @@ function renderNewEvents(events) {
   }
 }
 
+function _extractReasoning(ev) {
+  // Extract reasoning from the raw LLM response JSON
+  if (!ev.response) return '';
+  try {
+    // Try to parse JSON from the response
+    const match = ev.response.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      // Collect reasoning fields
+      const parts = [];
+      if (parsed.reasoning) parts.push(parsed.reasoning);
+      if (parsed.next) parts.push(`Next: ${parsed.next}`);
+      if (parsed.facts?.length) parts.push(`Facts: ${parsed.facts.join('; ')}`);
+      if (parsed.hypotheses?.length) parts.push(`Hypotheses: ${parsed.hypotheses.join('; ')}`);
+      if (parts.length) return parts.join(' | ');
+    }
+    // If no JSON, show the raw text (might be thinking/reasoning before JSON)
+    const beforeJson = ev.response.split('{')[0].trim();
+    if (beforeJson.length > 10) return beforeJson;
+  } catch {}
+  return '';
+}
+
 function buildDetails(ev) {
   switch (ev.event) {
-    case 'orchestrator_decide':
-      return `${ev.command || ''}${ev.agent_type ? ' -> ' + ev.agent_type : ''}${ev.task ? ': ' + ev.task : ''}`;
-    case 'subagent_start':
-      return `task: ${ev.task || ''} (budget: ${ev.budget || '?'})`;
-    case 'act':
-      return `${humanAction(ev.action) || ''}${ev.state ? ' [' + ev.state + ']' : ''}${ev.reasoning ? ' - ' + ev.reasoning : ''}`;
+    case 'orchestrator_decide': {
+      const header = `${ev.command || ''}${ev.agent_type ? ' -> ' + ev.agent_type : ''}${ev.task ? ': ' + ev.task : ''}`;
+      const reasoning = _extractReasoning(ev);
+      return reasoning ? `${header}\n${reasoning}` : header;
+    }
+    case 'subagent_start': {
+      let detail = `task: ${ev.task || ''} (budget: ${ev.budget || '?'})`;
+      if (ev.level) detail += ` | level: ${ev.level}`;
+      if (ev.available_actions) detail += `\nactions: ${ev.available_actions}`;
+      if (ev.memory_summary) detail += `\nmemory: ${ev.memory_summary}`;
+      return detail;
+    }
+    case 'act': {
+      const header = `${humanAction(ev.action) || ''}${ev.state ? ' [' + ev.state + ']' : ''}${ev.reasoning ? ' - ' + ev.reasoning : ''}`;
+      const reasoning = _extractReasoning(ev);
+      return reasoning ? `${header}\n${reasoning}` : header;
+    }
     case 'subagent_report':
-      return `steps: ${ev.steps_used || 0}, calls: ${ev.llm_calls || 0}, findings: ${ev.findings || 0}${ev.summary ? ' - ' + ev.summary : ''}`;
+    case 'sub_report':
+      return `steps: ${ev.steps_used || 0}, findings: ${ev.findings || 0}${ev.summary ? '\n' + ev.summary : ''}`;
     case 'frame_tool':
-      return `tool: ${ev.tool || ''}`;
+    case 'sub_tool':
+      return `tool: ${ev.tool || ev.tool_name || ''}`;
     case 'game_start':
       return ev.model || '';
     case 'game_end':
       return ev.result || '';
     default:
-      // Show any extra keys
-      const skip = new Set(['t','elapsed_s','event','agent','agent_type','grid']);
-      const extra = Object.entries(ev).filter(([k]) => !skip.has(k));
+      // Show any extra keys, skip empty values
+      const skip = new Set(['t','elapsed_s','event','agent','agent_type','grid','current_agent']);
+      const extra = Object.entries(ev).filter(([k, v]) => !skip.has(k) && v !== '' && v != null && v !== 0);
       return extra.map(([k,v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
   }
 }
@@ -1067,6 +1103,35 @@ function toggleAutoScroll() {
   autoScroll = !autoScroll;
   const btn = document.getElementById('autoScrollBtn');
   btn.classList.toggle('active', autoScroll);
+}
+
+function copyObsLogs() {
+  if (!allEvents.length) {
+    navigator.clipboard.writeText('(no events)');
+    return;
+  }
+  const lines = [];
+  lines.push(`=== Observatory Log (${allEvents.length} events) ===`);
+  if (currentSessionId) lines.push(`Session: ${currentSessionId}`);
+  lines.push('');
+  lines.push('Time'.padEnd(12) + '+s'.padEnd(8) + 'Agent'.padEnd(14) + 'Event'.padEnd(22) + 'Details');
+  lines.push('-'.repeat(80));
+  for (const ev of allEvents) {
+    const time = ev.t ? (ev.t.split('T')[1] || ev.t) : '';
+    const elapsed = ev.elapsed_s != null ? `+${ev.elapsed_s.toFixed(0)}` : '';
+    const agent = ev.agent || ev.agent_type || ev.current_agent || '';
+    const details = buildDetails(ev);
+    const tok = (ev.input_tokens || ev.output_tokens) ? ` [${fmtK(ev.input_tokens||0)}/${fmtK(ev.output_tokens||0)}]` : '';
+    const dur = ev.duration_ms ? ` ${ev.duration_ms}ms` : '';
+    lines.push(time.padEnd(12) + elapsed.padEnd(8) + agent.padEnd(14) + (ev.event||'').padEnd(22) + details + tok + dur);
+    // Include full response if present
+    if (ev.response) {
+      lines.push('  [response] ' + ev.response.substring(0, 2000));
+    }
+  }
+  navigator.clipboard.writeText(lines.join('\n'));
+  event.target.textContent = 'Copied!';
+  setTimeout(() => { event.target.textContent = 'Copy logs'; }, 1500);
 }
 
 // ── Find nearest grid at or before a given event index ──

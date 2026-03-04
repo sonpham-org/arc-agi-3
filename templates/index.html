@@ -1572,6 +1572,7 @@ const SCAFFOLDING_SCHEMAS = {
           fields: [
             { type: 'number-input', id: 'sf_as_maxSubagentBudget', label: 'Max subagent budget', default: 5, min: 1, max: 10, width: '55px' },
             { type: 'number-input', id: 'sf_as_orchestratorMaxTurns', label: 'Orchestrator max turns', default: 5, min: 1, max: 15, width: '55px' },
+            { type: 'number-input', id: 'sf_as_orchestratorHistoryLength', label: 'History length', default: 10, min: 1, max: 50, width: '55px' },
           ]
         }]
       },
@@ -4384,6 +4385,7 @@ function getScaffoldingSettings() {
     s.subagent_max_tokens = parseInt(document.getElementById('sf_as_subagentMaxTokens')?.value) || 16384;
     s.max_subagent_budget = parseInt(document.getElementById('sf_as_maxSubagentBudget')?.value) || 5;
     s.orchestrator_max_turns = parseInt(document.getElementById('sf_as_orchestratorMaxTurns')?.value) || 5;
+    s.orchestrator_history_length = parseInt(document.getElementById('sf_as_orchestratorHistoryLength')?.value) || 15;
     s.model = s.orchestrator_model;
   }
 
@@ -4686,6 +4688,7 @@ function renderTimelineTree(container, asEvents, allEvents) {
   container.innerHTML = `
     <div class="as-timeline-container" id="asTreeContainer">
       <div class="as-zoom-controls">
+        <button class="as-zoom-btn" id="asCopyLogs" title="Copy logs" onclick="copyTimelineLogs()">&#128203;</button>
         <button class="as-zoom-btn" id="asZoomIn" title="Zoom in">+</button>
         <button class="as-zoom-btn" id="asZoomOut" title="Zoom out">-</button>
         <button class="as-zoom-btn" id="asZoomReset" title="Reset view">R</button>
@@ -4773,9 +4776,22 @@ function renderTimelineTree(container, asEvents, allEvents) {
     if (ev.duration_ms) html += `<span>${(ev.duration_ms / 1000).toFixed(1)}s</span>`;
     html += `</div>`;
     if (ev.type === 'as_orch_think') {
-      html += `<div class="as-tt-body">Facts: ${ev.facts || 0}, Hypotheses: ${ev.hypotheses || 0}</div>`;
+      html += `<div class="as-tt-body">Facts: ${ev.facts || 0}, Hypotheses: ${ev.hypotheses || 0}`;
+      if (ev.reasoning) html += `\n${_tlEsc(ev.reasoning)}`;
+      if (ev.error) html += `\n<span style="color:#f85149">ERROR: ${_tlEsc(ev.error)}</span>`;
+      html += `</div>`;
     } else if (ev.type === 'as_orch_delegate') {
-      html += `<div class="as-tt-body">Task: ${_tlEsc(ev.task || '')}\nBudget: ${ev.budget || 0} steps</div>`;
+      html += `<div class="as-tt-body">Task: ${_tlEsc(ev.task || '')}\nBudget: ${ev.budget || 0} steps`;
+      if (ev.reasoning) html += `\nReasoning: ${_tlEsc(ev.reasoning)}`;
+      html += `</div>`;
+    } else if (ev.type === 'as_sub_start') {
+      html += `<div class="as-tt-body">Task: ${_tlEsc(ev.task || '')}`;
+      html += `\nBudget: ${ev.budget || 0} steps`;
+      if (ev.step_num != null) html += `\nStep: ${ev.step_num}`;
+      if (ev.level) html += ` | Level: ${ev.level}`;
+      if (ev.available_actions) html += `\nActions: ${_tlEsc(ev.available_actions)}`;
+      if (ev.memory_summary) html += `\n\nMemory:\n${_tlEsc(ev.memory_summary)}`;
+      html += `</div>`;
     } else if (ev.type === 'as_sub_act') {
       html += `<div class="as-tt-body">${_tlEsc(ev.action_name || '')}${ev.reasoning ? '\n' + _tlEsc(ev.reasoning) : ''}</div>`;
     } else if (ev.type === 'as_sub_report') {
@@ -4833,7 +4849,7 @@ function renderTimeline(ss) {
     if (!turns[t]) turns[t] = [];
     turns[t].push(ev);
   }
-  let html = '';
+  let html = '<div style="display:flex;justify-content:flex-end;margin-bottom:4px;"><button class="as-zoom-btn" onclick="copyTimelineLogs()" title="Copy logs" style="font-size:11px;width:auto;padding:2px 8px;">Copy logs</button></div>';
   let evIdx = 0;
   // In-flight block (pulsing, live timer)
   if (ss && ss.waitingForLLM && ss.waitStartTime) {
@@ -5006,6 +5022,62 @@ function _flashCopyBtn(msg) {
   const orig = btn.textContent;
   btn.textContent = msg;
   setTimeout(() => { btn.textContent = orig; }, 1500);
+}
+function copyTimelineLogs() {
+  const s = getActiveSession();
+  const events = s ? s.timelineEvents : [];
+  if (!events || !events.length) {
+    navigator.clipboard.writeText('(no timeline events)');
+    const btn = document.getElementById('asCopyLogs');
+    if (btn) { const o = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = o, 1500); }
+    return;
+  }
+  const lines = [];
+  lines.push(`=== Timeline Log (${events.length} events) ===`);
+  lines.push(`Session: ${s?.sessionId || sessionId || '?'}`);
+  lines.push(`Game: ${s?.gameId || ''}`);
+  lines.push(`Model: ${s?.model || getSelectedModel() || '?'}`);
+  lines.push('');
+  const t0 = events[0]?.timestamp || 0;
+  for (const ev of events) {
+    const elapsed = t0 ? `+${Math.round(((ev.timestamp || 0) - t0) / 1000)}s` : '';
+    const time = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '';
+    const agent = ev.agent_type || ev.current_agent || 'orchestrator';
+    const type = ev.type || '?';
+    const parts = [time.padEnd(12), elapsed.padEnd(8), agent.padEnd(14), type.padEnd(22)];
+    // Add key details
+    const details = [];
+    if (ev.task) details.push(`task: ${ev.task}`);
+    if (ev.budget) details.push(`budget: ${ev.budget}`);
+    if (ev.facts) details.push(`facts: ${ev.facts}`);
+    if (ev.hypotheses) details.push(`hypotheses: ${ev.hypotheses}`);
+    if (ev.action_name) details.push(`action: ${ev.action_name}`);
+    if (ev.reasoning) details.push(`reason: ${ev.reasoning}`);
+    if (ev.summary) details.push(`summary: ${ev.summary}`);
+    if (ev.error) details.push(`ERROR: ${ev.error}`);
+    if (ev.duration_ms) details.push(`${ev.duration_ms}ms`);
+    if (ev.totalSteps != null) details.push(`steps: ${ev.totalSteps}`);
+    if (ev.totalSubagents != null) details.push(`subagents: ${ev.totalSubagents}`);
+    parts.push(details.join(' | '));
+    lines.push(parts.join(''));
+  }
+  // Also include orchestrator log if available
+  const buf = s ? s.sessionStepsBuffer : [];
+  if (buf?.length) {
+    lines.push('');
+    lines.push(`=== Steps (${buf.length}) ===`);
+    for (const step of buf) {
+      const resp = step.llm_response;
+      if (resp?.agent_spawn?.orchestrator_log) {
+        for (const entry of resp.agent_spawn.orchestrator_log) {
+          lines.push(`  Turn ${entry.turn}: ${entry.type} ${entry.error || ''} ${entry.task || ''} ${entry.raw_preview || ''}`);
+        }
+      }
+    }
+  }
+  navigator.clipboard.writeText(lines.join('\n'));
+  const btn = document.getElementById('asCopyLogs');
+  if (btn) { const o = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = o, 1500); }
 }
 function getLastReasoningEntry() {
   const el = document.getElementById('reasoningContent');
@@ -6960,7 +7032,7 @@ function _extractJsonFromText(text) {
       else if (ch === '}') { depth--; if (depth === 0) {
         try {
           const parsed = JSON.parse(cleaned.substring(i, j + 1));
-          if (parsed.action !== undefined || parsed.plan || parsed.actions) return parsed;
+          if (parsed.action !== undefined || parsed.plan || parsed.actions || parsed.command) return parsed;
         } catch {}
         break;
       }}
@@ -7101,6 +7173,8 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
       if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);
       const fr = data.candidates?.[0]?.finishReason;
       const text = data.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || '';
+      const gUsage = data.usageMetadata;
+      callLLM._lastUsage = gUsage ? { input_tokens: gUsage.promptTokenCount || 0, output_tokens: gUsage.candidatesTokenCount || 0 } : null;
       if (fr === 'MAX_TOKENS') return { text, truncated: true };
       if (fr === 'MALFORMED_FUNCTION_CALL') return { text, malformed: true, finishMessage: data.candidates?.[0]?.finishMessage || '' };
       return text;
@@ -7117,6 +7191,7 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);
+    callLLM._lastUsage = data.usage ? { input_tokens: data.usage.prompt_tokens || 0, output_tokens: data.usage.completion_tokens || 0 } : null;
     return data.choices?.[0]?.message?.content || '';
   }
 
@@ -7133,6 +7208,7 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);
+    callLLM._lastUsage = data.usage ? { input_tokens: data.usage.input_tokens || 0, output_tokens: data.usage.output_tokens || 0 } : null;
     return data.content?.map(c => c.text).filter(Boolean).join('') || '';
   }
 
@@ -7151,6 +7227,7 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error || resp.statusText}`);
+    callLLM._lastUsage = null; // Cloudflare doesn't report usage
     return data.result || '';
   }
 
@@ -8083,7 +8160,7 @@ function _asCreateMemories() {
       if (this.stack.length) {
         const recent = this.stack.slice(-8);
         parts.push('## Agent Reports\n' + recent.map((m, i) =>
-          `[${i}] (${m.agentType}) ${m.summary}${m.details ? '\n   ' + m.details.substring(0, 200) : ''}`
+          `[${i}] (${m.agentType}) ${m.summary}${m.details ? '\n   ' + m.details : ''}`
         ).join('\n'));
       }
       return parts.length ? parts.join('\n\n') : '(none yet)';
@@ -8097,7 +8174,7 @@ const AS_GAME_REFERENCE = `# ARC-AGI-3 Game Reference
 
 ## Grid
 The game is played on a grid (up to 64x64). Each cell has a color value 0-15.
-Colors: 0=black/empty, 1=blue, 2=red, 3=green, 4=yellow, 5=grey, 6=magenta, 7=orange, 8=cyan, 9=brown, 10-15=extended.
+Colors: 0=White, 1=LightGray, 2=Gray, 3=DarkGray, 4=VeryDarkGray, 5=Black, 6=Magenta, 7=LightMagenta, 8=Red, 9=Blue, 10=LightBlue, 11=Yellow, 12=Orange, 13=Maroon, 14=Green, 15=Purple.
 
 ## Actions
 Actions are integers. Common mapping:
@@ -8165,10 +8242,10 @@ Always tell subagents:
 You MUST respond with exactly one JSON object:
 
 Option A — Delegate to a subagent:
-{"command": "delegate", "agent_type": "explorer|theorist|tester|solver", "task": "specific instructions", "budget": <1-10>}
+{"command": "delegate", "reasoning": "why this delegation is the right next step", "agent_type": "explorer|theorist|tester|solver", "task": "specific instructions", "budget": <1-10>}
 
 Option B — Think and record to memory:
-{"command": "think", "facts": ["confirmed fact", ...], "hypotheses": ["working theory", ...], "reasoning": "analysis"}`;
+{"command": "think", "reasoning": "analysis of current situation", "facts": ["confirmed fact", ...], "hypotheses": ["working theory", ...], "next": "what to do next"}`;
 
 const AS_AGENT_SYSTEM = {
   explorer: `You are an EXPLORER subagent for ARC-AGI-3.
@@ -8261,13 +8338,34 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
   const t0Total = performance.now();
   const settings = _snap?.scaffolding || getScaffoldingSettings();
   const orchModel = settings.orchestrator_model || settings.model || model;
-  const orchThinking = settings.orchestrator_thinking_level || 'low';
+  const orchThinking = settings.orchestrator_thinking_level || 'high';
   const orchMaxTokens = Math.min(parseInt(settings.orchestrator_max_tokens) || 16384, 65536);
   const subModel = settings.subagent_model || orchModel;
-  const subThinking = settings.subagent_thinking_level || 'low';
+  const subThinking = settings.subagent_thinking_level || 'med';
   const subMaxTokens = Math.min(parseInt(settings.subagent_max_tokens) || 16384, 65536);
   const maxSubBudget = parseInt(settings.max_subagent_budget) || 5;
   const orchMaxTurns = parseInt(settings.orchestrator_max_turns) || 5;
+
+  // Token/cost tracking helper — accumulates into session totals
+  const _asTokens = _cur.sessionTotalTokens || sessionTotalTokens;
+  function _asTrackUsage(model, rawText) {
+    const usage = callLLM._lastUsage;
+    let inputTok = usage?.input_tokens || 0;
+    let outputTok = usage?.output_tokens || 0;
+    // Estimate if API didn't report
+    if (!inputTok && rawText) inputTok = Math.ceil((rawText).length / 4);
+    if (!outputTok && rawText) outputTok = Math.ceil((rawText).length / 4);
+    _asTokens.input += inputTok;
+    _asTokens.output += outputTok;
+    const prices = TOKEN_PRICES[model] || null;
+    let cost = 0;
+    if (prices) {
+      cost = (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
+      _asTokens.cost += cost;
+    }
+    callLLM._lastUsage = null;
+    return { input_tokens: inputTok, output_tokens: outputTok, cost };
+  }
 
   // Init shared memory on session (stack-based)
   if (!_cur._asMemories) {
@@ -8297,12 +8395,24 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
       as_subagent_start: null, as_subagent_report: null, as_step: null };
     const agentType = ev.agent_type || ev.current_agent || 'orchestrator';
     const obsEvent = ev.type?.startsWith('as_') ? ev.type.replace('as_', '') : ev.type;
-    emitObsEvent(_asSess, {
+    const obsData = {
       event: obsEvent || ev.type, agent: agentType.toLowerCase(),
-      model: ev.model, duration_ms: ev.duration_ms,
-      input_tokens: ev.input_tokens, output_tokens: ev.output_tokens,
-      cost: ev.cost, summary: ev.task || ev.summary || '',
-    });
+    };
+    // Only include non-empty fields
+    if (ev.model) obsData.model = ev.model;
+    if (ev.duration_ms) obsData.duration_ms = ev.duration_ms;
+    if (ev.input_tokens) obsData.input_tokens = ev.input_tokens;
+    if (ev.output_tokens) obsData.output_tokens = ev.output_tokens;
+    if (ev.cost) obsData.cost = ev.cost;
+    if (ev.task || ev.summary) obsData.summary = ev.task || ev.summary;
+    if (ev.reasoning) obsData.reasoning = ev.reasoning;
+    if (ev.response) obsData.response = ev.response;
+    if (ev.findings != null) obsData.findings = ev.findings;
+    if (ev.hypotheses != null) obsData.hypotheses = ev.hypotheses;
+    if (ev.steps_used != null) obsData.steps_used = ev.steps_used;
+    if (ev.tool_name) obsData.tool_name = ev.tool_name;
+    if (ev.action_name) obsData.action_name = ev.action_name;
+    emitObsEvent(_asSess, obsData);
   }
 
   _asPushTl({ type: 'as_orch_start', turn: 0 });
@@ -8330,14 +8440,27 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
     };
   }
 
-  // Helper: format history
+  // Helper: format history with grid + change map per step
+  const orchHistoryLength = parseInt(settings.orchestrator_history_length) || 10;
   function _buildHistoryBlock() {
     const hist = _cur.moveHistory || [];
     if (!hist.length) return '(none)';
-    return hist.slice(-15).map(h => {
+    return hist.slice(-orchHistoryLength).map(h => {
       const aname = ACTION_NAMES[h.action] || '?';
-      return `  Step ${h.step || '?'}: ${aname} -> levels=${h.levels || '?'} | ${(h.observation || '').substring(0, 200)}`;
-    }).join('\n');
+      const lines = [`--- Step ${h.step || '?'}: ${aname} | levels=${h.levels || '?'} | state=${h.result_state || '?'} ---`];
+      if (h.observation) lines.push(`  Observation: ${h.observation}`);
+      // Include change map (full, no truncation)
+      const cmText = h.change_map?.change_map_text || '';
+      if (cmText && cmText !== '(no changes)' && cmText !== '(initial)') {
+        lines.push(`  Changes:\n${cmText}`);
+      }
+      // Include full grid snapshot (RLE compressed, all rows)
+      if (h.grid && h.grid.length) {
+        const gridLines = h.grid.map((r, i) => `    Row ${i}: ${compressRowJS(r)}`);
+        lines.push(`  Grid:\n${gridLines.join('\n')}`);
+      }
+      return lines.join('\n');
+    }).join('\n\n');
   }
 
   // ── Orchestrator REPL loop ──
@@ -8364,6 +8487,7 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
       grid_block: ctx.gridText, change_map_block: ctx.changeMapBlock,
       memories: mem.formatForPrompt(),
       history_block: _buildHistoryBlock(),
+      history_length: orchHistoryLength,
     };
 
     const prompt = AS_ORCHESTRATOR_PREMISE + '\n\n' + AS_GAME_REFERENCE + '\n\n' + _asFill(
@@ -8383,7 +8507,7 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
 # Shared Memories
 {memories}
 
-# Recent History
+# Recent History (last {history_length} steps with grid snapshots)
 {history_block}
 
 Decide your next move. Respond with a JSON object (delegate or think).`, turnVars);
@@ -8398,10 +8522,14 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
       break;
     }
     const durMs = Math.round(performance.now() - t0);
+    const orchUsage = _asTrackUsage(orchModel, raw || '');
     const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.command) {
-      orchestratorLog.push({ turn, type: 'error', error: 'unparseable', duration_ms: durMs });
+      console.warn(`[agent_spawn] orchestrator turn ${turn}: unparseable response (${(raw||'').length} chars):`, raw?.substring(0, 500));
+      orchestratorLog.push({ turn, type: 'error', error: 'unparseable', raw_preview: (raw||'').substring(0, 300), duration_ms: durMs });
+      _asPushTl({ type: 'as_orch_think', turn, facts: 0, hypotheses: 0, duration_ms: durMs, error: 'unparseable response',
+        input_tokens: orchUsage.input_tokens, output_tokens: orchUsage.output_tokens, cost: orchUsage.cost });
       continue;
     }
 
@@ -8414,8 +8542,9 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
       for (const f of facts) mem.addFact(f);
       for (const h of hypotheses) mem.addHypothesis(h);
       if (parsed.reasoning) mem.add(parsed.reasoning, '', 'orchestrator');
-      orchestratorLog.push({ turn, type: 'think', facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs });
-      _asPushTl({ type: 'as_orch_think', turn, facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs });
+      orchestratorLog.push({ turn, type: 'think', facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs, raw_preview: (raw||'').substring(0, 500) });
+      _asPushTl({ type: 'as_orch_think', turn, facts: facts.length, hypotheses: hypotheses.length, duration_ms: durMs, reasoning: parsed.next || parsed.reasoning || '', response: (raw||'').substring(0, 1000),
+        input_tokens: orchUsage.input_tokens, output_tokens: orchUsage.output_tokens, cost: orchUsage.cost });
       continue;
     }
 
@@ -8428,10 +8557,15 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
       const budgetLimit = isTheorist ? 0 : Math.min(parseInt(parsed.budget) || 3, maxSubBudget);
       const budget = _makeBoundedBudget(budgetLimit);
 
-      orchestratorLog.push({ turn, type: 'delegate', agent_type: agentType, task: task.substring(0, 100), budget: budgetLimit, duration_ms: durMs });
-      _asPushTl({ type: 'as_orch_delegate', turn, agent_type: agentType, task: task.substring(0, 80), budget: budgetLimit, duration_ms: durMs });
+      orchestratorLog.push({ turn, type: 'delegate', agent_type: agentType, task: task.substring(0, 100), budget: budgetLimit, duration_ms: durMs, raw_preview: (raw||'').substring(0, 500) });
+      _asPushTl({ type: 'as_orch_delegate', turn, agent_type: agentType, task: task.substring(0, 80), budget: budgetLimit, duration_ms: durMs, reasoning: parsed.reasoning || '', response: (raw||'').substring(0, 1000),
+        input_tokens: orchUsage.input_tokens, output_tokens: orchUsage.output_tokens, cost: orchUsage.cost });
       totalSubagents++;
-      _asPushTl({ type: 'as_sub_start', turn, agent_type: agentType, task: task.substring(0, 80), budget: budgetLimit, parentTurn: turn });
+      const subStartCtx = _buildContext();
+      _asPushTl({ type: 'as_sub_start', turn, agent_type: agentType, task: task.substring(0, 200), budget: budgetLimit, parentTurn: turn,
+        step_num: subStartCtx.step_num, level: `${subStartCtx.levels_completed}/${subStartCtx.win_levels}`,
+        available_actions: subStartCtx.actionDesc, memory_summary: mem.formatForPrompt().substring(0, 500),
+      });
 
       // Update wait label
       if (label) {
@@ -8443,11 +8577,15 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
         if (timer) label.appendChild(timer);
       }
 
-      // ── SUBAGENT REACTIVE LOOP ──
+      // ── SUBAGENT REACTIVE LOOP (multi-turn conversation) ──
       const subActions = [];
       let toolResults = '';
       const maxIter = isTheorist ? 3 : (budgetLimit + 3); // theorist gets 3 iterations for frame_tool + report
       let subTerminal = null;
+
+      // Build initial system prompt + first user turn
+      const systemPrompt = AS_AGENT_SYSTEM[agentType] || AS_AGENT_SYSTEM.explorer;
+      const subMessages = [{ role: 'system', content: systemPrompt + '\n\n' + AS_GAME_REFERENCE }];
 
       for (let si = 0; si < maxIter; si++) {
         if (!isActiveFn()) break;
@@ -8474,19 +8612,29 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           tool_results: toolResults ? `\n# Frame Tool Results\n${toolResults}\n` : '',
         };
 
-        const systemPrompt = AS_AGENT_SYSTEM[agentType] || AS_AGENT_SYSTEM.explorer;
-        const subPrompt = systemPrompt + '\n\n' + AS_GAME_REFERENCE + '\n\n' + _asFill(AS_AGENT_TURN, subVars);
+        // First iteration: full context as user message. Subsequent: feedback as user message.
+        if (si === 0) {
+          subMessages.push({ role: 'user', content: _asFill(AS_AGENT_TURN, subVars) });
+        }
+        // (feedback appended at end of loop for subsequent iterations)
 
         let subRaw;
         try {
-          subRaw = await callLLM([{role: 'system', content: subPrompt}], subModel, { maxTokens: subMaxTokens, thinkingLevel: subThinking });
+          subRaw = await callLLM(subMessages, subModel, { maxTokens: subMaxTokens, thinkingLevel: subThinking });
         } catch (e) {
           console.error(`[agent_spawn] ${agentType} iter ${si} failed:`, e);
           break;
         }
+        const subUsage = _asTrackUsage(subModel, subRaw || '');
 
         const subParsed = _extractJsonFromText(subRaw) || (() => { try { return JSON.parse(subRaw); } catch { return null; } })();
-        if (!subParsed || !subParsed.command) break;
+        if (!subParsed || !subParsed.command) {
+          console.warn(`[agent_spawn] ${agentType} iter ${si}: unparseable response (${(subRaw||'').length} chars):`, subRaw?.substring(0, 500));
+          break;
+        }
+
+        // Append assistant response to conversation
+        subMessages.push({ role: 'assistant', content: subRaw });
 
         // ── REPORT ──
         if (subParsed.command === 'report') {
@@ -8495,9 +8643,14 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           for (const f of findings) mem.addFact(f);
           for (const h of hypotheses) mem.addHypothesis(h);
           const summary = subParsed.summary || findings.join('; ');
-          mem.add(summary, findings.join('\n'), agentType);
+          const fullDetails = [
+            ...findings.map(f => `Finding: ${f}`),
+            ...hypotheses.map(h => `Hypothesis: ${h}`),
+          ].join('\n');
+          mem.add(summary, fullDetails, agentType);
           subagentSummaries.push({ type: agentType, task: task.substring(0, 60), steps: subActions.length, summary });
-          _asPushTl({ type: 'as_sub_report', turn, agent_type: agentType, findings: findings.length, hypotheses: hypotheses.length, summary: summary.substring(0, 120), steps_used: subActions.length });
+          _asPushTl({ type: 'as_sub_report', turn, agent_type: agentType, findings: findings.length, hypotheses: hypotheses.length, summary, steps_used: subActions.length, response: (subRaw || '').substring(0, 2000),
+            input_tokens: subUsage.input_tokens, output_tokens: subUsage.output_tokens, cost: subUsage.cost });
           break;
         }
 
@@ -8509,6 +8662,7 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           const result = _asDispatchFrameTool(toolName, subCtx.grid, prevGrid, toolArgs);
           toolResults = `Tool: ${toolName}\n${result}`;
           _asPushTl({ type: 'as_sub_tool', turn, agent_type: agentType, tool_name: toolName });
+          subMessages.push({ role: 'user', content: `Frame tool result:\n${toolResults}\n\nContinue with your next command.` });
           continue; // Don't count as action, loop again
         }
 
@@ -8516,20 +8670,26 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
         if (subParsed.command === 'act') {
           // Theorists cannot act
           if (isTheorist) {
-            toolResults = '(ERROR: theorists cannot take game actions — use frame_tool or report)';
+            const errMsg = '(ERROR: theorists cannot take game actions — use frame_tool or report)';
+            toolResults = errMsg;
+            subMessages.push({ role: 'user', content: errMsg });
             continue;
           }
 
           const actionId = parseInt(subParsed.action);
           const avail = new Set(subCtx.avail);
           if (isNaN(actionId) || !avail.has(actionId)) {
-            toolResults = `(ERROR: invalid action ${subParsed.action} — available: ${subCtx.actionDesc})`;
+            const errMsg = `(ERROR: invalid action ${subParsed.action} — available: ${subCtx.actionDesc})`;
+            toolResults = errMsg;
+            subMessages.push({ role: 'user', content: errMsg });
             continue;
           }
 
           // Check budget
           if (!budget.use(actionId)) {
-            toolResults = '(Budget exhausted — use "report" to yield findings)';
+            const errMsg = '(Budget exhausted — use "report" to yield findings)';
+            toolResults = errMsg;
+            subMessages.push({ role: 'user', content: errMsg });
             continue;
           }
 
@@ -8539,7 +8699,9 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           );
 
           if (stepResult.error) {
-            toolResults = `(Action ${actionId} failed — game error)`;
+            const errMsg = `(Action ${actionId} failed — game error)`;
+            toolResults = errMsg;
+            subMessages.push({ role: 'user', content: errMsg });
             continue;
           }
 
@@ -8555,9 +8717,10 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
             reasoning: subParsed.reasoning || '',
             result: `${changeSummary}, levels=${stepResult.data.levels_completed}`,
           });
-          _asPushTl({ type: 'as_sub_act', turn, agent_type: agentType, action: actionId, action_name: actionName, reasoning: (subParsed.reasoning || '').substring(0, 100), step_num: _cur.stepCount, duration_ms: actDurMs });
+          _asPushTl({ type: 'as_sub_act', turn, agent_type: agentType, action: actionId, action_name: actionName, reasoning: (subParsed.reasoning || '').substring(0, 100), step_num: _cur.stepCount, duration_ms: actDurMs,
+            input_tokens: subUsage.input_tokens, output_tokens: subUsage.output_tokens, cost: subUsage.cost });
 
-          // Clear tool results, the new state will be in the next prompt
+          // Build feedback for conversation continuation
           toolResults = `Last action: ${actionName} → ${changeSummary}`;
 
           // Check terminal
@@ -8568,9 +8731,19 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           }
 
           // Check budget exhaustion
+          let budgetNote = '';
           if (budget.exhausted()) {
-            toolResults += '\n(Budget exhausted — next response should be "report")';
+            budgetNote = '\n(Budget exhausted — next response MUST be "report")';
           }
+
+          // Append action result as user feedback for next turn
+          const nextCtx = _buildContext();
+          // Include full change map (not just summary count)
+          const fullChangeMap = stepResult.prevGrid && stepResult.newGrid
+            ? computeChangeMapJS(stepResult.prevGrid, stepResult.newGrid)
+            : null;
+          const changeDetail = fullChangeMap?.change_map_text || changeSummary;
+          subMessages.push({ role: 'user', content: `Action result: ${actionName} → ${changeSummary}\nState: ${nextCtx.state} | Level: ${nextCtx.levels_completed}/${nextCtx.win_levels} | Budget remaining: ${budget.remaining}\n\nChange map:\n${changeDetail}\n\nUpdated grid:\n${nextCtx.gridText}${budgetNote}\n\nContinue with your next command.` });
 
           continue;
         }

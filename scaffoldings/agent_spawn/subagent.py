@@ -102,7 +102,12 @@ def run_subagent(
 
     print(f"      [{agent_type}] starting — task: {task[:60]}, budget: {budget}")
     if observer:
-        observer.subagent_start(agent_type, task, budget, step_num)
+        avail_str = ", ".join(str(a) for a in (frame.available_actions or []))
+        level_str = f"{frame.levels_completed}/{frame.win_levels}"
+        mem_str = memories.format_for_prompt()[:500] if memories else ""
+        observer.subagent_start(agent_type, task, budget, step_num,
+                                available_actions=avail_str, level=level_str,
+                                memory_summary=mem_str)
 
     for turn in range(max_iterations):
         # For non-theorists, stop when action budget or global step limit is reached
