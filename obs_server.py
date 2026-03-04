@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, render_template, request
 
 from arcengine import GameAction
-from db import _get_db, _decompress_grid
+from db import _get_db, _decompress_grid, _list_file_sessions, _read_session_from_file
 
 app = Flask(__name__)
 
@@ -173,6 +173,28 @@ def get_session_obs_events(session_id):
         return jsonify({"events": events})
     except Exception as e:
         app.logger.warning(f"get_session_obs_events failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/browse")
+def browse_sessions():
+    """List sessions from per-session file exports (meta.json)."""
+    try:
+        sessions = _list_file_sessions()
+        return jsonify({"sessions": sessions})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/<session_id>/full")
+def get_session_full(session_id):
+    """Get full session data from per-session file export."""
+    try:
+        data = _read_session_from_file(session_id)
+        if not data:
+            return jsonify({"error": "Session not found"}), 404
+        return jsonify(data)
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 

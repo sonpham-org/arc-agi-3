@@ -303,7 +303,7 @@ _throttle_lock = threading.Lock()
 from db import (
     DB_PATH, _init_db, _get_db, _compress_grid, _decompress_grid,
     _db_insert_session, _db_insert_step, _db_update_session,
-    _log_llm_call, _get_session_calls,
+    _log_llm_call, _get_session_calls, _read_session_from_file,
 )
 
 def _reconstruct_session(game_id: str, actions: list[dict], capture_per_step: bool = False):
@@ -445,6 +445,13 @@ MODEL_REGISTRY: dict[str, dict] = {
         "provider": "gemini", "api_model": "gemini-3-pro-preview",
         "env_key": "GEMINI_API_KEY",
         "price": "$2/$12 per 1M tok",
+        "context_window": 1000000,
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
+    },
+    "gemini-3.1-flash-lite": {
+        "provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview",
+        "env_key": "GEMINI_API_KEY",
+        "price": "$0.25/$1.50 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
@@ -2842,6 +2849,14 @@ def get_session(session_id):
                 except Exception as e:
                     app.logger.warning(f"Turso get_session failed: {e}")
 
+        # Fall back to per-session file
+        if not sess_dict:
+            file_data = _read_session_from_file(session_id)
+            if file_data:
+                sess_dict = file_data["session"]
+                for s in file_data["steps"]:
+                    step_list.append(_format_step_row(s))
+
         if not sess_dict:
             return jsonify({"error": "Session not found"}), 404
 
@@ -2937,20 +2952,26 @@ def share_session(session_id):
             ).fetchone()
             if not sess_row:
                 conn.close()
-                return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
+                # Fall back to per-session file
+                file_data = _read_session_from_file(session_id)
+                if not file_data:
+                    return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
 <style>body{background:#0d1117;color:#c9d1d9;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
 .box{text-align:center;padding:40px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:400px;}
 h1{color:#f85149;font-size:24px;margin-bottom:12px;}p{color:#8b949e;margin-bottom:20px;}
 a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style></head>
 <body><div class="box"><h1>Session Not Found</h1><p>This session doesn't exist or hasn't been shared yet.</p>
 <a href="/">&#9654; Play ARC-AGI-3</a></div></body></html>""", 404
-            sess = dict(sess_row)
-            steps_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-                (session_id,),
-            ).fetchall()
-            conn.close()
-            step_list = [_format_step_row(dict(s)) for s in steps_rows]
+                sess = file_data["session"]
+                step_list = [_format_step_row(s) for s in file_data["steps"]]
+            else:
+                sess = dict(sess_row)
+                steps_rows = conn.execute(
+                    "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                    (session_id,),
+                ).fetchall()
+                conn.close()
+                step_list = [_format_step_row(dict(s)) for s in steps_rows]
 
         # Trace back through parent sessions to build full history
         parent_steps = []

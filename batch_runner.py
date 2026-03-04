@@ -24,7 +24,7 @@ from agent import (
 from db import (
     _get_db, _db_insert_session, _db_insert_step, _db_update_session,
     _compress_grid, _turso_import_session, _turso_sync_session,
-    _get_session_calls, _get_session_turns,
+    _get_session_calls, _get_session_turns, _export_session_to_file,
 )
 
 ROOT = Path(__file__).parent
@@ -240,6 +240,12 @@ def run_single_game(arcade, game_id: str, cfg: dict, max_steps: int,
         )
         conn.commit()
         conn.close()
+    except Exception:
+        pass
+
+    # Export session to per-session file for durability
+    try:
+        _export_session_to_file(session_id)
     except Exception:
         pass
 

@@ -638,6 +638,23 @@
       <h2>Past Sessions</h2>
       <button class="session-panel-close" onclick="toggleSessionBrowser()">&times;</button>
     </div>
+    <div style="display:flex;gap:8px;padding:8px;border-bottom:1px solid #222;align-items:center">
+      <input id="filterGame" type="text" placeholder="Game filter..." oninput="applySessionFilters()"
+        style="background:#1a1a24;border:1px solid #333;color:#ccc;padding:4px 8px;border-radius:4px;font-size:11px;width:120px;font-family:inherit">
+      <select id="filterResult" onchange="applySessionFilters()"
+        style="background:#1a1a24;border:1px solid #333;color:#ccc;padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
+        <option value="">All results</option>
+        <option value="WIN">WIN</option>
+        <option value="GAME_OVER">GAME_OVER</option>
+        <option value="NOT_FINISHED">NOT_FINISHED</option>
+        <option value="ERROR">ERROR</option>
+      </select>
+      <select id="filterModel" onchange="applySessionFilters()"
+        style="background:#1a1a24;border:1px solid #333;color:#ccc;padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
+        <option value="">All models</option>
+      </select>
+      <span id="sessionCount" style="font-size:10px;color:#555;margin-left:auto"></span>
+    </div>
     <div class="session-list-wrap">
       <table class="session-list">
         <thead>
@@ -1888,38 +1905,81 @@ function toggleSessionBrowser() {
   if (visible) fetchSessionList();
 }
 
+let allSessions = [];
+
 async function fetchSessionList() {
   try {
-    const r = await fetch('/api/sessions/list-for-obs');
-    if (!r.ok) return;
-    const data = await r.json();
-    const tbody = document.getElementById('sessionListBody');
-    if (!data.sessions || data.sessions.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#555;padding:20px">No sessions found</td></tr>';
-      return;
+    // Try both sources and merge (file-based + central DB)
+    const [fileRes, dbRes] = await Promise.allSettled([
+      fetch('/api/sessions/browse'),
+      fetch('/api/sessions/list-for-obs'),
+    ]);
+    const seen = new Set();
+    allSessions = [];
+    for (const res of [fileRes, dbRes]) {
+      if (res.status === 'fulfilled' && res.value.ok) {
+        const data = await res.value.json();
+        for (const s of (data.sessions || [])) {
+          if (!seen.has(s.id)) { seen.add(s.id); allSessions.push(s); }
+        }
+      }
     }
-    tbody.innerHTML = '';
-    for (const s of data.sessions) {
-      const tr = document.createElement('tr');
-      const result = (s.result || '').toUpperCase();
-      const badgeClass = result.includes('WON') || result.includes('WIN') || result.includes('COMPLETE') ? 'won'
-        : result.includes('LOST') || result.includes('FAIL') || result.includes('DEAD') ? 'lost' : 'other';
-      const date = s.created_at ? new Date(s.created_at * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '--';
-      const cost = s.total_cost ? '$' + s.total_cost.toFixed(3) : '--';
-      tr.innerHTML = `
-        <td style="color:#e0e0e0;font-weight:500">${escHtml(s.game_id || '')}</td>
-        <td>${escHtml((s.model || '').replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</td>
-        <td>${s.steps || 0}</td>
-        <td>${s.levels || 0}</td>
-        <td><span class="result-badge ${badgeClass}">${escHtml(s.result || 'N/A')}</span></td>
-        <td>${cost}</td>
-        <td style="color:#666">${date}</td>
-      `;
-      tr.addEventListener('click', () => loadSession(s.id, s.game_id));
-      tbody.appendChild(tr);
+    allSessions.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+    // Populate model filter dropdown
+    const models = [...new Set(allSessions.map(s => s.model).filter(Boolean))].sort();
+    const modelSelect = document.getElementById('filterModel');
+    const curModel = modelSelect.value;
+    modelSelect.innerHTML = '<option value="">All models</option>';
+    for (const m of models) {
+      modelSelect.innerHTML += `<option value="${escHtml(m)}">${escHtml(m.replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</option>`;
     }
+    modelSelect.value = curModel;
+
+    applySessionFilters();
   } catch (e) {
     console.error('Failed to fetch sessions:', e);
+  }
+}
+
+function applySessionFilters() {
+  const gameFilter = (document.getElementById('filterGame').value || '').toLowerCase();
+  const resultFilter = document.getElementById('filterResult').value;
+  const modelFilter = document.getElementById('filterModel').value;
+
+  const filtered = allSessions.filter(s => {
+    if (gameFilter && !(s.game_id || '').toLowerCase().includes(gameFilter)) return false;
+    if (resultFilter && s.result !== resultFilter) return false;
+    if (modelFilter && s.model !== modelFilter) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('sessionListBody');
+  document.getElementById('sessionCount').textContent = `${filtered.length} of ${allSessions.length}`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#555;padding:20px">No sessions found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  for (const s of filtered) {
+    const tr = document.createElement('tr');
+    const result = (s.result || '').toUpperCase();
+    const badgeClass = result.includes('WON') || result.includes('WIN') || result.includes('COMPLETE') ? 'won'
+      : result.includes('LOST') || result.includes('FAIL') || result.includes('DEAD') ? 'lost' : 'other';
+    const date = s.created_at ? new Date(s.created_at * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '--';
+    const cost = s.total_cost ? '$' + s.total_cost.toFixed(3) : '--';
+    tr.innerHTML = `
+      <td style="color:#e0e0e0;font-weight:500">${escHtml(s.game_id || '')}</td>
+      <td>${escHtml((s.model || '').replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</td>
+      <td>${s.steps || 0}</td>
+      <td>${s.levels || 0}</td>
+      <td><span class="result-badge ${badgeClass}">${escHtml(s.result || 'N/A')}</span></td>
+      <td>${cost}</td>
+      <td style="color:#666">${date}</td>
+    `;
+    tr.addEventListener('click', () => loadSession(s.id, s.game_id));
+    tbody.appendChild(tr);
   }
 }
 
