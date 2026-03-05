@@ -473,6 +473,20 @@
     max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
   .replay-branch-btn { margin-top: 6px; }
 
+  /* Live scrubber bar */
+  #liveScrubberBar { width: 100%; max-width: 520px; padding: 4px 12px; margin-top: 4px; }
+  .live-scrubber-row { display: flex; align-items: center; gap: 8px; }
+  .live-scrubber-label { font-size: 11px; color: var(--text-dim); font-weight: 600; white-space: nowrap; min-width: 80px; }
+  .live-scrubber-slider { flex: 1; cursor: pointer; accent-color: var(--accent); height: 4px; }
+  .live-scrubber-dot { font-size: 10px; font-weight: 700; white-space: nowrap; }
+  .live-scrubber-dot.is-live { color: var(--green); }
+  .live-scrubber-dot.is-historical { color: var(--text-dim); opacity: 0.5; }
+  .live-scrubber-banner { display: flex; align-items: center; justify-content: center; gap: 10px;
+    background: var(--yellow); color: #000; font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 4px; margin-top: 4px; }
+  .tl-step.tl-step-clickable { cursor: pointer; }
+  .tl-step.tl-step-clickable:hover { background: rgba(255,255,255,0.2); }
+
   /* Branch indicators */
   .history-item.branched { padding-left: 22px; }
   .history-item .branch-indicator { font-size: 10px; color: var(--purple); margin-right: 4px; }
@@ -886,6 +900,18 @@
           </div>
         </div>
         </div>
+        <!-- Live scrubber bar (shown during live gameplay) -->
+        <div id="liveScrubberBar" style="display:none;">
+          <div class="live-scrubber-row">
+            <span class="live-scrubber-label" id="liveScrubLabel">Step 0 / 0</span>
+            <input type="range" class="live-scrubber-slider" id="liveScrubSlider" min="0" max="0" value="0">
+            <span class="live-scrubber-dot" id="liveScrubDot" title="LIVE">&#9679; LIVE</span>
+          </div>
+          <div class="live-scrubber-banner" id="liveScrubBanner" style="display:none;">
+            <span id="liveScrubBannerText">Viewing step 0</span>
+            <button class="btn btn-step" onclick="liveScrubReturnToLive()" style="padding:2px 10px;font-size:11px;">&#9654; Return to Live</button>
+          </div>
+        </div>
         <!-- Transport controls (hidden until game loads) -->
         <div class="transport-strip" id="transportBar" style="display:none;">
           <div class="transport-bar">
@@ -1086,6 +1112,9 @@ let humanLocked = true;  // human controls locked by default
 let turnCounter = 0;     // monotonic turn counter for undo grouping
 let apiMode = 'local';
 const clientId = 'client_' + Math.random().toString(36).slice(2, 10);
+let _liveScrubMode = true;     // true = following live, false = viewing historical
+let _liveScrubViewIdx = -1;    // index into moveHistory being viewed
+let _liveScrubLiveGrid = null; // stashed live grid when viewing historical
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SCAFFOLDING SCHEMAS
@@ -3735,6 +3764,9 @@ async function startGame(gameId) {
   // Blink the Agent Autoplay button to guide the user
   const autoBtn = document.getElementById('autoPlayBtn');
   if (autoBtn) autoBtn.classList.add('btn-blink');
+
+  // Initialize live scrubber
+  initLiveScrubber();
 }
 
 function updateUI(data) {
@@ -3742,11 +3774,15 @@ function updateUI(data) {
   currentState = data;
   currentGrid = data.grid;
   currentChangeMap = data.change_map || null;
-  if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
+  // If viewing historical step, stash the new live grid but don't render it
+  if (!_liveScrubMode) {
+    _liveScrubLiveGrid = data.grid;
+  } else if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
     renderGridWithChanges(data.grid, currentChangeMap);
   } else {
     renderGrid(data.grid);
   }
+  liveScrubUpdate();
   const titleEl = document.getElementById('gameTitle');
   titleEl.textContent = gameShortName(data.game_id) || 'Game';
   // Show "Local" badge when running via Pyodide
@@ -4814,6 +4850,17 @@ function renderTimelineTree(container, asEvents, allEvents) {
     const el = e.target.closest('[data-event-idx]');
     if (el && tooltip) tooltip.classList.remove('visible');
   });
+  // Click to scrub to that step
+  svgEl.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-event-idx]');
+    if (!el) return;
+    const idx = parseInt(el.getAttribute('data-event-idx'));
+    const ev = asEvents[idx];
+    if (ev && ev.step_num != null) {
+      liveScrubToStep(ev.step_num);
+    }
+  });
+  svgEl.style.cursor = 'pointer';
 }
 
 function _updateAsTransform(svg, container) {
@@ -4874,7 +4921,7 @@ function renderTimeline(ss) {
         const stepParts = ev.actions.map((a, i) => {
           const stepNum = (ev.stepStart || 0) + i;
           const name = ACTION_NAMES[a] || `A${a}`;
-          return `<span class="tl-step">${stepNum}:${name}</span>`;
+          return `<span class="tl-step tl-step-clickable" onclick="event.stopPropagation();liveScrubToStep(${stepNum})">${stepNum}:${name}</span>`;
         });
         stepsHtml = `<span class="tl-steps">${stepParts.join(' ')}</span>`;
       }
@@ -7008,6 +7055,7 @@ function buildRlmUserContinue(planHorizon) {
 }
 
 function _rlmFindFinal(text) {
+  if (typeof text !== 'string') return null;
   // Strip code blocks before checking for FINAL
   const stripped = text.replace(/```repl\s*\n[\s\S]*?\n```/g, '');
   // Check for FINAL(...)
@@ -7017,6 +7065,7 @@ function _rlmFindFinal(text) {
 }
 
 function _extractJsonFromText(text) {
+  if (typeof text !== 'string') text = JSON.stringify(text);
   // Balanced-brace JSON extraction (same logic as parseClientLLMResponse)
   const cleaned = text.replace(/^\s*\/\/.*$/gm, '');
   for (let i = 0; i < cleaned.length; i++) {
@@ -9197,6 +9246,7 @@ async function loadReplay(sid) {
     bar.style.display = 'block';
     document.getElementById('controls').style.display = 'none';
     document.getElementById('transportBar').style.display = 'none';
+    hideLiveScrubber();
 
     const scrubber = document.getElementById('replayScrubber');
     const totalSteps = data.steps?.length || 0;
@@ -9294,7 +9344,132 @@ function closeReplay() {
     document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
     if (currentGrid) renderGrid(currentGrid);
+    initLiveScrubber();
+    liveScrubUpdate();
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE SCRUBBER
+// ═══════════════════════════════════════════════════════════════════════════
+
+function initLiveScrubber() {
+  const bar = document.getElementById('liveScrubberBar');
+  if (!bar) return;
+  bar.style.display = 'block';
+  _liveScrubMode = true;
+  _liveScrubViewIdx = -1;
+  _liveScrubLiveGrid = null;
+  const slider = document.getElementById('liveScrubSlider');
+  slider.value = 0; slider.max = 0;
+  document.getElementById('liveScrubLabel').textContent = 'Step 0 / 0';
+  const dot = document.getElementById('liveScrubDot');
+  dot.className = 'live-scrubber-dot is-live';
+  dot.innerHTML = '&#9679; LIVE';
+  document.getElementById('liveScrubBanner').style.display = 'none';
+
+  // Bind slider events
+  slider.oninput = function() {
+    const idx = parseInt(this.value);
+    if (idx >= moveHistory.length) {
+      liveScrubReturnToLive();
+    } else {
+      liveScrubShow(idx);
+    }
+  };
+}
+
+function liveScrubUpdate() {
+  const bar = document.getElementById('liveScrubberBar');
+  if (!bar || bar.style.display === 'none') return;
+  const slider = document.getElementById('liveScrubSlider');
+  const total = moveHistory.length;
+  slider.max = Math.max(0, total - 1);
+  if (_liveScrubMode) {
+    slider.value = Math.max(0, total - 1);
+    document.getElementById('liveScrubLabel').textContent = `Step ${total} / ${total}`;
+  } else {
+    const viewStep = _liveScrubViewIdx + 1;
+    document.getElementById('liveScrubLabel').textContent = `Step ${viewStep} / ${total}`;
+  }
+}
+
+function liveScrubShow(idx) {
+  if (idx < 0 || idx >= moveHistory.length) return;
+  _liveScrubViewIdx = idx;
+  // Stash the live grid on first historical view
+  if (_liveScrubMode) {
+    _liveScrubLiveGrid = currentGrid;
+  }
+  _liveScrubMode = false;
+  const entry = moveHistory[idx];
+  if (entry && entry.grid) {
+    _renderGridPreview(entry.grid);
+  }
+  // Update slider position
+  const slider = document.getElementById('liveScrubSlider');
+  slider.value = idx;
+  // Update label
+  document.getElementById('liveScrubLabel').textContent = `Step ${idx + 1} / ${moveHistory.length}`;
+  // Show banner
+  const banner = document.getElementById('liveScrubBanner');
+  banner.style.display = 'flex';
+  document.getElementById('liveScrubBannerText').textContent = `Viewing step ${idx + 1}`;
+  // Update dot
+  const dot = document.getElementById('liveScrubDot');
+  dot.className = 'live-scrubber-dot is-historical';
+  dot.innerHTML = '&#9679; PAUSED';
+}
+
+function liveScrubReturnToLive() {
+  _liveScrubMode = true;
+  _liveScrubViewIdx = -1;
+  // Restore the live grid
+  if (_liveScrubLiveGrid) {
+    renderGrid(_liveScrubLiveGrid);
+    _liveScrubLiveGrid = null;
+  } else if (currentGrid) {
+    renderGrid(currentGrid);
+  }
+  // Hide banner
+  document.getElementById('liveScrubBanner').style.display = 'none';
+  // Update dot
+  const dot = document.getElementById('liveScrubDot');
+  dot.className = 'live-scrubber-dot is-live';
+  dot.innerHTML = '&#9679; LIVE';
+  // Snap slider to end
+  liveScrubUpdate();
+}
+
+function liveScrubToStep(stepNum) {
+  // Map step number to moveHistory index
+  const idx = moveHistory.findIndex(m => m.step === stepNum);
+  if (idx >= 0) {
+    liveScrubShow(idx);
+  }
+}
+
+function hideLiveScrubber() {
+  const bar = document.getElementById('liveScrubberBar');
+  if (bar) bar.style.display = 'none';
+  _liveScrubMode = true;
+  _liveScrubViewIdx = -1;
+  _liveScrubLiveGrid = null;
+}
+
+function _renderGridPreview(grid) {
+  if (!grid || !grid.length) return;
+  const h = grid.length, w = grid[0].length;
+  const scale = Math.floor(512 / Math.max(h, w));
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      ctx.fillStyle = COLORS[grid[y][x]] || '#000';
+      ctx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  }
+  // Note: does NOT set currentGrid — that stays at the live value
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9910,6 +10085,8 @@ async function resumeSession(sid) {
     canvas.style.display = 'block';
     document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
+    initLiveScrubber();
+    liveScrubUpdate();
 
     // Highlight the matching game card in the sidebar
     if (data.game_id) {
@@ -10157,6 +10334,7 @@ async function branchHere() {
     document.getElementById('replayReasoningPanel').style.display = 'none';
     document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
+    initLiveScrubber();
 
     updateUI(data);
     updateUndoBtn();
@@ -10659,6 +10837,7 @@ function resetGlobalsToBlank() {
   _compactSummaryAtCall = 0;
   _compactSummaryAtStep = 0;
   _lastCompactPrompt = '';
+  hideLiveScrubber();
 }
 
 function createNewSession() {
