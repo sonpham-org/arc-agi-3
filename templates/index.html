@@ -11628,7 +11628,9 @@ let _obsScrubIdx = -1;  // index into moveHistory
 function obsScrubUpdate() {
   const slider = document.getElementById('obsScrubSlider');
   if (!slider) return;
-  const total = moveHistory.length;
+  let hist = moveHistory;
+  if ((!hist || !hist.length) && getActiveSession()) hist = getActiveSession().moveHistory || [];
+  const total = hist.length;
   slider.max = Math.max(0, total - 1);
   if (_obsScrubLive) {
     slider.value = Math.max(0, total - 1);
@@ -11643,16 +11645,34 @@ function obsScrubUpdate() {
 }
 
 function obsScrubShow(idx) {
-  if (idx < 0 || idx >= moveHistory.length) return;
+  // Resolve moveHistory from active session if global is empty
+  let hist = moveHistory;
+  if ((!hist || !hist.length) && getActiveSession()) hist = getActiveSession().moveHistory || [];
+  if (idx < 0 || idx >= hist.length) return;
   _obsScrubIdx = idx;
   _obsScrubLive = false;
-  const entry = moveHistory[idx];
+  const entry = hist[idx];
   if (entry && entry.grid) {
-    _renderGridPreview(entry.grid);
+    // Render directly to the game canvas (which is inside obsCanvasHost)
+    const c = document.getElementById('gameCanvas');
+    if (c) {
+      const cCtx = c.getContext('2d');
+      const grid = entry.grid;
+      const h = grid.length, w = grid[0].length;
+      const scale = Math.floor(512 / Math.max(h, w));
+      c.width = w * scale;
+      c.height = h * scale;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          cCtx.fillStyle = COLORS[grid[y][x]] || '#000';
+          cCtx.fillRect(x * scale, y * scale, scale, scale);
+        }
+      }
+    }
   }
   const slider = document.getElementById('obsScrubSlider');
   slider.value = idx;
-  document.getElementById('obsScrubLbl').textContent = `Step ${idx + 1} / ${moveHistory.length}`;
+  document.getElementById('obsScrubLbl').textContent = `Step ${idx + 1} / ${hist.length}`;
   const banner = document.getElementById('obsScrubBanner');
   banner.style.display = 'flex';
   document.getElementById('obsScrubBannerText').textContent = `Viewing step ${idx + 1}`;
@@ -11672,7 +11692,9 @@ function obsScrubReturnToLive() {
 // Bind slider
 document.getElementById('obsScrubSlider').oninput = function() {
   const idx = parseInt(this.value);
-  if (idx >= moveHistory.length - 1) {
+  let hist = moveHistory;
+  if ((!hist || !hist.length) && getActiveSession()) hist = getActiveSession().moveHistory || [];
+  if (idx >= hist.length - 1) {
     obsScrubReturnToLive();
   } else {
     obsScrubShow(idx);
