@@ -119,6 +119,7 @@
   }
   .grid-canvas-wrap {
     flex: 1;
+    min-height: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -496,7 +497,7 @@
   }
 
   /* ── Observatory scrubber ── */
-  .obs-scrubber { padding: 4px 12px 8px; }
+  .obs-scrubber { padding: 4px 12px 8px; flex-shrink: 0; }
   .obs-scrubber-row { display: flex; align-items: center; gap: 8px; }
   .obs-scrubber-label { font-size: 11px; color: #888; font-weight: 600; white-space: nowrap; min-width: 80px; }
   .obs-scrubber-slider { flex: 1; cursor: pointer; accent-color: #3b82f6; height: 4px; }
