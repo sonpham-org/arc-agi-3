@@ -199,7 +199,7 @@ def load_config(path: Path | None = None) -> dict:
     cfg = _DEFAULT_CONFIG
     resolved = path or (ROOT / "config.yaml")
     if resolved.exists():
-        with open(resolved) as f:
+        with open(resolved, encoding="utf-8") as f:
             file_cfg = yaml.safe_load(f) or {}
         cfg = _deep_merge(cfg, file_cfg)
     return cfg

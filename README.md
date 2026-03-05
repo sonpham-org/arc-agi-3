@@ -190,6 +190,30 @@ arc-agi-3/
 
 ---
 
+## Developer Tools
+
+### pi01 Level Selector
+
+**pi01** is the pirate ship game with 9 levels.
+
+While playing pi01 in the web UI, press **Shift+D** to open the dev level selector panel (bottom-right corner). Click any button to jump directly to that level:
+
+| Button | Level Name |
+|--------|-----------|
+| L1 | Caribbean Cove |
+| L2 | Skull Shoals |
+| L3 | Dragon's Lair |
+| L4 | Stormy Waters |
+| L5 | Kraken's Hunt |
+| L6 | Sentinel Straits |
+| L7 | Hunter's Web |
+| L8 | Fog of War |
+| L9 | Key & Switch |
+
+The panel uses the server endpoint `POST /api/dev/jump-level` with the secret header `X-Dev-Secret: arc-dev-2026`.
+
+---
+
 ## License
 
 Uses [arc-agi](https://pypi.org/project/arc-agi/) and [arcengine](https://pypi.org/project/arcengine/) from ARC Prize.

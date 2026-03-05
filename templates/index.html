@@ -2954,6 +2954,39 @@ json.dumps({
         }
         return;
       }
+
+      if (msg.type === 'jump_level') {
+        try {
+          const {level, id} = msg;
+          pyodide.globals.set('_target_level', level);
+          pyodide.runPython(\`
+from arcengine import GameState
+_game_instance._levels[_target_level] = _game_instance._clean_levels[_target_level].clone()
+_game_instance.set_level(_target_level)
+_game_instance._score = _target_level
+_game_instance._state = GameState.NOT_FINISHED
+_frame = _game_instance.camera.render(_game_instance.current_level.get_sprites())
+_undo_stack = []
+\`);
+          const stateJson = pyodide.runPython(\`
+import json
+_avail = list(_game_instance._available_actions)
+json.dumps({
+    "grid": _frame.tolist(),
+    "state": _game_instance._state.value if hasattr(_game_instance._state, "value") else str(_game_instance._state),
+    "levels_completed": _game_instance._score,
+    "win_levels": _game_instance._win_score,
+    "available_actions": _avail,
+    "game_id": _game_instance._game_id,
+    "undo_depth": 0,
+})
+\`);
+          self.postMessage({type: 'jump_level_result', id, state: JSON.parse(stateJson)});
+        } catch (err) {
+          self.postMessage({type: 'error', id: msg.id, error: err.message});
+        }
+        return;
+      }
     };
   `;
   const blob = new Blob([workerSrc], {type: 'application/javascript'});
@@ -2974,7 +3007,7 @@ json.dumps({
       console.error('[PyodideGame] Error:', error);
       const cb = _pyodideGamePending.get(id);
       if (cb) { cb.reject(new Error(error)); _pyodideGamePending.delete(id); }
-    } else if (type === 'game_loaded' || type === 'step_result' || type === 'reset_result' || type === 'undo_result') {
+    } else if (type === 'game_loaded' || type === 'step_result' || type === 'reset_result' || type === 'undo_result' || type === 'jump_level_result') {
       const cb = _pyodideGamePending.get(id);
       if (cb) { cb.resolve(state); _pyodideGamePending.delete(id); }
     }
@@ -11788,6 +11821,63 @@ async function syncObsEvents(ss) {
     console.warn('[obsSync] Failed:', e);
   }
 }
+</script>
+
+<!-- Dev panel JS -->
+<script>
+const DEV_SECRET = 'arc-dev-2026';
+
+function openDevPanel() {
+  const panel = document.getElementById('devPanel');
+  const btns  = document.getElementById('devLevelBtns');
+  btns.innerHTML = '';
+  const total = (currentState && currentState.win_levels) || 9;
+  for (let i = 0; i < total; i++) {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.style.cssText = 'font-size:10px;padding:2px 10px;';
+    b.textContent = 'L' + (i + 1);
+    b.onclick = () => devJumpLevel(i);
+    btns.appendChild(b);
+  }
+  panel.style.display = 'block';
+}
+
+async function devJumpLevel(levelIndex) {
+  if (!sessionId) { alert('[DEV] No active session — start a game first'); return; }
+  try {
+    // Pyodide mode: game runs in browser worker
+    if (_pyodideGameActive) {
+      const prevGrid = currentState && currentState.grid;
+      const state = await _sendGameWorkerMsg({type: 'jump_level', level: levelIndex});
+      state.change_map = computeChangeMapJS(prevGrid, state.grid);
+      state.session_id = sessionId;
+      state.action_labels = {};
+      (state.available_actions || []).forEach(a => {
+        const names = {0:'RESET',1:'ACTION1',2:'ACTION2',3:'ACTION3',4:'ACTION4',5:'ACTION5',6:'ACTION6',7:'ACTION7'};
+        state.action_labels[a] = names[a] || 'ACTION' + a;
+      });
+      updateUI(state);
+      return;
+    }
+    // Server mode
+    const resp = await fetch('/api/dev/jump-level', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Dev-Secret': DEV_SECRET },
+      body: JSON.stringify({ session_id: sessionId, level: levelIndex }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert('[DEV] ' + (data.error || 'Failed')); return; }
+    updateUI(data);
+  } catch (e) {
+    alert('[DEV] Error: ' + e.message);
+  }
+}
+
+// Shift+D to toggle dev panel
+document.addEventListener('keydown', e => {
+  if (e.shiftKey && e.key.toUpperCase() === 'D') openDevPanel();
+});
 </script>
 
 <!-- Dev panel (developer-only level selector) -->
