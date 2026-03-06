@@ -300,7 +300,8 @@
   .obs-right h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
     padding: 8px 12px 4px; }
   .obs-right .obs-grid-info { font-size: 10px; color: var(--text-dim); padding: 0 12px 6px; }
-  .obs-right .obs-canvas-wrap { flex: 0 0 auto; max-height: 40vh; display: flex; align-items: center; justify-content: center; padding: 8px; }
+  .obs-right .obs-canvas-wrap { flex: 0 0 auto; max-height: 30vh; display: flex; align-items: center; justify-content: center; padding: 8px; }
+  .obs-right .obs-canvas-wrap canvas { max-width: 50%; max-height: 100%; }
   .obs-reasoning-wrap { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid var(--border); padding: 8px 12px; }
   .obs-reasoning-wrap h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px; }
   .obs-reasoning-wrap .reasoning-entry { font-size: 11px; }
@@ -11259,6 +11260,11 @@ function switchSession(targetId) {
   // If this is a restored stub (no grid data), resume from server
   if (!target.currentGrid && target.sessionId && !target.sessionId.startsWith('pending_')) {
     resumeSession(target.sessionId);
+  }
+
+  // If target session is in obs/autoplay mode, re-enter observatory view
+  if (target.autoPlaying || document.getElementById('obsScreen')?.style.display === 'flex') {
+    enterObsMode(target);
   }
 }
 
