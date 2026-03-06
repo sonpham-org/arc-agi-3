@@ -2539,6 +2539,8 @@ def import_session():
              sess.get("levels", 0), sess.get("parent_session_id"),
              sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
         )
+        llm_count = sum(1 for s in steps if s.get("llm_response"))
+        app.logger.info(f"[import] session={sess['id'][:30]} steps={len(steps)} with_llm={llm_count}")
         for s in steps:
             grid_snapshot = None
             if s.get("grid"):
@@ -2555,7 +2557,8 @@ def import_session():
                  json.dumps(s.get("llm_response")) if s.get("llm_response") else None,
                  s.get("timestamp", time.time())),
             )
-        # Extract timeline events into llm_calls rows
+        # Extract timeline events into llm_calls rows (delete existing to avoid duplicates on re-upload)
+        conn.execute("DELETE FROM llm_calls WHERE session_id = ?", (sess["id"],))
         calls_imported = 0
         timeline = sess.get("timeline") or []
         if isinstance(timeline, str):
@@ -2648,7 +2651,7 @@ def resume_session():
     try:
         conn = _get_db()
         sess = conn.execute(
-            "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+            "SELECT game_id, model, parent_session_id, branch_at_step, timeline_json FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         if sess:
@@ -2728,6 +2731,13 @@ def resume_session():
             s["levels_completed"] = per_step_states[i]["levels_completed"]
     state["steps"] = step_list
     state["model"] = sess["model"] or ""
+    # Include timeline events for obs reconstruction
+    tl_raw = sess.get("timeline_json")
+    if tl_raw:
+        try:
+            state["timeline"] = json.loads(tl_raw) if isinstance(tl_raw, str) else tl_raw
+        except Exception:
+            state["timeline"] = []
     return jsonify(state)
 
 

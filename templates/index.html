@@ -300,9 +300,17 @@
   .obs-right h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
     padding: 8px 12px 4px; }
   .obs-right .obs-grid-info { font-size: 10px; color: var(--text-dim); padding: 0 12px 6px; }
-  .obs-right .obs-canvas-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px; }
+  .obs-right .obs-canvas-wrap { flex: 0 0 auto; max-height: 40vh; display: flex; align-items: center; justify-content: center; padding: 8px; }
+  .obs-reasoning-wrap { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid var(--border); padding: 8px 12px; }
+  .obs-reasoning-wrap h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px; }
+  .obs-reasoning-wrap .reasoning-entry { font-size: 11px; }
   .obs-right .obs-transport { padding: 8px 12px; border-top: 1px solid var(--border);
-    display: flex; gap: 8px; align-items: center; justify-content: center; }
+    display: flex; gap: 4px; align-items: center; justify-content: center; }
+  .obs-right .obs-transport .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+    padding: 7px 6px; font-size: 11px; font-weight: 600;
+    border-color: var(--accent); color: var(--accent); background: var(--surface); }
+  .obs-right .obs-transport .btn:hover { background: #58a6ff22; }
+  tr.obs-highlight { background: #58a6ff22 !important; }
 
   .obs-status-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -440,6 +448,10 @@
 
   .step-counter { color: var(--text-dim); }
   .level-info { color: var(--yellow); }
+  .upload-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; line-height: 1.4; }
+  .upload-badge.is-local { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
+  .upload-badge.is-synced { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+  .upload-badge.is-partial { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
 
   /* Disabled overlay for image toggle */
   .opt-row.disabled { opacity: 0.35; pointer-events: none; }
@@ -733,6 +745,16 @@
     <span class="nav-link active" onclick="showAppView('play')">Play</span>
     <span class="nav-link" onclick="showAppView('browse')">Browse Sessions</span>
     <span style="flex:1;"></span>
+    <button id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;" onclick="showLoginModal()">Log in</button>
+    <div id="userBadge" style="display:none;position:relative;">
+      <button class="btn" style="font-size:11px;padding:2px 10px;" onclick="toggleUserMenu()">
+        <span id="userBadgeLabel"></span> ▾
+      </button>
+      <div id="userMenu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 0;min-width:140px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+        <div style="padding:6px 12px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border);" id="userMenuEmail"></div>
+        <button style="display:block;width:100%;text-align:left;padding:6px 12px;background:none;border:none;color:var(--red);cursor:pointer;font-family:inherit;font-size:12px;" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
     <button id="themeToggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:6px;line-height:1;" title="Toggle light/dark mode"></button>
   </div>
   <!-- ── Session tab bar ─────────────────────────────────────────────── -->
@@ -810,18 +832,9 @@
       <span id="gameStatus" class="status status-NOT_PLAYED">—</span>
       <span id="levelInfo" class="level-info"></span>
       <span id="stepCounter" class="step-counter"></span>
+      <span id="uploadBadge" class="upload-badge" style="display:none;"></span>
       <button id="shareBtn" class="btn" style="display:none;font-size:11px;padding:2px 8px;" onclick="shareCurrentSession()">Share</button>
       <span style="flex:1;"></span>
-      <button id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;" onclick="showLoginModal()">Log in</button>
-      <div id="userBadge" style="display:none;position:relative;">
-        <button class="btn" style="font-size:11px;padding:2px 10px;" onclick="toggleUserMenu()">
-          <span id="userBadgeLabel"></span> ▾
-        </button>
-        <div id="userMenu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 0;min-width:140px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
-          <div style="padding:6px 12px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border);" id="userMenuEmail"></div>
-          <button style="display:block;width:100%;text-align:left;padding:6px 12px;background:none;border:none;color:var(--red);cursor:pointer;font-family:inherit;font-size:12px;" onclick="doLogout()">Log out</button>
-        </div>
-      </div>
       <span id="topSpinner" style="display:none;"><span class="spinner"></span></span>
     </div>
 
@@ -928,15 +941,15 @@
             <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
               onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
               onmouseleave="clearTransportDesc()">&#187; Agent Autoplay</button>
-            <button class="btn" onclick="stepOnce()" id="stepBtn"
-              onmouseenter="showTransportDesc('Call the agent once')"
-              onmouseleave="clearTransportDesc()">&#9654; Agent Once</button>
             <button class="btn" onclick="undoStep()" id="undoBtn" disabled
               onmouseenter="showTransportDesc('Undo last turn')"
               onmouseleave="clearTransportDesc()">&#9198; Undo</button>
             <button class="btn" onclick="resetSession()" id="resetBtn"
               onmouseenter="showTransportDesc('Restart the current game from scratch')"
               onmouseleave="clearTransportDesc()">&#8635; Restart</button>
+            <button class="btn" id="backToObsBtn" onclick="enterObsMode()" style="display:none;"
+              onmouseenter="showTransportDesc('Return to the observatory view')"
+              onmouseleave="clearTransportDesc()">&#128300; Observatory</button>
           </div>
           <div class="transport-desc" id="transportDesc"></div>
         </div>
@@ -1089,9 +1102,13 @@
             <button class="btn btn-step" onclick="obsScrubReturnToLive()" style="padding:2px 10px;font-size:11px;">&#9654; Return to Live</button>
           </div>
         </div>
+        <div class="obs-reasoning-wrap">
+          <h3>Reasoning Log</h3>
+          <div id="obsReasoningContent"></div>
+        </div>
         <div class="obs-transport">
-          <button class="btn" id="obsPauseBtn" onclick="toggleAutoPlay()">Pause</button>
-          <button class="btn" id="obsBackBtn" onclick="exitObsMode()">Back to Settings</button>
+          <button class="btn" id="obsPauseBtn" onclick="toggleAutoPlay()">&#187; Resume</button>
+          <button class="btn" id="obsBackBtn" onclick="exitObsMode()">&#9881; Settings</button>
         </div>
       </div>
     </div>
@@ -2321,6 +2338,10 @@ class SessionState {
     // Detach/attach: per-session DOM + settings snapshot
     this._viewEl = null;       // Detached DOM element for this session
     this._settings = null;     // Snapshot of DOM settings for background reads
+    // Original settings from when this session was created/resumed (for branch-on-change detection)
+    this._originalSettings = null;  // { model, scaffolding_type }
+    // Upload tracking
+    this._lastUploadedStep = 0;  // last step successfully uploaded to server
   }
   get avgCallDuration() {
     if (!this.callDurations.length) return 5000; // default 5s
@@ -2481,6 +2502,7 @@ function restoreSessionFromState(s) {
   document.getElementById('levelInfo').textContent = currentState.levels_completed !== undefined
     ? `Level ${currentState.levels_completed}/${currentState.win_levels || '?'}` : '';
   document.getElementById('stepCounter').textContent = stepCount ? `Step ${stepCount}` : '';
+  updateUploadBadge();
   updateUndoBtn();
   updateAutoBtn();
   updatePanelBlur();
@@ -5413,7 +5435,42 @@ function buildReasoningGroupHTML(g, gi, options) {
       + obsHtml + planHtml + orchHtml + subHtml
       + '</div>';
   } else if (g.type === 'llm' && g.llm && g.llm.parsed) {
-    // Human action
+    // Standard LLM response (linear scaffolding or enriched agent spawn steps)
+    var llm = g.llm;
+    var p = llm.parsed;
+    var firstStep = g.steps[0].step_num;
+    var lastStep = g.steps[g.steps.length - 1].step_num;
+    var stepLabel = g.steps.length > 1 ? 'Steps ' + firstStep + '\u2013' + lastStep : 'Step ' + firstStep;
+    var durationHtml = llm.call_duration_ms
+      ? '<span style="font-size:10px;color:var(--dim);margin-left:6px;">' + (llm.call_duration_ms / 1000).toFixed(1) + 's</span>' : '';
+    var scaffLabel = llm.scaffolding === 'agent_spawn' ? '<span class="tools-badge" style="background:#ff8b3d33;color:var(--orange);">AGENT</span>' : '';
+    var modelLabel = llm.model || defaultModel;
+    var cellHtml2 = cellChanges > 0 ? ' | ' + cellChanges + ' cells changed' : '';
+
+    // Plan steps display
+    var planSteps = (p.plan && Array.isArray(p.plan)) ? p.plan : [{ action: p.action, data: p.data || {} }];
+    var planHtml = planSteps.map(function(ps, i) {
+      var aName2 = ACTION_NAMES[ps.action] || ('ACTION' + ps.action);
+      var dataStr2 = (ps.data && ps.data.x !== undefined) ? ' (' + ps.data.x + ',' + ps.data.y + ')' : '';
+      var done = !isReplay && i < g.steps.length;
+      var cls = done ? 'plan-step done' : 'plan-step';
+      var btnStyle = done ? ' style="background:var(--green);color:#000;border-color:var(--green);"' : '';
+      return '<div class="' + cls + '" data-plan-idx="' + i + '">' + (i + 1) + '. <span class="action-btn"' + btnStyle + '>' + aName2 + '</span>' + dataStr2 + '</div>';
+    }).join('');
+
+    var branchBtn2 = showBranchBtn
+      ? '<button class="branch-btn" onclick="branchFromStep(' + lastStep + ')" title="Branch from step ' + lastStep + '">&#8627; branch</button>' : '';
+
+    return '<div class="reasoning-entry" data-group="' + gi + '" data-step-nums="' + stepNums + '"' + entryStyle + '>'
+      + branchBtn2
+      + '<div class="step-label">' + stepLabel + ' \u2014 ' + modelLabel + durationHtml + scaffLabel + levelBadge + tag + '</div>'
+      + (p.observation ? '<div class="observation"><strong>Obs:</strong> ' + esc(p.observation) + '</div>' : '')
+      + (p.reasoning ? '<div style="margin-top:4px;"><strong>Reasoning:</strong> ' + esc(p.reasoning) + '</div>' : '')
+      + (cellHtml2 ? '<div style="font-size:11px;color:var(--yellow);">' + cellHtml2 + '</div>' : '')
+      + '<div class="plan-progress">' + planHtml + '</div>'
+      + '</div>';
+  } else if (g.type === 'human') {
+    // Human / manual action (no LLM response)
     var s = g.steps[0];
     var aName = ACTION_NAMES[s.action] || ('ACTION' + s.action);
     var coordStr = (s.data && s.data.x !== undefined) ? ' (' + s.data.x + ',' + s.data.y + ')' : '';
@@ -6542,10 +6599,46 @@ async function toggleAutoPlay() {
     renderSessionTabs();
     // Update obs pause button text
     const _obsPB = document.getElementById('obsPauseBtn');
-    if (_obsPB) _obsPB.textContent = 'Resume';
+    if (_obsPB) _obsPB.innerHTML = '\u00BB Resume';
     return;
   }
   if (!sessionId) { alert('Start a game first'); return; }
+  if (currentState.state !== 'NOT_FINISHED') return;
+
+  // ── Branch-on-settings-change: if resumed session has different settings, auto-branch ──
+  if (ss && ss._originalSettings && ss.stepCount > 0) {
+    const curModel = getSelectedModel();
+    const curScaff = activeScaffoldingType;
+    const orig = ss._originalSettings;
+    if ((curModel && orig.model && curModel !== orig.model) || (curScaff !== orig.scaffolding_type)) {
+      const changes = [];
+      if (curModel !== orig.model) changes.push(`model: ${orig.model} → ${curModel}`);
+      if (curScaff !== orig.scaffolding_type) changes.push(`scaffolding: ${orig.scaffolding_type} → ${curScaff}`);
+      if (!confirm(`Settings changed (${changes.join(', ')}).\nThis will create a branch from step ${ss.stepCount}. Continue?`)) return;
+      // Auto-branch at current step
+      try {
+        const branchData = await fetchJSON('/api/sessions/branch', {
+          parent_session_id: sessionId,
+          step_num: ss.stepCount,
+        });
+        if (branchData.error) { alert(branchData.error); return; }
+        // Switch to the new branch session
+        const oldSid = ss.sessionId;
+        sessionId = branchData.session_id;
+        ss.sessionId = branchData.session_id;
+        ss._originalSettings = { model: curModel, scaffolding_type: curScaff };
+        ss.undoStack = [];
+        ss.syncStepCounter = 0;
+        activeSessionId = branchData.session_id;
+        // Re-register under new id
+        sessions.delete(oldSid);
+        sessions.set(branchData.session_id, ss);
+        saveSessionIndex();
+        renderSessionTabs();
+        logSessionEvent('branched_settings', ss.stepCount, { from: orig, to: { model: curModel, scaffolding_type: curScaff } });
+      } catch (e) { alert('Branch failed: ' + e.message); return; }
+    }
+  }
 
   // Stop the blink guide
   const autoBtn = document.getElementById('autoPlayBtn');
@@ -6558,6 +6651,11 @@ async function toggleAutoPlay() {
   updateAutoBtn();
   if (ss) {
     ss.autoPlaying = true;
+    ss._obsResumedAt = performance.now();
+    // Start elapsed timer if not already running
+    if (!_obsElapsedTimer) {
+      _obsElapsedTimer = setInterval(() => updateObsElapsed(ss), 1000);
+    }
     // Generate session tab name on first autoplay: game - model - random
     if (!ss.tabLabel) {
       const model = (getSelectedModel() || 'agent').split('/').pop().split('-').slice(0, 2).join('-');
@@ -8086,7 +8184,7 @@ async function askLLMThreeSystem(_cur, model, modelInfo, waitEl, isActiveFn, his
 
 // ── Step 1: Per-step execution helper ────────────────────────────────────
 
-async function _asExecuteOneStep(actionId, actionData, reasoning, agentType, _cur, isActiveFn) {
+async function _asExecuteOneStep(actionId, actionData, reasoning, agentType, _cur, isActiveFn, llmMeta) {
   // Push undo snapshot
   const currentTurnId = _cur.turnCounter;
   _cur.undoStack.push({
@@ -8131,8 +8229,14 @@ async function _asExecuteOneStep(actionId, actionData, reasoning, agentType, _cu
     reasoning: reasoning || '',
   });
 
-  // Record for persistence
-  recordStepForPersistence(actionId, actionData || {}, data.grid, changeMap, null, _cur,
+  // Record for persistence — include subagent LLM metadata so reasoning is available on resume
+  const _stepLlm = {
+    parsed: { observation: `[${agentType}] ${reasoning || ''}`, reasoning: reasoning || '', action: actionId, data: actionData || {} },
+    model: llmMeta?.model || '', scaffolding: 'agent_spawn',
+    usage: llmMeta?.usage || null,
+    call_duration_ms: llmMeta?.call_duration_ms || null,
+  };
+  recordStepForPersistence(actionId, actionData || {}, data.grid, changeMap, _stepLlm, _cur,
     { levels_completed: data.levels_completed, result_state: data.state });
 
   // Update UI if active
@@ -8801,7 +8905,8 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
 
           // Execute the step and SEE the result
           const stepResult = await _asExecuteOneStep(
-            actionId, subParsed.data || {}, subParsed.reasoning || '', agentType, _cur, isActiveFn
+            actionId, subParsed.data || {}, subParsed.reasoning || '', agentType, _cur, isActiveFn,
+            { model: subModel, usage: subUsage }
           );
 
           if (stepResult.error) {
@@ -9413,7 +9518,8 @@ function closeReplay() {
 function initLiveScrubber() {
   const bar = document.getElementById('liveScrubberBar');
   if (!bar) return;
-  bar.style.display = 'block';
+  // Live scrubber is only used for internal state tracking, not shown in settings view
+  bar.style.display = 'none';
   _liveScrubMode = true;
   _liveScrubViewIdx = -1;
   _liveScrubLiveGrid = null;
@@ -9645,6 +9751,7 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
   _ss.syncStepCounter++;
   if (!ss) { syncStepCounter = _ss.syncStepCounter; }
   updateShareBtnVisibility();
+  updateUploadBadge();
 
   // Save to localStorage periodically (online mode or Pyodide — per-user local history)
   if ((MODE === 'prod' || _pyodideGameActive) && (_ss.syncStepCounter % 5 === 0 || _ss.stepCount <= 1)) {
@@ -9664,14 +9771,14 @@ function recordStepForPersistence(actionId, actionData, grid, changeMap, llmResp
   if (_ss.syncStepCounter >= 30) {
     _ss.syncStepCounter = 0;
     if (!ss) syncStepCounter = 0;
-    autoUploadSession();
+    autoUploadSession(ss || getActiveSession());
   }
 }
 
 const MIN_STEPS_FOR_UPLOAD = 5;
 
-async function autoUploadSession() {
-  const payload = buildSessionPayload();
+async function autoUploadSession(ss) {
+  const payload = buildSessionPayload(ss || getActiveSession());
   if (!payload) return;
   // Always save to localStorage as backup (even below server threshold)
   if (payload.session && payload.steps?.length > 0) {
@@ -9679,11 +9786,17 @@ async function autoUploadSession() {
   }
   if ((payload.steps || []).length < MIN_STEPS_FOR_UPLOAD) return;
   try {
-    await fetch('/api/sessions/import', {
+    const resp = await fetch('/api/sessions/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    if (resp.ok) {
+      const uploadedStep = payload.session.steps || payload.steps.length;
+      const _ss = ss || getActiveSession();
+      if (_ss) _ss._lastUploadedStep = uploadedStep;
+      updateUploadBadge();
+    }
   } catch {} // fire-and-forget
 }
 
@@ -9714,6 +9827,11 @@ function uploadClosedSession(s) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  }).then(resp => {
+    if (resp.ok) {
+      s._lastUploadedStep = s.stepCount || steps.length;
+      updateUploadBadge();
+    }
   }).catch(() => {});
   // Also upload to Railway if running locally
   if (MODE === 'staging') {
@@ -9786,6 +9904,29 @@ function updateShareBtnVisibility() {
   const btn = document.getElementById('shareBtn');
   if (!btn) return;
   btn.style.display = (sessionId && stepCount >= MIN_STEPS_FOR_UPLOAD) ? '' : 'none';
+}
+
+function updateUploadBadge() {
+  const badge = document.getElementById('uploadBadge');
+  if (!badge) return;
+  const ss = getActiveSession();
+  const sc = ss?.stepCount || stepCount || 0;
+  if (!sessionId || sc === 0) { badge.style.display = 'none'; return; }
+  badge.style.display = '';
+  const uploaded = ss?._lastUploadedStep || 0;
+  if (uploaded <= 0) {
+    badge.className = 'upload-badge is-local';
+    badge.textContent = 'Local';
+    badge.title = 'Session saved locally only';
+  } else if (uploaded >= sc) {
+    badge.className = 'upload-badge is-synced';
+    badge.textContent = '↑ Synced';
+    badge.title = `All ${sc} steps uploaded to server`;
+  } else {
+    badge.className = 'upload-badge is-partial';
+    badge.textContent = `↑ ${uploaded}`;
+    badge.title = `Uploaded up to step ${uploaded} of ${sc}`;
+  }
 }
 
 async function shareCurrentSession() {
@@ -9975,9 +10116,11 @@ function renderRestoredReasoning(steps, bannerText, bannerColor, opts = {}) {
       defaultModel: '?',
       isReplay: isReplay,
     });
+    if (!html) continue;
     const wrapper = document.createElement('div');
     wrapper.innerHTML = html;
     const entry = wrapper.firstElementChild;
+    if (!entry) continue;
     content.appendChild(entry);
     annotateCoordRefs(entry);
   }
@@ -10094,6 +10237,8 @@ async function resumeSession(sid) {
         grid: s.grid || null,
         change_map: s.change_map || null,
         turnId: _turnId,
+        observation: llm?.parsed?.observation || '',
+        reasoning: llm?.parsed?.reasoning || '',
       });
       // Rebuild sessionStepsBuffer
       sessionStepsBuffer.push({
@@ -10126,6 +10271,23 @@ async function resumeSession(sid) {
         const prices = TOKEN_PRICES[model] || null;
         if (prices) {
           sessionTotalTokens.cost += (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
+        }
+      }
+    }
+
+    // If no token data from llm_response (e.g. Agent Spawn), rebuild from timeline events
+    if (sessionTotalTokens.input === 0 && sessionTotalTokens.output === 0 && data.timeline) {
+      for (const ev of data.timeline) {
+        if (ev.input_tokens) sessionTotalTokens.input += ev.input_tokens;
+        if (ev.output_tokens) sessionTotalTokens.output += ev.output_tokens;
+        if (ev.cost) sessionTotalTokens.cost += ev.cost;
+      }
+      // Count LLM calls from timeline: each sub_act and orch_think/delegate is a call
+      if (llmCallCount === 0) {
+        for (const ev of data.timeline) {
+          if (['as_sub_act', 'as_sub_tool', 'as_sub_report', 'as_orch_think', 'as_orch_delegate'].includes(ev.type)) {
+            llmCallCount++;
+          }
         }
       }
     }
@@ -10163,8 +10325,42 @@ async function resumeSession(sid) {
     // Log the resume event
     logSessionEvent('resumed', stepCount, {});
 
-    // Rebuild reasoning panel
-    renderRestoredReasoning(steps, `Session resumed at step ${stepCount} (${llmCallCount} prior LLM calls, ${sessionTotalTokens.input + sessionTotalTokens.output} tokens restored)`, 'var(--green)');
+    // ── Restore settings from session history ──
+    // Find model + scaffolding from LLM responses or timeline events
+    let _resumeModel = data.model || '';
+    let _resumeScaffolding = 'linear';
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const llm = steps[i].llm_response;
+      if (llm) {
+        if (llm.model) _resumeModel = llm.model;
+        if (llm.scaffolding) _resumeScaffolding = llm.scaffolding;
+        break;
+      }
+    }
+    // Fallback: detect scaffolding from timeline event types
+    if (_resumeScaffolding === 'linear' && data.timeline) {
+      const tlTypes = new Set(data.timeline.map(e => e.type));
+      if (tlTypes.has('as_orch_start')) _resumeScaffolding = 'agent_spawn';
+      else if (tlTypes.has('planner_call') || tlTypes.has('monitor_call')) _resumeScaffolding = 'three_system';
+      else if (tlTypes.has('rlm_iter')) _resumeScaffolding = 'rlm';
+    }
+    // Switch scaffolding UI to match session's scaffolding
+    if (SCAFFOLDING_SCHEMAS[_resumeScaffolding] && _resumeScaffolding !== activeScaffoldingType) {
+      switchScaffolding(_resumeScaffolding);
+    }
+    // Set model select to match session's model (after scaffolding switch ensures correct selects exist)
+    if (_resumeModel) {
+      await loadModels();
+      const _modelSelId = _resumeScaffolding === 'rlm' ? 'sf_rlm_modelSelect'
+        : _resumeScaffolding === 'three_system' ? 'sf_ts_plannerModelSelect'
+        : _resumeScaffolding === 'two_system' ? 'sf_2s_plannerModelSelect'
+        : _resumeScaffolding === 'agent_spawn' ? 'sf_as_orchestratorModelSelect'
+        : 'modelSelect';
+      const _msel = document.getElementById(_modelSelId);
+      if (_msel && [..._msel.options].some(o => o.value === _resumeModel)) {
+        _msel.value = _resumeModel;
+      }
+    }
 
     // ── Multi-session: register resumed session ──
     if (!sessions.has(sid)) {
@@ -10173,17 +10369,99 @@ async function resumeSession(sid) {
     }
     activeSessionId = sid;
 
-    // Rebuild timelineEvents from step history
+    // Rebuild timelineEvents from step history (or use saved timeline)
     const _tlSs = sessions.get(sid);
     if (_tlSs) {
-      _tlSs.timelineEvents = _rebuildTimelineFromSteps(steps);
+      _tlSs.timelineEvents = data.timeline || _rebuildTimelineFromSteps(steps);
+      // Rebuild obs events from timeline for observatory display
+      _tlSs._obsEvents = [];
+      const _tl = _tlSs.timelineEvents;
+      const _tlStart = _tl.length ? (_tl[0].timestamp || 0) : 0;
+      for (const ev of _tl) {
+        const agentType = ev.agent_type || ev.current_agent || 'orchestrator';
+        const obsEvent = ev.type?.startsWith('as_') ? ev.type.replace('as_', '') : (ev.type || '');
+        const obsData = { event: obsEvent, agent: agentType.toLowerCase() };
+        if (ev.timestamp) {
+          const d = new Date(ev.timestamp);
+          obsData.t = d.toISOString();
+          obsData.elapsed_s = (ev.timestamp - _tlStart) / 1000;
+        }
+        if (ev.model) obsData.model = ev.model;
+        if (ev.duration_ms) obsData.duration_ms = ev.duration_ms;
+        if (ev.input_tokens) obsData.input_tokens = ev.input_tokens;
+        if (ev.output_tokens) obsData.output_tokens = ev.output_tokens;
+        if (ev.cost) obsData.cost = ev.cost;
+        if (ev.task || ev.summary) obsData.summary = ev.task || ev.summary;
+        if (ev.reasoning) obsData.reasoning = ev.reasoning;
+        if (ev.response) obsData.response = ev.response;
+        if (ev.findings != null) obsData.findings = ev.findings;
+        if (ev.hypotheses != null) obsData.hypotheses = ev.hypotheses;
+        if (ev.action_name) obsData.action_name = ev.action_name;
+        if (ev.tool_name) obsData.tool_name = ev.tool_name;
+        if (ev.step_num != null) obsData.step_num = ev.step_num;
+        _tlSs._obsEvents.push(obsData);
+      }
+      // Enrich moveHistory from timeline events (for legacy sessions where llm_response was NULL)
+      if (moveHistory.length && _tl.length) {
+        const tlByStep = {};
+        for (const ev of _tl) {
+          if (ev.step_num != null && (ev.reasoning || ev.action_name || ev.agent_type)) {
+            tlByStep[ev.step_num] = ev;
+          }
+        }
+        for (const h of moveHistory) {
+          if (!h.observation && !h.reasoning && tlByStep[h.step]) {
+            const ev = tlByStep[h.step];
+            h.observation = ev.action_name ? `[${ev.agent_type || 'agent'}] ${ev.action_name}` : '';
+            h.reasoning = ev.reasoning || '';
+          }
+        }
+        // Also backfill sessionStepsBuffer so renderRestoredReasoning sees LLM groups (not "Human")
+        for (const sb of sessionStepsBuffer) {
+          if (!sb.llm_response && tlByStep[sb.step_num]) {
+            const ev = tlByStep[sb.step_num];
+            sb.llm_response = {
+              parsed: {
+                observation: ev.action_name ? `[${ev.agent_type || 'agent'}] ${ev.action_name}` : '',
+                reasoning: ev.reasoning || '',
+                action: sb.action,
+                data: sb.data || {},
+              },
+              model: ev.model || _resumeModel || '',
+              scaffolding: 'agent_spawn',
+              usage: (ev.input_tokens || ev.output_tokens) ? { input_tokens: ev.input_tokens || 0, output_tokens: ev.output_tokens || 0 } : null,
+              call_duration_ms: ev.duration_ms || null,
+            };
+          }
+        }
+      }
+      // Store original settings for branch-on-change detection
+      _tlSs._originalSettings = { model: _resumeModel, scaffolding_type: _resumeScaffolding };
+      // Compute elapsed time from timeline timestamps (don't tick from now)
+      if (_tl.length >= 2) {
+        const t0 = _tl[0].timestamp || 0;
+        const tN = _tl[_tl.length - 1].timestamp || 0;
+        _tlSs._obsElapsedFixed = (tN - t0) / 1000;
+      } else {
+        _tlSs._obsElapsedFixed = 0;
+      }
+      // Session was loaded from server, so all steps are already uploaded
+      _tlSs._lastUploadedStep = stepCount;
     }
+
+    // Rebuild reasoning panel (after timeline enrichment so Agent Spawn steps show as LLM groups)
+    renderRestoredReasoning(sessionStepsBuffer, `Session resumed at step ${stepCount} (${llmCallCount} prior LLM calls, ${sessionTotalTokens.input + sessionTotalTokens.output} tokens restored)`, 'var(--green)');
 
     saveSessionToState();
     renderSessionTabs();
     saveSessionIndex();
     updatePanelBlur();
     updateGameListLock();
+
+    // Persist enriched steps back to DB so future resumes don't need re-enrichment
+    if (sessionStepsBuffer.some(s => s.llm_response && !steps.find(orig => orig.step_num === s.step_num && orig.llm_response))) {
+      autoUploadSession();
+    }
 
     // Enter observability view so user sees the grid + scrubber
     enterObsMode(_tlSs || getActiveSession());
@@ -10245,6 +10523,8 @@ async function branchFromStep(stepNum) {
         grid: s.grid || null,
         change_map: s.change_map || null,
         turnId: _turnId,
+        observation: llm?.parsed?.observation || '',
+        reasoning: llm?.parsed?.reasoning || '',
       });
       sessionStepsBuffer.push({
         step_num: s.step_num,
@@ -10364,6 +10644,8 @@ async function branchHere() {
         levels: s.levels_completed || 0,
         grid: s.grid || null, change_map: s.change_map || null,
         turnId: _turnId,
+        observation: llm?.parsed?.observation || '',
+        reasoning: llm?.parsed?.reasoning || '',
       });
       sessionStepsBuffer.push({
         step_num: s.step_num, action: s.action, data: s.data || {},
@@ -11051,8 +11333,10 @@ function updatePanelBlur() {
 function updateGameListLock() {
   const sidebar = document.getElementById('gameSidebar');
   if (sidebar) {
-    // Lock the sidebar after first move (human or agent) or autoplay started
-    const shouldLock = sessionId && (stepCount > 0 || autoPlaying) && currentState.state === 'NOT_FINISHED';
+    // Lock the sidebar once a session has any steps — can't switch games mid-session
+    const cur = getActiveSession();
+    const hasSteps = (cur && cur.stepCount > 0) || stepCount > 0;
+    const shouldLock = sessionId && hasSteps;
     sidebar.classList.toggle('locked', shouldLock);
   }
 }
@@ -11440,15 +11724,11 @@ function enterObsMode(ss) {
   ss._obsEvents = ss._obsEvents || [];
   ss._obsSyncCursor = ss._obsSyncCursor || 0;
 
-  // Hide game area + sidebar, show obs screen
-  const gameArea = document.querySelector('.game-area');
-  if (gameArea) gameArea.style.display = 'none';
-  const sidebar = document.getElementById('gameSidebar');
-  if (sidebar) sidebar.style.display = 'none';
-  const rightPanel = document.querySelector('.right-panel');
-  if (rightPanel) rightPanel.style.display = 'none';
-  const obsScreen = document.getElementById('obsScreen');
-  obsScreen.style.display = 'flex';
+  // Hide game area + sidebar + right panel, show obs screen
+  document.querySelector('.game-area')?.style.setProperty('display', 'none');
+  document.getElementById('gameSidebar')?.style.setProperty('display', 'none', 'important');
+  document.querySelector('.right-panel')?.style.setProperty('display', 'none');
+  document.getElementById('obsScreen').style.display = 'flex';
 
   // Move the game canvas into the obs right panel
   const canvasEl = document.getElementById('gameCanvas');
@@ -11462,19 +11742,42 @@ function enterObsMode(ss) {
 
   // Update pause button
   const pauseBtn = document.getElementById('obsPauseBtn');
-  if (pauseBtn) pauseBtn.textContent = (ss.autoPlaying) ? 'Pause' : 'Resume';
+  if (pauseBtn) pauseBtn.innerHTML = (ss.autoPlaying) ? '&#10074;&#10074; Pause' : '&#187; Resume';
+
+  // Hide "Back to Observatory" button since we're in obs mode
+  const obsBtn = document.getElementById('backToObsBtn');
+  if (obsBtn) obsBtn.style.display = 'none';
 
   // Re-render from existing events
   renderObsScreen(ss);
   startObsSync(ss);
 
-  // Start elapsed timer
-  _obsElapsedTimer = setInterval(() => updateObsElapsed(ss), 1000);
+  // Mirror reasoning panel changes to obs reasoning (debounced)
+  if (window._obsReasoningObserver) window._obsReasoningObserver.disconnect();
+  const _rcSrc = document.getElementById('reasoningContent');
+  if (_rcSrc) {
+    let _syncTimer = null;
+    window._obsReasoningObserver = new MutationObserver(() => {
+      if (_syncTimer) return;
+      _syncTimer = setTimeout(() => { _syncTimer = null; syncObsReasoning(); }, 300);
+    });
+    window._obsReasoningObserver.observe(_rcSrc, { childList: true, subtree: true });
+  }
+
+  // Initialize scrubber with current move history
+  _obsScrubLive = true;
+  obsScrubUpdate();
+
+  // Start elapsed timer only if autoplay is active
+  if (ss.autoPlaying) {
+    _obsElapsedTimer = setInterval(() => updateObsElapsed(ss), 1000);
+  }
 }
 
 function exitObsMode() {
   stopObsSync();
   if (_obsElapsedTimer) { clearInterval(_obsElapsedTimer); _obsElapsedTimer = null; }
+  if (window._obsReasoningObserver) { window._obsReasoningObserver.disconnect(); window._obsReasoningObserver = null; }
 
   const obsScreen = document.getElementById('obsScreen');
   obsScreen.style.display = 'none';
@@ -11494,9 +11797,74 @@ function exitObsMode() {
   const rightPanel = document.querySelector('.right-panel');
   if (rightPanel) rightPanel.style.display = '';
   unlockSettings();
+
+  // Show "Back to Observatory" button in transport bar
+  const obsBtn = document.getElementById('backToObsBtn');
+  if (obsBtn) obsBtn.style.display = '';
 }
 
 // ── Full re-render ──
+
+function syncObsReasoning() {
+  const src = document.getElementById('reasoningContent');
+  const dst = document.getElementById('obsReasoningContent');
+  if (!src || !dst) return;
+  // Check if source has meaningful content (not all human entries for an agent session)
+  const hasLLMEntries = src.querySelector('.reasoning-entry:not(.human)');
+  if (hasLLMEntries || !src.querySelector('.reasoning-entry')) {
+    dst.innerHTML = src.innerHTML;
+    // Add click-to-navigate on mirrored entries that have data-step-nums
+    dst.querySelectorAll('.reasoning-entry[data-step-nums]').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.onclick = function() {
+        const nums = (this.dataset.stepNums || '').split(',').map(Number).filter(n => n > 0);
+        if (nums.length) obsScrubShow(nums[0] - 1);
+      };
+    });
+  } else {
+    // All entries are "human" — likely a legacy agent session without stored LLM responses
+    // Build a compact step list from moveHistory, enriched with obs events / timeline data
+    const ss = getActiveSession();
+    const hist = ss?.moveHistory || moveHistory || [];
+    if (hist.length === 0) { dst.innerHTML = src.innerHTML; return; }
+    // Build a map of step_num → obs event data for enrichment
+    const obsMap = {};
+    const obsEvents = ss?._obsEvents || [];
+    for (const ev of obsEvents) {
+      if (ev.step_num != null) {
+        if (!obsMap[ev.step_num]) obsMap[ev.step_num] = [];
+        obsMap[ev.step_num].push(ev);
+      }
+    }
+    let html = '';
+    for (const h of hist) {
+      const aName = ACTION_NAMES[h.action] || ('ACTION' + h.action);
+      let obs = h.observation || '';
+      let reason = h.reasoning || '';
+      // Enrich from obs events if step-level data is empty
+      if (!obs && !reason && obsMap[h.step]) {
+        for (const oev of obsMap[h.step]) {
+          if (oev.reasoning && !reason) reason = oev.reasoning;
+          if (oev.summary && !obs) obs = oev.summary;
+          if (oev.action_name && !obs) obs = oev.action_name;
+        }
+      }
+      const cc = h.change_map?.change_count || 0;
+      const ccStr = cc > 0 ? ` | ${cc} cells` : '';
+      const agentLabel = obsMap[h.step]?.[0]?.agent ? ` [${obsMap[h.step][0].agent}]` : '';
+      const reasonStr = reason ? `<div style="font-size:10px;color:var(--text-dim);margin-top:1px;">${reason.substring(0, 120)}</div>` : '';
+      html += `<div class="reasoning-entry" data-step-nums="${h.step}" style="cursor:pointer;" onclick="obsScrubShow(${h.step - 1})">`;
+      html += `<div class="step-label">Step ${h.step} — ${aName}${agentLabel}${ccStr}</div>`;
+      if (obs) html += `<div style="font-size:10px;color:var(--accent);">${obs.substring(0, 150)}</div>`;
+      html += reasonStr;
+      html += `</div>`;
+    }
+    dst.innerHTML = html;
+  }
+  // Auto-scroll to bottom
+  const wrap = dst.closest('.obs-reasoning-wrap');
+  if (wrap) wrap.scrollTop = wrap.scrollHeight;
+}
 
 function renderObsScreen(ss) {
   if (!ss) return;
@@ -11507,6 +11875,7 @@ function renderObsScreen(ss) {
   for (let i = 0; i < events.length; i++) {
     appendObsLogRow(events[i], i);
   }
+  syncObsReasoning();
   renderObsSwimlane(ss);
   updateObsStatus(ss);
 }
@@ -11544,10 +11913,21 @@ function updateObsStatus(ss) {
 }
 
 function updateObsElapsed(ss) {
-  if (!ss || !ss._obsStartTime) return;
-  const elapsedSec = (performance.now() - ss._obsStartTime) / 1000;
+  if (!ss) return;
   const el = document.getElementById('obsElapsed');
   if (!el) return;
+  let elapsedSec = 0;
+  // For resumed sessions, compute elapsed from timeline timestamps
+  if (ss._obsElapsedFixed != null) {
+    // Fixed elapsed from historical timeline — only update if autoplay is running
+    if (ss.autoPlaying && ss._obsResumedAt) {
+      elapsedSec = ss._obsElapsedFixed + (performance.now() - ss._obsResumedAt) / 1000;
+    } else {
+      elapsedSec = ss._obsElapsedFixed;
+    }
+  } else if (ss._obsStartTime) {
+    elapsedSec = (performance.now() - ss._obsStartTime) / 1000;
+  }
   if (elapsedSec < 60) el.textContent = `${Math.round(elapsedSec)}s`;
   else if (elapsedSec < 3600) el.textContent = `${(elapsedSec / 60).toFixed(1)}m`;
   else el.textContent = `${(elapsedSec / 3600).toFixed(1)}h`;
@@ -11559,6 +11939,7 @@ function appendObsLogRow(ev, evIdx) {
   const tbody = document.getElementById('obsLogBody');
   if (!tbody) return;
   const tr = document.createElement('tr');
+  if (ev.step_num != null) tr.dataset.step = ev.step_num;
   const agent = ev.agent || '';
   const c = obsAgentColor(agent);
   tr.style.borderLeft = `3px solid ${c}`;
@@ -11679,6 +12060,40 @@ function obsScrubShow(idx) {
   const dot = document.getElementById('obsScrubDot');
   dot.className = 'obs-scrub-dot is-hist';
   dot.innerHTML = '&#9679; PAUSED';
+
+  // Scroll event log to the matching step row
+  _obsScrubScrollToStep(idx + 1);
+  // Highlight matching reasoning entry
+  _obsScrubHighlightReasoning(idx + 1);
+}
+
+function _obsScrubScrollToStep(stepNum) {
+  const tbody = document.getElementById('obsLogBody');
+  const wrap = document.getElementById('obsLogWrap');
+  if (!tbody || !wrap) return;
+  // Find the last row matching this step number
+  const rows = tbody.querySelectorAll(`tr[data-step="${stepNum}"]`);
+  const target = rows.length ? rows[rows.length - 1] : null;
+  if (target) {
+    // Remove previous highlights
+    tbody.querySelectorAll('tr.obs-highlight').forEach(r => r.classList.remove('obs-highlight'));
+    target.classList.add('obs-highlight');
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+
+function _obsScrubHighlightReasoning(stepNum) {
+  const container = document.getElementById('obsReasoningContent');
+  if (!container) return;
+  // Find reasoning entry whose data-step-nums contains this step
+  container.querySelectorAll('.reasoning-entry').forEach(el => {
+    el.style.outline = '';
+    const nums = (el.dataset.stepNums || '').split(',').map(Number);
+    if (nums.includes(stepNum)) {
+      el.style.outline = '1px solid var(--accent)';
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  });
 }
 
 function obsScrubReturnToLive() {

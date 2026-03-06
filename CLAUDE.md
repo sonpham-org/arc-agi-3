@@ -7,6 +7,15 @@
 - **"Turn"** = one complete planning cycle. In scaffold mode: planner REPL → execute plan steps → monitor checks → world model update. In single-agent mode: one LLM call → one step. Each turn gets a unique `turnId`. Undo reverts an entire turn, not individual steps. Stored in `session_turns`.
 - **"Call"** = one individual LLM invocation. A single turn may contain many calls (planner REPL iterations, monitor checks, world model queries). In single-agent mode, one turn = one call. Stored in `llm_calls`. Compact context triggers after N Calls, not Steps.
 
+## UI Views (index.html)
+
+The web UI has two main views that replace each other in the main content area:
+
+1. **Settings View** (default) — Game sidebar (list of games) on the left, game canvas with human controls (d-pad, intervene button) and transport bar (Autoplay, Undo, Restart) in the center, and the right panel with Agent Settings / Prompts / Graphics tabs. No scrubber in this view.
+2. **Observatory View** — Replaces the entire settings view during autoplay or when resumed. Left side has status bar, swimlane timeline, and event log table. Right side has the game canvas, step scrubber, reasoning log (mirrored from the Reasoning tab), and transport (Pause / Back to Settings). A "Back to Observatory" button appears in the settings transport bar after exiting obs mode.
+
+When modifying either view, do NOT mix up their elements — they have separate DOM structures. The observatory has its own scrubber (`obsScrubBar`), its own reasoning mirror (`obsReasoningContent`), and its own canvas host (`obsCanvasHost`). The settings view's live scrubber (`liveScrubberBar`) is kept hidden.
+
 ## Reasoning View Consistency
 
 The Reasoning view must look the same across ALL viewing modes and pages:
