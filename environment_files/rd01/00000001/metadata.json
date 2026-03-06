@@ -1,0 +1,9 @@
+{
+  "game_id": "rd01-00000001",
+  "title": "River Diverter",
+  "default_fps": 5,
+  "baseline_actions": [3, 5, 8, 10, 14, 18, 22, 28, 35, 42],
+  "tags": ["puzzle", "pipes", "flow"],
+  "local_dir": "environment_files/rd01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}

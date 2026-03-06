@@ -1,0 +1,9 @@
+{
+  "game_id": "rr01-00000001",
+  "title": "Relic Runner",
+  "default_fps": 5,
+  "baseline_actions": [8, 8, 10, 10, 12, 20, 14, 14, 14, 16],
+  "tags": ["puzzle", "maze", "keys", "grid"],
+  "local_dir": "environment_files/rr01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}

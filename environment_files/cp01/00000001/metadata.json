@@ -1,0 +1,9 @@
+{
+  "game_id": "cp01-00000001",
+  "title": "Continuous Painter",
+  "default_fps": 5,
+  "baseline_actions": [8, 12, 18, 22, 28, 34, 40, 48, 56, 65],
+  "tags": ["puzzle", "painting", "grid"],
+  "local_dir": "environment_files/cp01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}

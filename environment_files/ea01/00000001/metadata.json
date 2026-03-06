@@ -1,0 +1,9 @@
+{
+  "game_id": "ea01-00000001",
+  "title": "Escalation Arena",
+  "default_fps": 5,
+  "baseline_actions": [5, 8, 12, 18, 22, 28, 32, 40, 48, 60],
+  "tags": ["action", "tactical", "grid"],
+  "local_dir": "environment_files/ea01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}

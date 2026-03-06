@@ -1,0 +1,23 @@
+{
+  "game_id": "kt01-00000001",
+  "title": "Knight's Tourney",
+  "default_fps": 5,
+  "baseline_actions": [
+    5,
+    8,
+    12,
+    16,
+    20,
+    25,
+    30,
+    35,
+    42,
+    50
+  ],
+  "tags": [
+    "puzzle",
+    "grid"
+  ],
+  "local_dir": "environment_files/kt01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}
