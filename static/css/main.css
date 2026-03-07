@@ -41,7 +41,7 @@
   .game-card { padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
   .game-card:hover { background: var(--border); }
   .game-card.active { background: #1f6feb22; border-left: 3px solid var(--accent); }
-  .game-card .title { font-weight: 400; font-size: 13px; }
+  .game-card .title { font-weight: 600; font-size: 13px; }
   .game-card .meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
   .dev-tag { font-size: 9px; color: var(--accent); opacity: 0.7; border: 1px solid var(--accent);
     padding: 0 4px; border-radius: 3px; cursor: help; letter-spacing: 0.3px; position: relative;
