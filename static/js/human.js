@@ -887,3 +887,55 @@ async function loadContributors() {
     console.error('Failed to load contributors', e);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FEEDBACK PAGE (reuses comments API with game_id = '_feedback')
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _feedbackLoaded = false;
+
+async function loadFeedback() {
+  const list = document.getElementById('feedbackList');
+  list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Loading...</div>';
+  try {
+    const comments = await fetchJSON('/api/comments/_feedback?voter_id=' + encodeURIComponent(_getCommenterId()));
+    if (!comments.length) {
+      list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No feedback yet. Be the first!</div>';
+    } else {
+      list.innerHTML = comments.map(c => _renderComment(c)).join('');
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Failed to load feedback.</div>';
+  }
+}
+
+async function submitFeedback() {
+  const input = document.getElementById('feedbackInput');
+  const body = input.value.trim();
+  if (!body) return;
+  try {
+    const resp = await fetch('/api/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        game_id: '_feedback',
+        body,
+        author_id: _getCommenterId(),
+        author_name: _getCommenterName(),
+      }),
+    });
+    if (resp.ok) {
+      input.value = '';
+      document.getElementById('feedbackCharCount').textContent = '0 / 2000';
+      loadFeedback();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// Wire up feedback char counter
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('feedbackInput');
+  if (input) input.addEventListener('input', () => {
+    document.getElementById('feedbackCharCount').textContent = input.value.length + ' / 2000';
+  });
+});

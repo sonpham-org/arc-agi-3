@@ -1573,8 +1573,8 @@ let _browseGlobalCache = null;  // cache server sessions
 let _browseGameFilter = null;   // currently selected game in By Game tab
 
 // Hash-to-view mapping
-const _VIEW_HASHES = { agent: 'play', human: 'human', sessions: 'browse', leaderboards: 'leaderboard', contributors: 'contributors' };
-const _VIEW_TO_HASH = { play: 'agent', human: 'human', browse: 'sessions', leaderboard: 'leaderboards', contributors: 'contributors' };
+const _VIEW_HASHES = { agent: 'play', human: 'human', sessions: 'browse', leaderboards: 'leaderboard', contributors: 'contributors', feedback: 'feedback' };
+const _VIEW_TO_HASH = { play: 'agent', human: 'human', browse: 'sessions', leaderboard: 'leaderboards', contributors: 'contributors', feedback: 'feedback' };
 
 function showAppView(view, skipHash) {
   // Update URL hash (unless called from hashchange handler)
@@ -1594,6 +1594,7 @@ function showAppView(view, skipHash) {
   const humanView = document.getElementById('humanView');
   const leaderboardView = document.getElementById('leaderboardView');
   const contributorsView = document.getElementById('contributorsView');
+  const feedbackView = document.getElementById('feedbackView');
 
   const sidebar = document.getElementById('gameSidebar');
   const outerLayout = document.getElementById('outerLayout');
@@ -1604,6 +1605,7 @@ function showAppView(view, skipHash) {
   if (humanView) humanView.style.display = 'none';
   if (leaderboardView) leaderboardView.style.display = 'none';
   if (contributorsView) contributorsView.style.display = 'none';
+  if (feedbackView) feedbackView.style.display = 'none';
   tabBar.style.display = 'none';
   emptyApp.style.display = 'none';
   menuView.classList.remove('visible');
@@ -1638,6 +1640,15 @@ function showAppView(view, skipHash) {
     if (contributorsView) {
       contributorsView.style.display = 'flex';
       if (typeof loadContributors === 'function') loadContributors();
+    }
+  } else if (view === 'feedback') {
+    // Feedback link is after the flex spacer, find it by href
+    document.querySelector('.top-nav a[href="#feedback"]')?.classList.add('active');
+    _browseActive = false;
+    _menuActive = false;
+    if (feedbackView) {
+      feedbackView.style.display = 'flex';
+      if (typeof loadFeedback === 'function') loadFeedback();
     }
   } else {
     // Default: agent / play

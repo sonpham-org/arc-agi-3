@@ -33,6 +33,7 @@
     <a class="nav-link" href="#leaderboards" onclick="event.preventDefault();showAppView('leaderboard')">&#127942; Leaderboards</a>
     <a class="nav-link" href="#contributors" onclick="event.preventDefault();showAppView('contributors')">&#128150; Contributors</a>
     <span style="flex:1;"></span>
+    <a class="nav-link" href="#feedback" onclick="event.preventDefault();showAppView('feedback')">Roadmap / Feedback</a>
     <button id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;" onclick="showLoginModal()">Log in</button>
     <div id="userBadge" style="display:none;position:relative;">
       <button class="btn" style="font-size:11px;padding:2px 10px;" onclick="toggleUserMenu()">
@@ -148,6 +149,31 @@
         <table class="lb-drill-table"><thead><tr><th>#</th><th>Contributor</th><th>Sessions</th><th>Games</th><th>Steps</th><th>Model</th></tr></thead><tbody id="contribAI"><tr><td colspan="6" class="lb-loading">Loading...</td></tr></tbody></table>
       </div>
     </div>
+    </div>
+  </div>
+  <!-- ── Feedback view ─────────────────────────────────────────────── -->
+  <div id="feedbackView" style="display:none;flex:1;overflow:hidden;">
+    <div class="feedback-layout">
+      <div class="feedback-left">
+        <h2>Roadmap / Feedback</h2>
+        <p>Tell us what you'd like to see on the platform. Feature requests, bug reports, game ideas — anything goes.</p>
+        <p style="margin-top:12px;font-size:11px;color:var(--text-dim);">Posts are public. Be constructive.</p>
+      </div>
+      <div class="feedback-right">
+        <div class="comment-compose" style="border-top:none;border-bottom:1px solid var(--border);">
+          <textarea id="feedbackInput" class="text-input" placeholder="I wish the platform had..." rows="3" maxlength="2000" style="resize:vertical;font-size:12px;"></textarea>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+            <span style="font-size:10px;color:var(--text-dim);" id="feedbackCharCount">0 / 2000</span>
+            <span style="flex:1;"></span>
+            <button class="btn btn-primary" onclick="submitFeedback()" style="font-size:11px;padding:3px 12px;">Post</button>
+          </div>
+        </div>
+        <div style="flex:1;overflow:auto;padding:10px;" id="feedbackListWrap">
+          <div id="feedbackList" class="comments-list">
+            <div class="empty-state" style="height:auto;font-size:12px;">Loading...</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <!-- ── Browse Sessions view ────────────────────────────────────────── -->

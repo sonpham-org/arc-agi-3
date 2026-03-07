@@ -697,6 +697,14 @@
   .contrib-section h3 { font-size: 14px; color: var(--accent); margin-bottom: 4px; }
   .contrib-desc { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
 
+  /* ── Feedback ──────────────────────────────────────────────────────── */
+  .feedback-layout { display: flex; flex: 1; min-height: 0; }
+  .feedback-left { flex: 0 0 33%; padding: 24px 20px; }
+  .feedback-left h2 { font-size: 22px; color: var(--accent); margin-bottom: 12px; }
+  .feedback-left p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .feedback-right { flex: 1; display: flex; flex-direction: column; min-height: 0;
+    border-left: 1px solid var(--border); }
+
   /* ── Empty app state ────────────────────────────────────────────────── */
   #emptyAppState { display: none; flex: 1; align-items: center; justify-content: center;
     font-size: 16px; color: var(--text-dim); }
