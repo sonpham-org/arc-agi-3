@@ -517,6 +517,7 @@
   .transport-strip { display: none; flex-shrink: 0; border-top: 1px solid var(--border);
     background: var(--surface); padding: 8px 8px 6px; margin: auto -16px -16px -16px;
     width: calc(100% + 32px); }
+  .transport-strip.human-transport { margin: 0; width: auto; border-top: none; background: none; padding: 0; }
   .transport-bar { display: flex; gap: 2px; }
   .transport-bar .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px;
     padding: 7px 6px; font-size: 11px; font-weight: 600; min-width: 0;
