@@ -56,7 +56,12 @@ def orchestrator_decide(
         history=format_history(history),
     )
 
-    result = call_model_with_metadata(model, prompt, cfg, role="planner")
+    result = call_model_with_metadata(
+        model, prompt, cfg, role="planner",
+        tools_enabled=True, session_id=session_id,
+        grid=grid, prev_grid=prev_grid,
+        thinking_budget=16000,
+    )
 
     # Log LLM call
     if session_id:
@@ -116,4 +121,5 @@ def orchestrator_decide(
         }
 
     parsed.update(meta)
+    parsed["raw_response"] = result.text or ""
     return parsed

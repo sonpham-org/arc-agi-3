@@ -10,8 +10,9 @@ GAME_REFERENCE = """\
 ## Grid Encoding
 The game world is a 2D grid (up to 64x64 cells). Each cell contains a color
 value from 0-15. Colors are mapped to names for readability:
-  0=black, 1=blue, 2=red, 3=green, 4=yellow, 5=grey, 6=magenta, 7=orange,
-  8=cyan, 9=brown, 10=white, 11=pink, 12=lime, 13=teal, 14=lavender, 15=maroon
+  0=White, 1=LightGray, 2=Gray, 3=DarkGray, 4=VeryDarkGray, 5=Black,
+  6=Magenta, 7=LightMagenta, 8=Red, 9=Blue, 10=LightBlue, 11=Yellow,
+  12=Orange, 13=Maroon, 14=Green, 15=Purple
 
 Rows are displayed with row numbers. Values may be RLE-compressed for long
 uniform runs (e.g. "3x black" instead of "black black black").
@@ -43,6 +44,22 @@ You have access to analysis tools that do NOT consume action budget:
 
 To use a frame tool, emit the "frame_tool" command with the tool name and arguments.
 Frame tools are FREE — they do not consume your action budget.
+
+## Code Execution (run_python tool)
+You have a `run_python` tool that executes Python code to analyze the grid.
+This is your most powerful analysis capability — use it whenever you need to
+compute, measure, or verify something about the grid.
+
+Pre-imported: numpy (as np), collections, itertools.
+Available variables:
+  - `grid`: numpy 2D int array of the current grid
+  - `prev_grid`: numpy 2D int array of the previous grid (or None)
+
+Variables you define persist across calls within the same turn.
+Use print() to return results. Keep code short — use numpy vectorized ops.
+The tool is FREE (does not consume action budget) and runs automatically
+when you need computation. Just write your analysis and the model will
+call run_python as needed.
 
 ## Memory Usage
 The orchestrator maintains shared memory (facts, hypotheses, and a stack of
@@ -110,6 +127,9 @@ Always brief subagents properly:
 - For testers: state the hypothesis clearly and what result confirms/refutes it.
 - For solvers: provide a step-by-step plan.
 
+You also have access to the run_python tool — use code to analyze the grid before
+deciding what to delegate. This helps you make informed delegation decisions.
+
 You respond in JSON only. You have exactly two commands: "delegate" and "think".
 """
 
@@ -139,6 +159,7 @@ Decide your next move. You MUST respond with exactly one JSON object:
 Option A — Delegate to a subagent:
 {{
   "command": "delegate",
+  "reasoning": "why this delegation is the right next step",
   "agent_type": "explorer" | "theorist" | "tester" | "solver",
   "task": "clear description of what the subagent should do",
   "budget": <max steps for subagent, 1-10>
@@ -147,6 +168,7 @@ Option A — Delegate to a subagent:
 Option B — Record a finding and continue thinking:
 {{
   "command": "think",
+  "reasoning": "analysis of current situation and what you've learned",
   "facts": ["fact1", ...],
   "hypotheses": ["hypothesis1", ...],
   "next": "what to do next"
@@ -168,8 +190,8 @@ Your job: systematically try actions to discover what they do.
 
 Guidelines:
 - Try ALL available actions at least once (unless budget is very small).
-- After each action, use frame tools (render_grid, diff_frames, change_summary)
-  to analyze exactly what changed.
+- After each action, use code to analyze grid changes programmatically —
+  compute diffs, count colors, measure regions with numpy.
 - Track which actions you've tested and what each one does.
 - Look for patterns: does an action always do the same thing? Does it depend on
   the current grid state? Does it interact with specific colors or regions?
@@ -189,8 +211,9 @@ cannot use the "act" command. You can only use frame_tool and report.
 
 Your job:
 - Analyze the observations and findings provided by the orchestrator.
-- Look for higher-order patterns: symmetry, periodicity, conditional rules,
-  spatial relationships, color transformations.
+- Use code to test pattern hypotheses mathematically — this is your most
+  powerful tool. Compute symmetry checks, periodicity, color distributions,
+  spatial correlations with numpy.
 - Challenge assumptions in existing hypotheses — look for counterexamples
   in the data.
 - Propose NEW hypotheses that explain the observations more completely.
@@ -212,7 +235,8 @@ Guidelines:
 - Plan your test BEFORE acting. What specific action sequence would confirm
   the hypothesis? What result would refute it?
 - Use the smallest number of actions possible — your budget is limited.
-- Use frame tools after each action to verify exactly what happened.
+- Use code to verify hypotheses with precise measurements — compare grid
+  values, compute diffs, check exact positions and colors with numpy.
 - RESET (action 0) before testing if you need a known starting state.
 - Report conclusively: "CONFIRMED" or "REFUTED", with evidence.
   If inconclusive, explain what additional test would resolve it.
@@ -227,7 +251,8 @@ and report progress.
 
 Guidelines:
 - Follow the plan step by step.
-- After each action, verify the result matches expectations using frame tools.
+- After each action, use code to verify the result matches expectations —
+  compute optimal action sequences and validate grid state with numpy.
 - If something unexpected happens, STOP and report back rather than continuing
   blindly — the orchestrator may need to revise the strategy.
 - Track your progress: which steps are done, which remain.

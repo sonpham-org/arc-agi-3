@@ -101,6 +101,9 @@ MODELS = {
     "gemini-2.5-flash-lite": {"provider": "gemini", "api_model": "gemini-2.5-flash-lite",  "env_key": "GEMINI_API_KEY"},
     "gemini-2.5-flash":      {"provider": "gemini", "api_model": "gemini-2.5-flash",       "env_key": "GEMINI_API_KEY"},
     "gemini-2.5-pro":        {"provider": "gemini", "api_model": "gemini-2.5-pro",         "env_key": "GEMINI_API_KEY"},
+    "gemini-3-flash":        {"provider": "gemini", "api_model": "gemini-3-flash-preview",        "env_key": "GEMINI_API_KEY"},
+    "gemini-3.1-flash-lite": {"provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview", "env_key": "GEMINI_API_KEY"},
+    "gemini-3-pro":          {"provider": "gemini", "api_model": "gemini-3-pro-preview",    "env_key": "GEMINI_API_KEY"},
     "gemini-3.1-pro":        {"provider": "gemini", "api_model": "gemini-3.1-pro-preview",  "env_key": "GEMINI_API_KEY"},
     # Anthropic (direct API via httpx)
     "claude-haiku-4-5":      {"provider": "anthropic", "api_model": "claude-haiku-4-5-20251001", "env_key": "ANTHROPIC_API_KEY"},
@@ -196,7 +199,7 @@ def load_config(path: Path | None = None) -> dict:
     cfg = _DEFAULT_CONFIG
     resolved = path or (ROOT / "config.yaml")
     if resolved.exists():
-        with open(resolved) as f:
+        with open(resolved, encoding="utf-8") as f:
             file_cfg = yaml.safe_load(f) or {}
         cfg = _deep_merge(cfg, file_cfg)
     return cfg
@@ -464,7 +467,9 @@ def _call_anthropic(model: str, messages: list, system: str,
     }
 
 
-def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: int) -> dict:
+def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: int,
+                  tools_enabled: bool = False, session_id: str = "",
+                  grid=None, prev_grid=None, thinking_budget: int = 0) -> dict:
     from google import genai
     import re as _re
     api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -476,22 +481,129 @@ def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: i
     is_thinking = bool(_re.search(r"2\.5|3-pro|3-flash|3\.1", model_name))
     thinking_cfg = None
     if is_thinking:
-        thinking_cfg = genai.types.ThinkingConfig(thinking_budget=1024)
+        budget = thinking_budget if thinking_budget > 0 else 1024
+        thinking_cfg = genai.types.ThinkingConfig(thinking_budget=budget)
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=f"{SYSTEM_MSG}\n\n{prompt}",
-        config=genai.types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-            thinking_config=thinking_cfg,
-        ),
+    config = genai.types.GenerateContentConfig(
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+        thinking_config=thinking_cfg,
     )
-    usage = getattr(response, "usage_metadata", None)
+
+    # Enable run_python tool if requested and we have a session context
+    if tools_enabled and session_id:
+        from code_sandbox import get_tool_declarations, execute_python
+        config.tools = [get_tool_declarations()]
+
+    contents = [genai.types.Content(
+        role="user",
+        parts=[genai.types.Part.from_text(text=f"{SYSTEM_MSG}\n\n{prompt}")],
+    )]
+
+    total_input = 0
+    total_output = 0
+    max_rounds = 3 if (tools_enabled and session_id) else 1
+
+    for round_i in range(max_rounds):
+        # On the last round, remove tools to force a text answer
+        if round_i == max_rounds - 1 and config.tools:
+            config.tools = None
+            # Add instruction to force JSON text output
+            contents.append(genai.types.Content(
+                role="user",
+                parts=[genai.types.Part.from_text(
+                    text="Tool calls are no longer available. Now output your final answer as a JSON object."
+                )],
+            ))
+
+        response = client.models.generate_content(
+            model=model_name, contents=contents, config=config,
+        )
+        usage = getattr(response, "usage_metadata", None)
+        total_input += (getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+        total_output += (getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+
+        # Handle MALFORMED_FUNCTION_CALL — model tried to call a tool but
+        # formatted it as a code block instead of a proper function call
+        if response.candidates and tools_enabled and session_id:
+            fr = getattr(response.candidates[0], 'finish_reason', None)
+            fr_str = str(fr).upper() if fr else ""
+            if "MALFORMED" in fr_str:
+                raw_text = ""
+                try:
+                    raw_text = response.text or ""
+                except Exception:
+                    fm = getattr(response.candidates[0], 'finish_message', None)
+                    if fm:
+                        raw_text = fm
+                code_match = _re.search(r'```python\s*\n(.*?)```', raw_text, _re.DOTALL)
+                if code_match:
+                    code = code_match.group(1).strip()
+                    print(f"  [tools] recovered MALFORMED code ({len(code)} chars), executing")
+                    output = execute_python(session_id, code, grid, prev_grid)
+                    contents.append(genai.types.Content(
+                        role="model",
+                        parts=[genai.types.Part.from_function_call(
+                            name="run_python", args={"code": code}
+                        )],
+                    ))
+                    contents.append(genai.types.Content(
+                        role="user",
+                        parts=[genai.types.Part.from_function_response(
+                            name="run_python",
+                            response={"result": output},
+                        )],
+                    ))
+                    config.tools = None  # force text answer on next round
+                    continue
+                else:
+                    config.tools = None
+                    continue
+
+        # Check for function calls in the response
+        if response.candidates and response.candidates[0].content and tools_enabled and session_id:
+            model_parts = response.candidates[0].content.parts or []
+            fn_call_parts = [p for p in model_parts if p.function_call]
+
+            if fn_call_parts:
+                contents.append(response.candidates[0].content)
+                fn_response_parts = []
+                for part in fn_call_parts:
+                    fc = part.function_call
+                    code = fc.args.get("code", "") if fc.args else ""
+                    print(f"  [tools] run_python ({len(code)} chars)")
+                    output = execute_python(session_id, code, grid, prev_grid)
+                    fn_response_parts.append(
+                        genai.types.Part.from_function_response(
+                            name=fc.name,
+                            response={"result": output},
+                        )
+                    )
+                contents.append(genai.types.Content(
+                    role="user",
+                    parts=fn_response_parts,
+                ))
+                continue  # next round
+
+        # No function call — extract final text and return
+        break
+
+    # Extract text safely — response may contain function_call parts
+    # if the model exhausted all rounds without giving a text answer
+    final_text = ""
+    try:
+        final_text = response.text or ""
+    except (ValueError, AttributeError):
+        # response.text raises ValueError when there are only non-text parts
+        if response.candidates and response.candidates[0].content:
+            text_parts = [p.text for p in response.candidates[0].content.parts
+                          if hasattr(p, 'text') and p.text]
+            final_text = "\n".join(text_parts)
+
     return {
-        "text": response.text,
-        "input_tokens": getattr(usage, "prompt_token_count", 0) if usage else 0,
-        "output_tokens": getattr(usage, "candidates_token_count", 0) if usage else 0,
+        "text": final_text,
+        "input_tokens": total_input,
+        "output_tokens": total_output,
     }
 
 
@@ -502,8 +614,16 @@ def _call_cloudflare(model: str, messages: list, temperature: float, max_tokens:
     return _call_openai_compatible(url, api_key, model, messages, temperature, max_tokens)
 
 
-def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor") -> dict:
-    """Route to the right provider. Returns dict with {text, input_tokens, output_tokens}."""
+def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
+               tools_enabled: bool = False, session_id: str = "",
+               grid=None, prev_grid=None, thinking_budget: int = 0) -> dict:
+    """Route to the right provider. Returns dict with {text, input_tokens, output_tokens}.
+
+    Optional kwargs for Gemini tool calling:
+        tools_enabled: enable run_python tool
+        session_id: sandbox session ID
+        grid / prev_grid: current and previous game grids (list-of-lists)
+    """
     info = MODELS.get(model_key)
     if info is None:
         raise ValueError(f"Unknown model: {model_key}")
@@ -526,7 +646,10 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor") -
     messages = [{"role": "system", "content": SYSTEM_MSG}, {"role": "user", "content": prompt}]
 
     if provider == "gemini":
-        return _call_gemini(api_model, prompt, temp, max_tok)
+        return _call_gemini(api_model, prompt, temp, max_tok,
+                            tools_enabled=tools_enabled, session_id=session_id,
+                            grid=grid, prev_grid=prev_grid,
+                            thinking_budget=thinking_budget)
     if provider == "anthropic":
         return _call_anthropic(api_model, [{"role": "user", "content": prompt}],
                                 SYSTEM_MSG, temp, max_tok)
@@ -541,12 +664,22 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor") -
 
 
 def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str = "executor",
-                              retries: int = 2) -> LLMResult:
-    """Call LLM with retries, returning full metadata (tokens, timing, errors)."""
+                              retries: int = 10,
+                              tools_enabled: bool = False, session_id: str = "",
+                              grid=None, prev_grid=None,
+                              thinking_budget: int = 0) -> LLMResult:
+    """Call LLM with retries, returning full metadata (tokens, timing, errors).
+
+    Retries up to `retries` times (default 10) with exponential backoff.
+    Rate-limit (429) waits scale from 15s to 120s; server errors use shorter waits.
+    """
     t0 = time.time()
     for attempt in range(retries + 1):
         try:
-            result = call_model(model_key, prompt, cfg, role)
+            result = call_model(model_key, prompt, cfg, role,
+                                tools_enabled=tools_enabled, session_id=session_id,
+                                grid=grid, prev_grid=prev_grid,
+                                thinking_budget=thinking_budget)
             duration_ms = int((time.time() - t0) * 1000)
             return LLMResult(
                 text=result["text"],
@@ -558,23 +691,35 @@ def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str =
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                wait = 10 * (attempt + 1)
-                print(f"  [Rate limited] waiting {wait}s...")
+                wait = min(10 * (2 ** attempt), 120)  # exponential: 10, 20, 40, 80, 120, 120...
+                print(f"  [Rate limited] attempt {attempt+1}/{retries+1}, waiting {wait}s...")
+                time.sleep(wait)
+            elif e.response.status_code in (500, 502, 503, 529) and attempt < retries:
+                wait = min(5 * (2 ** attempt), 60)  # exponential: 5, 10, 20, 40, 60...
+                print(f"  [HTTP {e.response.status_code}] attempt {attempt+1}/{retries+1}, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 duration_ms = int((time.time() - t0) * 1000)
                 print(f"  [HTTP error {e.response.status_code}]: {e}")
                 return LLMResult(error=str(e), duration_ms=duration_ms, model=model_key, attempt=attempt)
         except Exception as e:
-            duration_ms = int((time.time() - t0) * 1000)
-            print(f"  [LLM error]: {e}")
-            return LLMResult(error=str(e), duration_ms=duration_ms, model=model_key, attempt=attempt)
+            err_str = str(e).lower()
+            # Retry on transient errors (quota, timeout, server errors)
+            if attempt < retries and any(k in err_str for k in ("429", "quota", "rate", "timeout", "503", "500", "overloaded", "resource_exhausted")):
+                is_rate_limit = any(k in err_str for k in ("429", "quota", "rate", "resource_exhausted"))
+                wait = min(10 * (2 ** attempt), 120) if is_rate_limit else min(5 * (2 ** attempt), 60)
+                print(f"  [LLM error] {e} — attempt {attempt+1}/{retries+1}, retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                duration_ms = int((time.time() - t0) * 1000)
+                print(f"  [LLM error]: {e}")
+                return LLMResult(error=str(e), duration_ms=duration_ms, model=model_key, attempt=attempt)
     duration_ms = int((time.time() - t0) * 1000)
     return LLMResult(error="max retries exceeded", duration_ms=duration_ms, model=model_key, attempt=retries)
 
 
 def call_model_with_retry(model_key: str, prompt: str, cfg: dict, role: str = "executor",
-                           retries: int = 2) -> str | None:
+                           retries: int = 10) -> str | None:
     """Thin wrapper: returns just the text (or None). For backward compatibility."""
     result = call_model_with_metadata(model_key, prompt, cfg, role, retries)
     return result.text
@@ -1179,6 +1324,39 @@ def _post_game(arcade, game_id: str, history: list, result: str,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# OBSERVABILITY SERVER (auto-started with --obs)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_obs_server = None
+
+
+def _start_obs_server(port: int = 5111):
+    """Start the Flask server in a background thread for the /obs dashboard."""
+    global _obs_server
+    try:
+        from server import app
+        from werkzeug.serving import make_server
+        _obs_server = make_server("0.0.0.0", port, app)
+        t = threading.Thread(target=_obs_server.serve_forever, daemon=True)
+        t.start()
+        print(f"\n  Observatory dashboard: http://localhost:{port}/obs\n")
+    except Exception as e:
+        print(f"  [obs] Failed to start dashboard server: {e}")
+
+
+def _obs_keepalive(seconds: int = 60):
+    """Keep the process alive so the dashboard remains accessible after the run."""
+    if _obs_server is None:
+        return
+    print(f"\n  Run complete. Dashboard still live for {seconds}s — Ctrl+C to exit early.")
+    try:
+        time.sleep(seconds)
+    except KeyboardInterrupt:
+        pass
+    print("  Observatory shutting down.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1193,6 +1371,8 @@ def main() -> None:
     parser.add_argument("--scaffolding", action="store_true", help="Use 3-system scaffold agent")
     parser.add_argument("--planning-horizon", type=int, default=None,
                         help="Max actions per LLM call (1=single-action, >1=multi-action planning)")
+    parser.add_argument("--obs", action="store_true",
+                        help="Enable observability dashboard (writes to .agent_obs/)")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config) if args.config else None)
@@ -1202,6 +1382,9 @@ def main() -> None:
         cfg["reasoning"]["executor_model"] = args.model
     if args.planning_horizon is not None:
         cfg["reasoning"]["planning_horizon"] = args.planning_horizon
+    if args.obs:
+        cfg["observability"] = True
+        _start_obs_server()
 
     if args.list_models:
         print("\nAvailable models:\n")
@@ -1271,6 +1454,9 @@ def main() -> None:
     for gid, res in results.items():
         print(f"  {gid:15s} -> {res}")
     print(f"\n  Scorecard: {arcade.get_scorecard()}\n")
+
+    if args.obs:
+        _obs_keepalive(60)
 
 
 if __name__ == "__main__":

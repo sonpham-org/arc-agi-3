@@ -1,0 +1,9 @@
+{
+  "game_id": "ar01-00000001",
+  "title": "Arbitrage Runner",
+  "default_fps": 5,
+  "baseline_actions": [10, 15, 20, 28, 35, 42, 50, 60, 70, 85],
+  "tags": ["puzzle", "economics", "grid"],
+  "local_dir": "environment_files/ar01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}

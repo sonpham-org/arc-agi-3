@@ -27,7 +27,7 @@ PROVIDER_TEST_MODELS = {
     "anthropic":  "claude-haiku-4-5",
     "cloudflare": "cloudflare/llama-3.3-70b",
     "huggingface": "hf/meta-llama-3.3-70b",
-    "ollama":     "ollama/llama3.1",
+    "ollama":     "ollama/qwen3.5",
 }
 
 # Simple prompt that should produce parseable JSON — minimal tokens

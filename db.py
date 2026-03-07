@@ -60,7 +60,9 @@ def _init_db():
                       ("total_cost", "REAL DEFAULT 0"),
                       ("prompts_json", "TEXT DEFAULT NULL"),
                       ("timeline_json", "TEXT DEFAULT NULL"),
-                      ("user_id", "TEXT DEFAULT NULL")]:
+                      ("user_id", "TEXT DEFAULT NULL"),
+                      ("player_type", "TEXT DEFAULT 'agent'"),
+                      ("duration_seconds", "REAL DEFAULT NULL")]:
         try:
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
@@ -142,6 +144,12 @@ def _init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session_turns_session ON session_turns(session_id)")
     except sqlite3.OperationalError:
         pass
+    # Leaderboard index: covers player_type filter + ORDER BY levels/steps
+    try:
+        conn.execute("""CREATE INDEX IF NOT EXISTS idx_sessions_leaderboard
+                        ON sessions(player_type, steps, levels DESC)""")
+    except sqlite3.OperationalError:
+        pass
     # Sync tracking table (local only — tracks what's been uploaded to Turso)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS session_sync (
@@ -179,6 +187,47 @@ def _init_db():
             error TEXT,
             PRIMARY KEY (batch_id, game_id)
         );
+    """)
+    # Observability events table (client-side obs screen events synced to server)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS obs_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            event_idx INTEGER NOT NULL,
+            event_json TEXT NOT NULL,
+            timestamp REAL NOT NULL
+        )
+    """)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_obs_session ON obs_events(session_id, event_idx)")
+    except sqlite3.OperationalError:
+        pass
+    # Comments table (per-game discussion)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            author_id TEXT NOT NULL,
+            author_name TEXT NOT NULL,
+            body TEXT NOT NULL,
+            upvotes INTEGER DEFAULT 0,
+            downvotes INTEGER DEFAULT 0,
+            created_at REAL NOT NULL
+        )
+    """)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_comments_game ON comments(game_id, created_at DESC)")
+    except sqlite3.OperationalError:
+        pass
+    # Track who voted on which comment (prevent double-voting)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS comment_votes (
+            comment_id INTEGER NOT NULL,
+            voter_id TEXT NOT NULL,
+            vote INTEGER NOT NULL,
+            PRIMARY KEY (comment_id, voter_id),
+            FOREIGN KEY (comment_id) REFERENCES comments(id)
+        )
     """)
     conn.commit()
     conn.close()
@@ -266,14 +315,14 @@ TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
 
 def _get_turso_db():
-    """Return a libsql connection to Turso, or None if not configured."""
+    """Return a libsql connection to Turso, or None if not configured.
+    Does NOT sync — callers that write must call conn.sync() themselves."""
     if not libsql or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
         return None
     try:
         conn = libsql.connect("db/turso_replica.db",
                               sync_url=TURSO_DATABASE_URL,
                               auth_token=TURSO_AUTH_TOKEN)
-        conn.sync()
         return conn
     except Exception as e:
         log.warning(f"Turso connection failed: {e}")
@@ -304,6 +353,7 @@ def _init_turso_db():
     if not conn:
         return
     try:
+        conn.sync()  # hydrate local replica once at startup
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -401,7 +451,9 @@ def _init_turso_db():
         # Schema migration: add columns (idempotent)
         for col, defn in [("prompts_json", "TEXT DEFAULT NULL"),
                           ("timeline_json", "TEXT DEFAULT NULL"),
-                          ("user_id", "TEXT DEFAULT NULL")]:
+                          ("user_id", "TEXT DEFAULT NULL"),
+                          ("player_type", "TEXT DEFAULT 'agent'"),
+                          ("duration_seconds", "REAL DEFAULT NULL")]:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
             except Exception:
@@ -431,6 +483,20 @@ def _init_turso_db():
                 used INTEGER DEFAULT 0
             );
         """)
+        # Observability events table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS obs_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                event_idx INTEGER NOT NULL,
+                event_json TEXT NOT NULL,
+                timestamp REAL NOT NULL
+            )
+        """)
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_obs_session ON obs_events(session_id, event_idx)")
+        except Exception:
+            pass
         conn.commit()
         conn.sync()
         conn.close()
@@ -452,19 +518,23 @@ def _turso_import_session(payload):
         user_id = sess.get("user_id")
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json,
+                                     user_id, player_type, duration_seconds)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
                  timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json),
-                 user_id = COALESCE(excluded.user_id, sessions.user_id)""",
+                 user_id = COALESCE(excluded.user_id, sessions.user_id),
+                 player_type = COALESCE(excluded.player_type, sessions.player_type),
+                 duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
+             sess.get("branch_at_step"), prompts_json, timeline_json, user_id,
+             sess.get("player_type", "agent"), sess.get("duration_seconds")),
         )
         for s in steps:
             grid_snapshot = None
@@ -610,12 +680,22 @@ def _turso_sync_session(session_id: str) -> dict:
         log.warning(f"_turso_sync_session local read failed: {e}")
         return result
 
-    # Build incremental payload
+    # Build lean payload: strip response_json from calls, skip turns & obs_events
+    lean_calls = []
+    for c in new_calls:
+        cd = dict(c)
+        cd["response_json"] = None  # exclude full response body
+        if cd.get("prompt_preview"):
+            cd["prompt_preview"] = cd["prompt_preview"][:200]
+        if cd.get("response_preview"):
+            cd["response_preview"] = cd["response_preview"][:200]
+        lean_calls.append(cd)
+
     payload = {
         "session": sess,
         "steps": [dict(s) for s in new_steps],
-        "llm_calls": [dict(c) for c in new_calls],
-        "session_turns": [dict(t) for t in new_turns],
+        "llm_calls": lean_calls,
+        "session_turns": [],  # skip turns — share page doesn't use them
     }
 
     if not _turso_import_session(payload):
@@ -955,6 +1035,197 @@ def _get_session_turns(session_id: str) -> list[dict]:
     except Exception as e:
         log.warning(f"_get_session_turns failed: {e}")
         return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PER-SESSION FILE EXPORT
+# ═══════════════════════════════════════════════════════════════════════════
+
+SESSIONS_DIR = Path(__file__).parent / "data" / "sessions"
+
+
+def _export_session_to_file(session_id: str) -> Path | None:
+    """Export a session from the central DB into a self-contained per-session directory.
+
+    Creates data/sessions/{session_id}/session.db (full SQLite copy) and
+    data/sessions/{session_id}/meta.json (lightweight index).
+    Idempotent — re-export overwrites existing files.
+    Returns the directory path, or None on failure.
+    """
+    try:
+        conn = _get_db()
+        sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not sess_row:
+            conn.close()
+            log.warning(f"_export_session_to_file: session {session_id} not found")
+            return None
+        sess = dict(sess_row)
+
+        steps = [dict(r) for r in conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num", (session_id,),
+        ).fetchall()]
+        calls = [dict(r) for r in conn.execute(
+            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY id", (session_id,),
+        ).fetchall()]
+        turns = [dict(r) for r in conn.execute(
+            "SELECT * FROM session_turns WHERE session_id = ? ORDER BY turn_num", (session_id,),
+        ).fetchall()]
+        conn.close()
+
+        # Create directory
+        out_dir = SESSIONS_DIR / session_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_db_path = out_dir / "session.db"
+
+        # Create self-contained SQLite
+        out_conn = sqlite3.connect(str(out_db_path))
+        out_conn.execute("PRAGMA journal_mode=WAL")
+        out_conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY, game_id TEXT NOT NULL, model TEXT DEFAULT '',
+                mode TEXT DEFAULT 'local', created_at REAL NOT NULL,
+                result TEXT DEFAULT 'NOT_FINISHED', steps INTEGER DEFAULT 0,
+                levels INTEGER DEFAULT 0, parent_session_id TEXT, branch_at_step INTEGER,
+                total_cost REAL DEFAULT 0, prompts_json TEXT, timeline_json TEXT, user_id TEXT
+            );
+            CREATE TABLE IF NOT EXISTS session_steps (
+                session_id TEXT NOT NULL, step_num INTEGER NOT NULL, action INTEGER NOT NULL,
+                data_json TEXT DEFAULT '{}', grid_snapshot TEXT, change_map_json TEXT,
+                llm_response_json TEXT, timestamp REAL NOT NULL,
+                PRIMARY KEY (session_id, step_num)
+            );
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, call_type TEXT NOT NULL,
+                step_num INTEGER, turn_num INTEGER, parent_call_id INTEGER, model TEXT NOT NULL,
+                prompt_preview TEXT, prompt_length INTEGER, response_preview TEXT, response_json TEXT,
+                input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+                cost REAL DEFAULT 0, duration_ms INTEGER DEFAULT 0, thinking_level TEXT,
+                tools_active INTEGER DEFAULT 0, cache_active INTEGER DEFAULT 0,
+                error TEXT, attempt INTEGER DEFAULT 0, timestamp REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, turn_num INTEGER NOT NULL,
+                turn_type TEXT NOT NULL, goal TEXT, plan_json TEXT,
+                steps_planned INTEGER DEFAULT 0, steps_executed INTEGER DEFAULT 0,
+                step_start INTEGER, step_end INTEGER, llm_calls INTEGER DEFAULT 0,
+                total_input_tokens INTEGER DEFAULT 0, total_output_tokens INTEGER DEFAULT 0,
+                total_cost REAL DEFAULT 0, total_duration_ms INTEGER DEFAULT 0,
+                replan_reason TEXT, world_model_updated INTEGER DEFAULT 0,
+                rules_version INTEGER DEFAULT 0, timestamp_start REAL NOT NULL, timestamp_end REAL
+            );
+        """)
+
+        # Insert session
+        sess_cols = ["id", "game_id", "model", "mode", "created_at", "result", "steps", "levels",
+                     "parent_session_id", "branch_at_step", "total_cost", "prompts_json", "timeline_json", "user_id"]
+        out_conn.execute(
+            f"INSERT OR REPLACE INTO sessions ({','.join(sess_cols)}) VALUES ({','.join('?' for _ in sess_cols)})",
+            tuple(sess.get(c) for c in sess_cols),
+        )
+
+        # Insert steps
+        step_cols = ["session_id", "step_num", "action", "data_json", "grid_snapshot",
+                     "change_map_json", "llm_response_json", "timestamp"]
+        for s in steps:
+            out_conn.execute(
+                f"INSERT OR REPLACE INTO session_steps ({','.join(step_cols)}) VALUES ({','.join('?' for _ in step_cols)})",
+                tuple(s.get(c) for c in step_cols),
+            )
+
+        # Insert calls
+        call_cols = ["id", "session_id", "call_type", "step_num", "turn_num", "parent_call_id", "model",
+                     "prompt_preview", "prompt_length", "response_preview", "response_json",
+                     "input_tokens", "output_tokens", "cost", "duration_ms", "thinking_level",
+                     "tools_active", "cache_active", "error", "attempt", "timestamp"]
+        for c in calls:
+            out_conn.execute(
+                f"INSERT OR REPLACE INTO llm_calls ({','.join(call_cols)}) VALUES ({','.join('?' for _ in call_cols)})",
+                tuple(c.get(col) for col in call_cols),
+            )
+
+        # Insert turns
+        turn_cols = ["id", "session_id", "turn_num", "turn_type", "goal", "plan_json",
+                     "steps_planned", "steps_executed", "step_start", "step_end", "llm_calls",
+                     "total_input_tokens", "total_output_tokens", "total_cost", "total_duration_ms",
+                     "replan_reason", "world_model_updated", "rules_version", "timestamp_start", "timestamp_end"]
+        for t in turns:
+            out_conn.execute(
+                f"INSERT OR REPLACE INTO session_turns ({','.join(turn_cols)}) VALUES ({','.join('?' for _ in turn_cols)})",
+                tuple(t.get(col) for col in turn_cols),
+            )
+
+        out_conn.commit()
+        out_conn.close()
+
+        # Write meta.json
+        total_cost = sess.get("total_cost", 0) or 0
+        meta = {
+            "id": session_id,
+            "game_id": sess.get("game_id", ""),
+            "model": sess.get("model", ""),
+            "result": sess.get("result", "NOT_FINISHED"),
+            "steps": sess.get("steps", 0),
+            "levels": sess.get("levels", 0),
+            "total_cost": round(total_cost, 4),
+            "created_at": sess.get("created_at", 0),
+            "calls": len(calls),
+            "turns": len(turns),
+        }
+        (out_dir / "meta.json").write_text(json.dumps(meta))
+
+        log.info(f"Exported session {session_id} to {out_dir}")
+        return out_dir
+    except Exception as e:
+        log.warning(f"_export_session_to_file failed: {e}")
+        return None
+
+
+def _read_session_from_file(session_id: str) -> dict | None:
+    """Read a session from its per-session file directory.
+
+    Returns {"session": {...}, "steps": [...], "calls": [...], "turns": [...]}
+    or None if the directory doesn't exist.
+    """
+    session_dir = SESSIONS_DIR / session_id
+    db_path = session_dir / "session.db"
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not sess_row:
+            conn.close()
+            return None
+        steps = [dict(r) for r in conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num", (session_id,),
+        ).fetchall()]
+        calls = [dict(r) for r in conn.execute(
+            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY id", (session_id,),
+        ).fetchall()]
+        turns = [dict(r) for r in conn.execute(
+            "SELECT * FROM session_turns WHERE session_id = ? ORDER BY turn_num", (session_id,),
+        ).fetchall()]
+        conn.close()
+        return {"session": dict(sess_row), "steps": steps, "calls": calls, "turns": turns}
+    except Exception as e:
+        log.warning(f"_read_session_from_file failed for {session_id}: {e}")
+        return None
+
+
+def _list_file_sessions() -> list[dict]:
+    """Scan data/sessions/*/meta.json and return list of metadata dicts, sorted by created_at desc."""
+    results = []
+    if not SESSIONS_DIR.exists():
+        return results
+    for meta_path in SESSIONS_DIR.glob("*/meta.json"):
+        try:
+            meta = json.loads(meta_path.read_text())
+            results.append(meta)
+        except Exception:
+            pass
+    results.sort(key=lambda m: m.get("created_at", 0), reverse=True)
+    return results
 
 
 # Initialize both DBs at import time (for gunicorn/Railway)

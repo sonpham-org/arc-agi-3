@@ -29,6 +29,11 @@ data/.copilot_token
 
 # Screenshots
 screenshots/
+Screenshot*.png
 
 # Test / benchmark results
 test/benchmark_*.json
+
+# Agent observability (runtime)
+.agent_obs/
+agentops.log

@@ -1,0 +1,9 @@
+{
+  "game_id": "lb01-00000001",
+  "title": "Light Bender",
+  "default_fps": 5,
+  "baseline_actions": [2, 2, 8, 2, 10, 14, 18, 6, 14, 22],
+  "tags": ["puzzle", "beam", "reflection"],
+  "local_dir": "environment_files/lb01/00000001",
+  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
+}

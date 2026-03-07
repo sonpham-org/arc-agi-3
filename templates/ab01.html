@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Angry Birds – ARC-AGI-3</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0d1a;display:flex;flex-direction:column;align-items:center;
+     justify-content:center;min-height:100vh;font-family:'Segoe UI',Arial,sans-serif;
+     overflow:hidden;user-select:none}
+#wrap{position:relative;display:inline-block}
+canvas{display:block;border-radius:10px;
+       box-shadow:0 0 60px rgba(0,100,255,.3),0 0 20px rgba(0,0,0,.9);
+       cursor:crosshair}
+/* ── Overlays ── */
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;
+         align-items:center;justify-content:center;border-radius:10px;
+         background:rgba(0,0,0,.65);backdrop-filter:blur(4px);
+         transition:opacity .3s}
+.overlay.hidden{opacity:0;pointer-events:none}
+.overlay h1{font-size:52px;font-weight:900;letter-spacing:2px;
+            text-shadow:0 3px 10px rgba(0,0,0,.8)}
+.overlay p{font-size:20px;color:#ccc;margin:10px 0 30px}
+.btn{padding:14px 38px;font-size:22px;font-weight:700;border:none;
+     border-radius:50px;cursor:pointer;margin:6px;transition:transform .1s,filter .1s;
+     box-shadow:0 4px 15px rgba(0,0,0,.4)}
+.btn:hover{transform:scale(1.06);filter:brightness(1.15)}
+.btn:active{transform:scale(.97)}
+.btn-green{background:linear-gradient(135deg,#4caf50,#2e7d32);color:#fff}
+.btn-orange{background:linear-gradient(135deg,#ff9800,#e65100);color:#fff}
+.btn-red{background:linear-gradient(135deg,#f44336,#b71c1c);color:#fff}
+.btn-blue{background:linear-gradient(135deg,#2196f3,#0d47a1);color:#fff}
+#stars-row{display:flex;gap:12px;margin:10px 0}
+.star{font-size:48px;transition:transform .4s;display:inline-block}
+.star.lit{filter:drop-shadow(0 0 8px gold)}
+.star.unlit{filter:grayscale(1) brightness(.4)}
+#level-btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.lvl-btn{width:56px;height:56px;border-radius:12px;font-size:20px;font-weight:700;
+         border:none;cursor:pointer;background:linear-gradient(135deg,#1565c0,#0d47a1);
+         color:#fff;box-shadow:0 3px 8px rgba(0,0,0,.4);transition:transform .1s}
+.lvl-btn:hover{transform:scale(1.1)}
+.lvl-btn.locked{background:linear-gradient(135deg,#555,#333);cursor:default}
+#hud{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;
+     padding:8px 18px;pointer-events:none;gap:20px}
+#hud-level{font-size:18px;font-weight:700;color:#fff;
+           text-shadow:0 2px 6px rgba(0,0,0,.7)}
+#hud-score{font-size:18px;font-weight:700;color:#ffd740;
+           text-shadow:0 2px 6px rgba(0,0,0,.7)}
+#ability-hint{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+              font-size:15px;color:rgba(255,255,255,.75);pointer-events:none;
+              text-shadow:0 1px 4px rgba(0,0,0,.8);transition:opacity .5s}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="900" height="500"></canvas>
+
+  <!-- HUD (always visible) -->
+  <div id="hud">
+    <span id="hud-level">Level 1</span>
+    <span id="hud-score">Score: 0</span>
+  </div>
+  <div id="ability-hint"></div>
+
+  <!-- Main menu -->
+  <div id="ov-menu" class="overlay">
+    <h1 style="color:#ff6b35">🐦 Angry Birds</h1>
+    <p>Launch birds to smash the castle and defeat the pigs!</p>
+    <button class="btn btn-green" onclick="G.startLevel(0)">Play Level 1</button>
+    <div style="margin-top:20px">
+      <p style="color:#aaa;font-size:15px">Select Level</p>
+      <div id="level-btns"></div>
+    </div>
+  </div>
+
+  <!-- Level complete -->
+  <div id="ov-win" class="overlay hidden">
+    <h1 style="color:#ffd740">Level Clear!</h1>
+    <div id="stars-row">
+      <span class="star unlit" id="s1">⭐</span>
+      <span class="star unlit" id="s2">⭐</span>
+      <span class="star unlit" id="s3">⭐</span>
+    </div>
+    <p id="win-score">Score: 0</p>
+    <div>
+      <button class="btn btn-orange" onclick="G.retry()">Retry</button>
+      <button class="btn btn-green" id="btn-next" onclick="G.nextLevel()">Next Level</button>
+    </div>
+  </div>
+
+  <!-- Level fail -->
+  <div id="ov-fail" class="overlay hidden">
+    <h1 style="color:#f44336">Oh No!</h1>
+    <p>Some pigs survived… Try again!</p>
+    <button class="btn btn-red" onclick="G.retry()">Retry</button>
+    <button class="btn btn-blue" onclick="G.showMenu()">Menu</button>
+  </div>
+
+  <!-- Game clear -->
+  <div id="ov-clear" class="overlay hidden">
+    <h1 style="color:#ffd740">🏆 You Win!</h1>
+    <p>All pigs defeated across 5 levels!</p>
+    <button class="btn btn-green" onclick="G.showMenu()">Play Again</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const W = 900, H = 500, GROUND = 440;
+const GRAV = 0.38;
+const SLING_X = 162, SLING_Y = 338;  // bird launch point
+const MAX_PULL = 75;
+const BIRD_SPEED_SCALE = 0.14;       // pull distance → launch speed
+
+// ───── Bird type IDs ─────
+const RED='red', BLU='blue', YEL='yellow', BLK='black', GRN='green';
+
+// ───── Block type IDs ─────
+const WOOD='wood', STONE='stone', ICE='ice';
+
+// ───── ARC colour palette (for HUD) ─────
+const BIRD_LABEL = {
+  [RED]:'Red – Standard',
+  [BLU]:'Blue – Splits into 3',
+  [YEL]:'Yellow – Speed boost',
+  [BLK]:'Black – Explodes',
+  [GRN]:'Green – Boomerang',
+};
+const ABILITY_HINT = {
+  [RED]:'',
+  [BLU]:'Click to split into 3!',
+  [YEL]:'Click to boost speed!',
+  [BLK]:'Click to explode early!',
+  [GRN]:'Click to boomerang!',
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  LEVELS  (fully hardcoded – deterministic)
+// ═══════════════════════════════════════════════════════════════
+// Block: [type, x, y, w, h]     Pig: [x, y, hp]
+const LEVELS = [
+  // ── Level 1 ─────────────────────────────────────────────────
+  { birds:[RED,RED,RED],
+    bg:0,
+    blocks:[
+      [WOOD,560,400,36,40],[WOOD,560,360,36,40],[WOOD,560,320,36,40],
+      [WOOD,640,400,36,40],[WOOD,640,360,36,40],
+      [WOOD,530,280,108,20],
+    ],
+    pigs:[[596,258,1],[640,340,1]]
+  },
+  // ── Level 2 ─────────────────────────────────────────────────
+  { birds:[RED,RED,BLU,BLU],
+    bg:1,
+    blocks:[
+      [WOOD,540,400,30,40],[STONE,540,360,30,40],[WOOD,540,320,30,40],
+      [WOOD,620,400,30,40],[STONE,620,360,30,40],
+      [ICE,580,280,30,30],[ICE,580,250,30,30],
+      [WOOD,510,280,120,20],
+      [WOOD,660,400,30,100],[STONE,660,300,30,100],
+    ],
+    pigs:[[595,228,1],[595,260,1],[675,278,2]]
+  },
+  // ── Level 3 ─────────────────────────────────────────────────
+  { birds:[RED,YEL,YEL,BLU,RED],
+    bg:2,
+    blocks:[
+      // Left tower
+      [STONE,490,400,30,80],[STONE,490,320,30,80],
+      [WOOD,522,400,30,80],[WOOD,522,320,30,80],
+      [STONE,490,240,62,24],
+      // Middle tower
+      [WOOD,600,400,28,40],[ICE,600,360,28,40],[WOOD,600,320,28,40],
+      [ICE,600,280,28,40],[WOOD,572,240,84,20],
+      // Right tower
+      [STONE,690,400,28,60],[WOOD,690,340,28,60],[ICE,690,280,28,60],
+      [STONE,720,400,28,60],[WOOD,720,340,28,60],
+      [WOOD,686,220,66,20],
+    ],
+    pigs:[[521,216,2],[614,216,1],[704,196,1],[705,316,1]]
+  },
+  // ── Level 4 ─────────────────────────────────────────────────
+  { birds:[RED,YEL,BLK,BLU,BLU,RED],
+    bg:1,
+    blocks:[
+      // Bunker left
+      [STONE,480,400,100,40],[STONE,480,360,40,40],[STONE,540,360,40,40],
+      [STONE,480,320,100,40],[STONE,480,280,100,28],
+      // Tower mid
+      [WOOD,610,400,28,120],[ICE,638,400,28,120],
+      [WOOD,610,280,56,28],
+      // Bunker right
+      [STONE,680,400,90,40],[STONE,680,360,90,40],[STONE,680,320,90,28],
+      // Plank bridge
+      [WOOD,598,252,172,16],
+      // Top decorations
+      [ICE,620,236,30,30],[ICE,680,236,30,30],
+    ],
+    pigs:[[510,252,2],[625,212,1],[710,294,2],[625,254,1],[710,212,1]]
+  },
+  // ── Level 5 ─────────────────────────────────────────────────
+  { birds:[RED,YEL,BLK,BLK,GRN,BLU,RED],
+    bg:2,
+    blocks:[
+      // Far left pillar
+      [STONE,460,400,28,120],[STONE,460,280,28,120],[STONE,460,160,28,120],
+      // Left fortress
+      [STONE,490,400,80,40],[WOOD,490,360,80,40],[STONE,490,320,80,40],
+      [ICE,490,280,80,40],[STONE,490,240,80,28],
+      // Center tower
+      [STONE,600,400,30,100],[WOOD,600,300,30,100],[STONE,600,200,30,100],
+      [STONE,630,400,30,100],[WOOD,630,300,30,100],[ICE,630,200,30,100],
+      [STONE,598,170,64,28],
+      // Right fortress
+      [STONE,690,400,80,40],[WOOD,690,360,80,40],[STONE,690,320,80,40],
+      [ICE,690,280,80,40],[STONE,690,240,80,28],
+      // Far right pillar
+      [STONE,772,400,28,120],[STONE,772,280,28,120],[STONE,772,160,28,120],
+      // Roof planks
+      [WOOD,488,212,174,16],[WOOD,596,142,66,16],
+      // Extra blocks
+      [ICE,560,360,28,40],[ICE,670,360,28,40],
+    ],
+    pigs:[[530,212,2],[615,142,2],[725,212,2],[615,168,1],[530,168,1],[725,168,1]]
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITY
+// ═══════════════════════════════════════════════════════════════
+function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+function dist(ax,ay,bx,by){const dx=ax-bx,dy=ay-by;return Math.sqrt(dx*dx+dy*dy)}
+function lerp(a,b,t){return a+(b-a)*t}
+
+// ═══════════════════════════════════════════════════════════════
+//  BIRD
+// ═══════════════════════════════════════════════════════════════
+class Bird {
+  constructor(type){
+    this.type=type;
+    this.x=0; this.y=0;
+    this.vx=0; this.vy=0;
+    this.r=this.baseRadius();
+    this.active=false;  // in-flight
+    this.landed=false;
+    this.abilityUsed=false;
+    this.life=300;       // frames before removed
+    this.trail=[];
+    this.angryEye=false;
+    this.scale=1;
+    this.alpha=1;
+    // For black: countdown before forced explode
+    this.fuseTimer=0;
+  }
+
+  baseRadius(){
+    return {[RED]:16,[BLU]:11,[YEL]:14,[BLK]:19,[GRN]:15}[this.type];
+  }
+
+  launch(vx,vy){
+    this.vx=vx; this.vy=vy;
+    this.active=true; this.angryEye=true;
+    if(this.type===BLK) this.fuseTimer=90; // ~1.5s
+  }
+
+  // Returns list of new birds if ability splits; otherwise null
+  useAbility(){
+    if(this.abilityUsed||!this.active) return null;
+    this.abilityUsed=true;
+    switch(this.type){
+      case BLU:{
+        const speed=Math.sqrt(this.vx*this.vx+this.vy*this.vy);
+        const a=Math.atan2(this.vy,this.vx);
+        const spread=0.35;
+        const b1=new Bird(BLU); b1.x=this.x; b1.y=this.y;
+        b1.vx=Math.cos(a-spread)*speed; b1.vy=Math.sin(a-spread)*speed;
+        b1.active=true; b1.angryEye=true; b1.abilityUsed=true;
+        const b2=new Bird(BLU); b2.x=this.x; b2.y=this.y;
+        b2.vx=Math.cos(a+spread)*speed; b2.vy=Math.sin(a+spread)*speed;
+        b2.active=true; b2.angryEye=true; b2.abilityUsed=true;
+        // Main bird continues straight
+        return [b1,b2];
+      }
+      case YEL:{
+        const speed=Math.sqrt(this.vx*this.vx+this.vy*this.vy);
+        const a=Math.atan2(this.vy,this.vx);
+        this.vx=Math.cos(a)*speed*2.2;
+        this.vy=Math.sin(a)*speed*2.2;
+        return null;
+      }
+      case BLK:
+        this.fuseTimer=1; // explode next frame
+        return null;
+      case GRN:
+        this.vx=-this.vx*0.9;
+        this.vy=-Math.abs(this.vy)*0.6;
+        return null;
+      default: return null;
+    }
+  }
+
+  update(){
+    if(!this.active) return;
+    this.vy+=GRAV;
+    this.x+=this.vx; this.y+=this.vy;
+
+    // Trail
+    this.trail.push({x:this.x,y:this.y});
+    if(this.trail.length>28) this.trail.shift();
+
+    // Black bird fuse
+    if(this.type===BLK&&this.fuseTimer>0){
+      this.fuseTimer--;
+    }
+
+    // Ground
+    if(this.y+this.r>=GROUND){
+      this.y=GROUND-this.r;
+      this.vy*=-0.28;
+      this.vx*=0.72;
+      if(Math.abs(this.vy)<1.5){this.vy=0;this.landed=true;}
+    }
+
+    // Off-screen left
+    if(this.x<-100) this.life=0;
+    if(!this.landed) this.life--;
+    else this.life-=3;
+  }
+
+  get dead(){return this.life<=0;}
+
+  drawBody(ctx){
+    const r=this.r;
+    ctx.save();
+    ctx.translate(this.x,this.y);
+    if(this.active){
+      const a=Math.atan2(this.vy,this.vx);
+      ctx.rotate(a*0.25);
+    }
+
+    // Shadow
+    ctx.beginPath();
+    ctx.ellipse(r*0.15,r*0.5,r*0.9,r*0.3,0,0,Math.PI*2);
+    ctx.fillStyle='rgba(0,0,0,0.18)';
+    ctx.fill();
+
+    // Body gradient
+    ctx.beginPath();
+    ctx.arc(0,0,r,0,Math.PI*2);
+    const g=ctx.createRadialGradient(-r*.35,-r*.35,r*.08,r*.1,r*.1,r*1.1);
+    const cols={
+      [RED]:['#ff7070','#cc0000'],
+      [BLU]:['#6ab0ff','#1a55cc'],
+      [YEL]:['#ffe566','#cc8800'],
+      [BLK]:['#888','#111'],
+      [GRN]:['#80ef60','#1a7a00'],
+    }[this.type];
+    g.addColorStop(0,cols[0]);
+    g.addColorStop(1,cols[1]);
+    ctx.fillStyle=g;
+    ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.25)';
+    ctx.lineWidth=1.5;
+    ctx.stroke();
+
+    // Feather/crest detail
+    if(this.type===RED||this.type===YEL){
+      ctx.beginPath();
+      ctx.moveTo(-r*.1,-r);
+      ctx.lineTo(-r*.3,-r*1.35);
+      ctx.lineTo(0,-r*1.1);
+      ctx.lineTo(r*.1,-r*1.4);
+      ctx.lineTo(r*.2,-r*1.0);
+      ctx.fillStyle=cols[0];
+      ctx.fill();
+    }
+    if(this.type===GRN){
+      ctx.beginPath();
+      ctx.moveTo(0,-r);
+      ctx.lineTo(-r*.2,-r*1.3);
+      ctx.lineTo(r*.2,-r*1.3);
+      ctx.closePath();
+      ctx.fillStyle='#a0ff70';
+      ctx.fill();
+    }
+
+    // Eye whites
+    ctx.beginPath();
+    ctx.arc(r*.28,-r*.18,r*.28,0,Math.PI*2);
+    ctx.fillStyle='#fff';
+    ctx.fill();
+
+    // Pupil (angry if active)
+    const pup={x:r*.32+(this.angryEye?.04:0),y:-r*.12};
+    ctx.beginPath();
+    ctx.arc(pup.x,pup.y,r*.13,0,Math.PI*2);
+    ctx.fillStyle='#111';
+    ctx.fill();
+    // Angry eyebrow
+    if(this.angryEye){
+      ctx.beginPath();
+      ctx.moveTo(r*.02,-r*.42);
+      ctx.lineTo(r*.58,-r*.32);
+      ctx.strokeStyle='#222';
+      ctx.lineWidth=2.5;
+      ctx.stroke();
+    }
+
+    // Beak
+    ctx.beginPath();
+    ctx.moveTo(r*.5,r*.05);
+    ctx.lineTo(r*.9,r*.0);
+    ctx.lineTo(r*.5,r*.2);
+    ctx.closePath();
+    ctx.fillStyle='#ffb300';
+    ctx.fill();
+
+    // Black bird fuse spark
+    if(this.type===BLK&&this.fuseTimer>0){
+      const sz=this.fuseTimer>30?4:2;
+      ctx.beginPath();
+      ctx.arc(0,-r,sz,0,Math.PI*2);
+      ctx.fillStyle=this.fuseTimer%6<3?'#fff':'#ff8800';
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  draw(ctx){
+    // Trail
+    for(let i=0;i<this.trail.length;i++){
+      const t=this.trail[i];
+      const a=(i/this.trail.length)*0.45;
+      ctx.beginPath();
+      ctx.arc(t.x,t.y,this.r*.28*(i/this.trail.length),0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${a})`;
+      ctx.fill();
+    }
+    ctx.globalAlpha=this.alpha;
+    this.drawBody(ctx);
+    ctx.globalAlpha=1;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BLOCK
+// ═══════════════════════════════════════════════════════════════
+class Block {
+  constructor(type,x,y,w,h){
+    this.type=type;
+    this.x=x; this.y=y; this.w=w; this.h=h;
+    this.maxHp=this.hp=({[WOOD]:4,[STONE]:9,[ICE]:2})[type];
+    this.vx=0; this.vy=0;
+    this.angle=0; this.angVel=0;
+    this.destroyed=false;
+    this.crumble=0; // countdown for death animation
+  }
+
+  get cx(){return this.x+this.w/2}
+  get cy(){return this.y+this.h/2}
+  get right(){return this.x+this.w}
+  get bottom(){return this.y+this.h}
+
+  hit(dmg){
+    if(this.destroyed) return;
+    this.hp-=dmg;
+    if(this.hp<=0){this.hp=0;this.destroyed=true;this.crumble=25;}
+  }
+
+  draw(ctx){
+    if(this.destroyed&&this.crumble<=0) return;
+    ctx.save();
+    if(this.destroyed) ctx.globalAlpha=this.crumble/25;
+
+    ctx.translate(this.cx,this.cy);
+    ctx.rotate(this.angle);
+    const hw=this.w/2, hh=this.h/2;
+
+    // Colours per type
+    const C={
+      [WOOD]:{m:'#a0622a',hi:'#c8812e',sh:'#5a3200',grain:true},
+      [STONE]:{m:'#8a8a8a',hi:'#b0b0b0',sh:'#444',grain:false},
+      [ICE]:{m:'#a8d8f0',hi:'#d8f0ff',sh:'#70b0d8',grain:false},
+    }[this.type];
+
+    // Shadow
+    ctx.fillStyle='rgba(0,0,0,.2)';
+    ctx.fillRect(-hw+3,-hh+3,this.w,this.h);
+
+    // Body
+    ctx.fillStyle=C.m;
+    ctx.fillRect(-hw,-hh,this.w,this.h);
+
+    // Highlight edge
+    ctx.fillStyle=C.hi;
+    ctx.fillRect(-hw,-hh,this.w*0.16,this.h);
+    ctx.fillRect(-hw,-hh,this.w,this.h*0.16);
+
+    // Shadow edge
+    ctx.fillStyle=C.sh;
+    ctx.fillRect(hw-this.w*.16,-hh,this.w*.16,this.h);
+    ctx.fillRect(-hw,hh-this.h*.16,this.w,this.h*.16);
+
+    // Wood grain
+    if(C.grain){
+      ctx.strokeStyle='rgba(60,30,0,.3)';
+      ctx.lineWidth=1;
+      for(let gx=-hw+8;gx<hw;gx+=10){
+        ctx.beginPath();ctx.moveTo(gx,-hh);ctx.lineTo(gx,hh);ctx.stroke();
+      }
+    }
+    // Ice shine
+    if(this.type===ICE){
+      ctx.fillStyle='rgba(255,255,255,.35)';
+      ctx.beginPath();
+      ctx.moveTo(-hw+2,-hh+2);
+      ctx.lineTo(-hw+hw*.4,-hh+2);
+      ctx.lineTo(-hw+2,-hh+hh*.4);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Cracks
+    const hp01=this.hp/this.maxHp;
+    if(hp01<0.85){
+      ctx.strokeStyle='rgba(0,0,0,.55)';
+      ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(-hw*.3,-hh*.5);ctx.lineTo(hw*.1,hh*.35);ctx.stroke();
+    }
+    if(hp01<0.55){
+      ctx.beginPath();ctx.moveTo(hw*.2,-hh*.7);ctx.lineTo(-hw*.4,hh*.55);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-hw*.6,-hh*.1);ctx.lineTo(hw*.5,hh*.2);ctx.stroke();
+    }
+    if(hp01<0.25){
+      ctx.beginPath();ctx.moveTo(hw*.4,-hh*.3);ctx.lineTo(-hw*.2,hh*.6);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-hw*.8,hh*.4);ctx.lineTo(hw*.1,-hh*.8);ctx.stroke();
+    }
+
+    ctx.restore();
+    if(this.destroyed) ctx.globalAlpha=1;
+    if(this.crumble>0) this.crumble--;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PIG
+// ═══════════════════════════════════════════════════════════════
+class Pig {
+  constructor(x,y,hp){
+    this.x=x; this.y=y; this.r=18; this.hp=hp; this.maxHp=hp;
+    this.destroyed=false;
+    this.hitFlash=0;
+    this.dieAnim=0;
+  }
+  hit(dmg){
+    this.hp-=dmg;
+    this.hitFlash=14;
+    if(this.hp<=0){this.hp=0;this.destroyed=true;this.dieAnim=30;}
+  }
+  draw(ctx){
+    if(this.destroyed&&this.dieAnim<=0) return;
+    ctx.save();
+    ctx.translate(this.x,this.y);
+    if(this.destroyed){
+      const s=this.dieAnim/30;
+      ctx.scale(s,s);
+      ctx.globalAlpha=s;
+      this.dieAnim--;
+    }
+    const r=this.r;
+    const flash=this.hitFlash>0;
+    // Body
+    ctx.beginPath();
+    ctx.arc(0,0,r,0,Math.PI*2);
+    const g=ctx.createRadialGradient(-r*.3,-r*.3,r*.1,r*.1,r*.1,r);
+    g.addColorStop(0,flash?'#eeff80':'#90e060');
+    g.addColorStop(1,flash?'#aadd00':'#2a7a15');
+    ctx.fillStyle=g;
+    ctx.fill();
+    ctx.strokeStyle='#1a5a0a';ctx.lineWidth=2;ctx.stroke();
+    // Ears
+    ctx.beginPath();
+    ctx.ellipse(-r*.55,-r*.7,r*.22,r*.18,-.3,0,Math.PI*2);
+    ctx.fillStyle='#3a9020';ctx.fill();
+    ctx.ellipse(r*.55,-r*.7,r*.22,r*.18,.3,0,Math.PI*2);
+    ctx.fill();
+    // Snout
+    ctx.beginPath();
+    ctx.ellipse(0,r*.2,r*.38,r*.26,0,0,Math.PI*2);
+    ctx.fillStyle='#58a830';ctx.fill();
+    ctx.strokeStyle='#1a5a0a';ctx.lineWidth=1;ctx.stroke();
+    // Nostrils
+    [-r*.14,r*.14].forEach(nx=>{
+      ctx.beginPath();ctx.arc(nx,r*.22,r*.08,0,Math.PI*2);
+      ctx.fillStyle='#0d4008';ctx.fill();
+    });
+    // Eyes
+    [-r*.28,r*.28].forEach(ex=>{
+      ctx.beginPath();ctx.arc(ex,-r*.22,r*.2,0,Math.PI*2);
+      ctx.fillStyle='#fff';ctx.fill();
+      ctx.beginPath();ctx.arc(ex+(this.destroyed?0:r*.05),-r*.18,r*.1,0,Math.PI*2);
+      ctx.fillStyle='#111';ctx.fill();
+    });
+    // X eyes if dead
+    if(this.destroyed){
+      ctx.strokeStyle='#333';ctx.lineWidth=2;
+      [-r*.28,r*.28].forEach(ex=>{
+        ctx.beginPath();
+        ctx.moveTo(ex-r*.12,-r*.34);ctx.lineTo(ex+r*.12,-r*.1);
+        ctx.moveTo(ex+r*.12,-r*.34);ctx.lineTo(ex-r*.12,-r*.1);
+        ctx.stroke();
+      });
+    }
+    // Damage bruise
+    if(!this.destroyed&&this.hp<this.maxHp){
+      ctx.strokeStyle='rgba(0,60,0,.6)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(-r*.5,r*.4);ctx.lineTo(-r*.1,r*.1);ctx.lineTo(r*.3,r*.5);ctx.stroke();
+    }
+    // Helmet for hp≥2
+    if(this.maxHp>=2&&!this.destroyed){
+      ctx.fillStyle='#888';
+      ctx.beginPath();
+      ctx.ellipse(0,-r*.55,r*.7,r*.5,-0.05,Math.PI,Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle='#555';ctx.lineWidth=1.5;ctx.stroke();
+      // Helmet rivets
+      [[-r*.4,-r*.7],[r*.4,-r*.7],[0,-r*.95]].forEach(([px,py])=>{
+        ctx.beginPath();ctx.arc(px,py,r*.07,0,Math.PI*2);
+        ctx.fillStyle='#666';ctx.fill();
+      });
+    }
+    if(this.hitFlash>0) this.hitFlash--;
+    ctx.restore();
+    ctx.globalAlpha=1;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PARTICLE
+// ═══════════════════════════════════════════════════════════════
+class Particle {
+  constructor(x,y,vx,vy,col,life,r){
+    this.x=x;this.y=y;this.vx=vx;this.vy=vy;
+    this.col=col;this.life=life;this.maxLife=life;this.r=r;
+  }
+  update(){
+    this.vy+=0.32;this.x+=this.vx;this.y+=this.vy;
+    this.vx*=0.94;this.life--;
+    if(this.y>GROUND){this.y=GROUND;this.vy*=-.3;this.vx*=.7;}
+  }
+  draw(ctx){
+    const a=this.life/this.maxLife;
+    ctx.globalAlpha=a;
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.r*a,0,Math.PI*2);
+    ctx.fillStyle=this.col;ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  get dead(){return this.life<=0;}
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME  CLASS
+// ═══════════════════════════════════════════════════════════════
+class Game {
+  constructor(){
+    this.canvas=document.getElementById('c');
+    this.ctx=this.canvas.getContext('2d');
+    this.levelIdx=0;
+    this.unlockedLevels=1;
+    this.score=0;
+    this.state='menu';  // menu|playing|win|fail|clear
+
+    // Level state
+    this.birds=[];
+    this.blocks=[];
+    this.pigs=[];
+    this.particles=[];
+    this.birdQueue=[];     // indices into this.birds not yet launched
+    this.activeBirdIdx=-1;
+    this.nextBirdTimer=0;
+
+    // Slingshot input
+    this.dragging=false;
+    this.dragX=0; this.dragY=0;
+    this.pullX=0; this.pullY=0;
+    this.aimPreview=[];
+
+    this.frameCount=0;
+    this.postShotTimer=0;  // wait after bird goes off-screen
+    this.bgCache=null;
+
+    this._initUI();
+    this._bindInput();
+    this._buildLevelBtns();
+    requestAnimationFrame(()=>this._loop());
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────
+  _initUI(){
+    this._ovMenu=document.getElementById('ov-menu');
+    this._ovWin =document.getElementById('ov-win');
+    this._ovFail=document.getElementById('ov-fail');
+    this._ovClear=document.getElementById('ov-clear');
+    this._hudLevel=document.getElementById('hud-level');
+    this._hudScore=document.getElementById('hud-score');
+    this._abilityHint=document.getElementById('ability-hint');
+    this._stars=[1,2,3].map(i=>document.getElementById('s'+i));
+    this._btnNext=document.getElementById('btn-next');
+  }
+
+  _setOverlay(name){
+    const map={menu:this._ovMenu,win:this._ovWin,fail:this._ovFail,clear:this._ovClear};
+    [this._ovMenu,this._ovWin,this._ovFail,this._ovClear].forEach(o=>{
+      o.classList.add('hidden');
+    });
+    if(name&&map[name]) map[name].classList.remove('hidden');
+  }
+
+  _buildLevelBtns(){
+    const c=document.getElementById('level-btns');
+    for(let i=0;i<5;i++){
+      const b=document.createElement('button');
+      b.textContent=i+1;
+      b.className='lvl-btn'+(i>=this.unlockedLevels?' locked':'');
+      b.onclick=()=>{ if(i<this.unlockedLevels) this.startLevel(i); };
+      c.appendChild(b);
+    }
+    this._levelBtns=Array.from(c.querySelectorAll('.lvl-btn'));
+  }
+
+  _refreshLevelBtns(){
+    this._levelBtns.forEach((b,i)=>{
+      b.className='lvl-btn'+(i>=this.unlockedLevels?' locked':'');
+    });
+  }
+
+  // ── Input ─────────────────────────────────────────────────────
+  _bindInput(){
+    const cv=this.canvas;
+    cv.addEventListener('mousedown',e=>this._onDown(e.offsetX,e.offsetY));
+    cv.addEventListener('mousemove',e=>this._onMove(e.offsetX,e.offsetY));
+    cv.addEventListener('mouseup', e=>this._onUp(e.offsetX,e.offsetY));
+    cv.addEventListener('touchstart',e=>{e.preventDefault();const t=this._touch(e);this._onDown(t.x,t.y);},{passive:false});
+    cv.addEventListener('touchmove', e=>{e.preventDefault();const t=this._touch(e);this._onMove(t.x,t.y);},{passive:false});
+    cv.addEventListener('touchend',  e=>{e.preventDefault();const t=this._touch(e);this._onUp(t.x,t.y);},{passive:false});
+  }
+
+  _touch(e){
+    const r=this.canvas.getBoundingClientRect();
+    const t=e.changedTouches[0]||e.touches[0];
+    const scaleX=W/r.width, scaleY=H/r.height;
+    return {x:(t.clientX-r.left)*scaleX,y:(t.clientY-r.top)*scaleY};
+  }
+
+  _onDown(x,y){
+    if(this.state!=='playing') return;
+    if(this.activeBirdIdx<0) return;
+    const bird=this.birds[this.activeBirdIdx];
+    if(bird.active){
+      // In-flight: trigger ability
+      const extras=bird.useAbility();
+      if(extras) this.birds.push(...extras);
+      this._showAbilityHint('');
+    } else {
+      // On slingshot: start drag
+      const d=dist(x,y,SLING_X,SLING_Y);
+      if(d<50){this.dragging=true;this.dragX=x;this.dragY=y;}
+    }
+  }
+
+  _onMove(x,y){
+    if(!this.dragging) return;
+    const dx=x-SLING_X, dy=y-SLING_Y;
+    const d=Math.min(Math.sqrt(dx*dx+dy*dy),MAX_PULL);
+    const a=Math.atan2(dy,dx);
+    this.pullX=Math.cos(a)*d;
+    this.pullY=Math.sin(a)*d;
+    this._calcPreview();
+  }
+
+  _onUp(x,y){
+    if(!this.dragging) return;
+    this.dragging=false;
+    const d=Math.sqrt(this.pullX*this.pullX+this.pullY*this.pullY);
+    if(d<8){this.pullX=0;this.pullY=0;this.aimPreview=[];return;}
+    const vx=-this.pullX*BIRD_SPEED_SCALE;
+    const vy=-this.pullY*BIRD_SPEED_SCALE;
+    const bird=this.birds[this.activeBirdIdx];
+    bird.x=SLING_X; bird.y=SLING_Y;
+    bird.launch(vx,vy);
+    this.pullX=0;this.pullY=0;this.aimPreview=[];
+    this._showAbilityHint(ABILITY_HINT[bird.type]);
+    this.postShotTimer=180;
+  }
+
+  _calcPreview(){
+    const vx=-this.pullX*BIRD_SPEED_SCALE;
+    const vy=-this.pullY*BIRD_SPEED_SCALE;
+    const pts=[];
+    let px=SLING_X,py=SLING_Y,pvx=vx,pvy=vy;
+    for(let i=0;i<120;i+=2){
+      pvy+=GRAV; px+=pvx; py+=pvy;
+      if(i%6===0) pts.push({x:px,y:py});
+      if(py>GROUND||px>W+50||px<-50) break;
+    }
+    this.aimPreview=pts;
+  }
+
+  // ── Level management ─────────────────────────────────────────
+  startLevel(idx){
+    this.levelIdx=idx;
+    const ld=LEVELS[idx];
+    this.state='playing';
+    this.score=0;
+    this.particles=[];
+    this.bgCache=null;
+    this.postShotTimer=0;
+    this.nextBirdTimer=0;
+
+    // Build birds
+    this.birds=ld.birds.map(t=>new Bird(t));
+    this.birdQueue=this.birds.map((_,i)=>i);
+    this.activeBirdIdx=-1;
+
+    // Build blocks
+    this.blocks=ld.blocks.map(b=>new Block(b[0],b[1],b[2],b[3],b[4]));
+
+    // Build pigs
+    this.pigs=ld.pigs.map(p=>new Pig(p[0],p[1],p[2]));
+
+    this._setOverlay(null);
+    this._hudLevel.textContent=`Level ${idx+1}`;
+    this._hudScore.textContent='Score: 0';
+    this._loadNextBird();
+  }
+
+  _loadNextBird(){
+    if(this.birdQueue.length===0){this.activeBirdIdx=-1;return;}
+    this.activeBirdIdx=this.birdQueue.shift();
+    const bird=this.birds[this.activeBirdIdx];
+    bird.x=SLING_X; bird.y=SLING_Y;
+    bird.active=false;
+    // Queue display: position waiting birds
+    this.birdQueue.forEach((bi,qi)=>{
+      const b=this.birds[bi];
+      b.x=80-qi*32; b.y=GROUND-22-b.r;
+    });
+  }
+
+  retry(){this.startLevel(this.levelIdx);}
+  nextLevel(){this.startLevel(Math.min(this.levelIdx+1,4));}
+  showMenu(){this.state='menu';this._setOverlay('menu');this._refreshLevelBtns();}
+
+  // ── Collision helpers ─────────────────────────────────────────
+  _circleRect(cx,cy,cr,rx,ry,rw,rh){
+    const nx=clamp(cx,rx,rx+rw);
+    const ny=clamp(cy,ry,ry+rh);
+    const dx=cx-nx, dy=cy-ny;
+    return dx*dx+dy*dy<cr*cr;
+  }
+
+  _birdVsBlocks(bird){
+    if(!bird.active) return;
+    for(const blk of this.blocks){
+      if(blk.destroyed) continue;
+      if(!this._circleRect(bird.x,bird.y,bird.r,blk.x,blk.y,blk.w,blk.h)) continue;
+
+      const spd=Math.sqrt(bird.vx*bird.vx+bird.vy*bird.vy);
+      const dmg=({[WOOD]:2,[STONE]:1,[ICE]:3})[blk.type];
+      blk.hit(Math.ceil(spd*dmg*.18));
+      if(blk.destroyed) this._spawnDestroyParticles(blk);
+
+      // Give block impulse
+      blk.vx+=bird.vx*.3;
+      blk.vy+=bird.vy*.3;
+      blk.angVel+=(bird.x-blk.cx)*.01;
+
+      // Slow bird
+      bird.vx*=0.55; bird.vy*=0.55;
+
+      // Damage score
+      this._addScore(10);
+    }
+  }
+
+  _birdVsPigs(bird){
+    if(!bird.active) return;
+    for(const pig of this.pigs){
+      if(pig.destroyed) continue;
+      if(dist(bird.x,bird.y,pig.x,pig.y)>bird.r+pig.r) continue;
+      const spd=Math.sqrt(bird.vx*bird.vx+bird.vy*bird.vy);
+      pig.hit(Math.ceil(spd*.22));
+      if(pig.destroyed){
+        this._spawnPigDeathParticles(pig);
+        this._addScore(500);
+      }
+      bird.vx*=0.45; bird.vy*=0.45;
+    }
+  }
+
+  _explodeBird(bird){
+    const R=90;
+    for(const blk of this.blocks){
+      if(blk.destroyed) continue;
+      if(dist(bird.x,bird.y,blk.cx,blk.cy)<R){
+        blk.hit(6);
+        blk.vx+=(blk.cx-bird.x)*.12;
+        blk.vy+=(blk.cy-bird.y)*.12-(bird.x>blk.cx?.2:.2);
+        blk.angVel+=(blk.cx-bird.x)*.006;
+        if(blk.destroyed){this._spawnDestroyParticles(blk);this._addScore(10);}
+      }
+    }
+    for(const pig of this.pigs){
+      if(pig.destroyed) continue;
+      if(dist(bird.x,bird.y,pig.x,pig.y)<R+pig.r){
+        pig.hit(4);
+        if(pig.destroyed){this._spawnPigDeathParticles(pig);this._addScore(500);}
+      }
+    }
+    // Explosion particles
+    this._spawnExplosion(bird.x,bird.y);
+    bird.life=0;
+  }
+
+  // ── Particles ─────────────────────────────────────────────────
+  _spawnDestroyParticles(blk){
+    const cols={[WOOD]:['#a06020','#c08030','#603000'],
+                [STONE]:['#888','#aaa','#555'],
+                [ICE]:['#c0e8ff','#90c8f0','#ffffff']}[blk.type];
+    const N=8;
+    for(let i=0;i<N;i++){
+      const a=(i/N)*Math.PI*2;
+      const sp=2+i*.5;
+      this.particles.push(new Particle(
+        blk.cx,blk.cy,
+        Math.cos(a)*sp,Math.sin(a)*sp,
+        cols[i%cols.length],40+i*3,4+i*.5
+      ));
+    }
+  }
+
+  _spawnPigDeathParticles(pig){
+    const N=10;
+    for(let i=0;i<N;i++){
+      const a=(i/N)*Math.PI*2;
+      const sp=1.5+i*.6;
+      this.particles.push(new Particle(
+        pig.x,pig.y,
+        Math.cos(a)*sp,Math.sin(a)*sp,
+        i%2===0?'#80e040':'#50b020',35+i*2,5
+      ));
+    }
+  }
+
+  _spawnExplosion(x,y){
+    const N=16;
+    for(let i=0;i<N;i++){
+      const a=(i/N)*Math.PI*2;
+      const sp=3+i*.7;
+      const cols=['#ff8800','#ffcc00','#ff4400','#fff'];
+      this.particles.push(new Particle(
+        x,y,Math.cos(a)*sp,Math.sin(a)*sp,
+        cols[i%cols.length],50+i,6+(i%4)
+      ));
+    }
+    // Shockwave flash particles outward
+    for(let i=0;i<8;i++){
+      const a=(i/8)*Math.PI*2;
+      this.particles.push(new Particle(
+        x,y,Math.cos(a)*8,Math.sin(a)*8,
+        '#ffffff',20,3
+      ));
+    }
+  }
+
+  _addScore(n){
+    this.score+=n;
+    this._hudScore.textContent=`Score: ${this.score}`;
+  }
+
+  _showAbilityHint(txt){
+    const el=this._abilityHint;
+    el.style.opacity=txt?'1':'0';
+    el.textContent=txt;
+  }
+
+  // ── Win/Fail check ───────────────────────────────────────────
+  _checkEnd(){
+    const alivePigs=this.pigs.filter(p=>!p.destroyed);
+    if(alivePigs.length===0){
+      // Win!
+      const birdsLeft=this.birdQueue.length+(this.activeBirdIdx>=0&&!this.birds[this.activeBirdIdx].active?1:0);
+      this._addScore(birdsLeft*200);
+      const stars=this.score>4000?3:this.score>2000?2:1;
+      this.state='win';
+      // Unlock next
+      if(this.levelIdx+1<5) this.unlockedLevels=Math.max(this.unlockedLevels,this.levelIdx+2);
+      this._refreshLevelBtns();
+      // Animate stars
+      setTimeout(()=>{
+        this._setOverlay('win');
+        document.getElementById('win-score').textContent=`Score: ${this.score}`;
+        this._stars.forEach((s,i)=>{
+          s.className='star unlit';
+          if(i<stars){
+            setTimeout(()=>{s.className='star lit';},i*400+200);
+          }
+        });
+        this._btnNext.style.display=this.levelIdx<4?'inline-block':'none';
+        if(this.levelIdx===4){
+          setTimeout(()=>{
+            this._setOverlay('clear');
+            this.unlockedLevels=1;
+          },2000);
+        }
+      },1000);
+      return;
+    }
+
+    // Check fail: no birds left and active bird has landed/gone
+    const active=this.activeBirdIdx>=0?this.birds[this.activeBirdIdx]:null;
+    const flyingExtra=this.birds.some((b,i)=>b.active&&i!==this.activeBirdIdx);
+    if(this.birdQueue.length===0&&(!active||active.landed||active.dead)&&!flyingExtra){
+      this.state='fail';
+      setTimeout(()=>this._setOverlay('fail'),1200);
+    }
+  }
+
+  // ── Main loop ─────────────────────────────────────────────────
+  _loop(){
+    requestAnimationFrame(()=>this._loop());
+    this.frameCount++;
+    const ctx=this.ctx;
+    ctx.clearRect(0,0,W,H);
+
+    this._drawBG();
+
+    if(this.state==='playing'||this.state==='win'||this.state==='fail'){
+      this._updatePhysics();
+      this._drawWorld();
+    }
+  }
+
+  // ── Background ───────────────────────────────────────────────
+  _drawBG(){
+    const ctx=this.ctx;
+    const lvl=this.levelIdx;
+    // Sky gradient
+    const sky=ctx.createLinearGradient(0,0,0,H);
+    if(lvl===2){
+      sky.addColorStop(0,'#ff9a3c');  // sunset
+      sky.addColorStop(.45,'#ff6b6b');
+      sky.addColorStop(1,'#2a1a3a');
+    } else {
+      sky.addColorStop(0,'#1e90ff');
+      sky.addColorStop(.6,'#87ceeb');
+      sky.addColorStop(1,'#c9e8ff');
+    }
+    ctx.fillStyle=sky;
+    ctx.fillRect(0,0,W,H);
+
+    // Clouds (fixed positions)
+    ctx.fillStyle='rgba(255,255,255,0.82)';
+    [[120,80,55,30],[280,55,70,35],[500,90,60,28],[720,65,80,38],[830,100,50,25]].forEach(([cx,cy,rw,rh])=>{
+      ctx.beginPath();
+      ctx.ellipse(cx,cy,rw,rh,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx-rw*.4,cy+rh*.3,rw*.6,rh*.7,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx+rw*.4,cy+rh*.3,rw*.6,rh*.7,0,0,Math.PI*2);
+      ctx.fill();
+    });
+
+    // Mountains
+    ctx.fillStyle=lvl===2?'#6a3a2a':'#5a8a3a';
+    [[200,GROUND-60,150],[450,GROUND-90,200],[700,GROUND-50,180]].forEach(([mx,my,mw])=>{
+      ctx.beginPath();
+      ctx.moveTo(mx-mw/2,GROUND);
+      ctx.lineTo(mx,my);
+      ctx.lineTo(mx+mw/2,GROUND);
+      ctx.closePath();
+      ctx.fill();
+    });
+    // Mountain highlights
+    ctx.fillStyle=lvl===2?'#a06a4a':'#7ab05a';
+    [[200,GROUND-60,50],[450,GROUND-90,70],[700,GROUND-50,55]].forEach(([mx,my,mw])=>{
+      ctx.beginPath();
+      ctx.moveTo(mx,my);
+      ctx.lineTo(mx+mw/2,GROUND);
+      ctx.lineTo(mx,GROUND);
+      ctx.closePath();
+      ctx.fill();
+    });
+
+    // Ground
+    const grd=ctx.createLinearGradient(0,GROUND,0,H);
+    grd.addColorStop(0,'#5a9a30');
+    grd.addColorStop(.08,'#4a8a20');
+    grd.addColorStop(1,'#3a6a18');
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,GROUND,W,H-GROUND);
+
+    // Ground edge highlight
+    ctx.fillStyle='#70c040';
+    ctx.fillRect(0,GROUND,W,5);
+  }
+
+  // ── Physics update ───────────────────────────────────────────
+  _updatePhysics(){
+    if(this.state!=='playing') return;
+
+    // Update active bird
+    if(this.activeBirdIdx>=0){
+      const bird=this.birds[this.activeBirdIdx];
+      bird.update();
+      this._birdVsBlocks(bird);
+      this._birdVsPigs(bird);
+
+      // Black bomb fuse
+      if(bird.type===BLK&&bird.active&&bird.fuseTimer===0&&!bird.abilityUsed){
+        bird.abilityUsed=true;
+        this._explodeBird(bird);
+      }
+      // On explicit explode
+      if(bird.type===BLK&&bird.active&&bird.abilityUsed&&bird.fuseTimer===1&&!bird.dead){
+        this._explodeBird(bird);
+      }
+
+      if(bird.dead||bird.landed){
+        this.postShotTimer--;
+        if(this.postShotTimer<=0){
+          this._showAbilityHint('');
+          this._loadNextBird();
+          this._checkEnd();
+        }
+      }
+    }
+
+    // Update extra birds (blue splits etc.)
+    for(let i=0;i<this.birds.length;i++){
+      if(i===this.activeBirdIdx) continue;
+      const b=this.birds[i];
+      if(!b.active||b.dead) continue;
+      b.update();
+      this._birdVsBlocks(b);
+      this._birdVsPigs(b);
+      if(b.type===BLK&&b.fuseTimer===0&&!b.abilityUsed){
+        b.abilityUsed=true; this._explodeBird(b);
+      }
+    }
+
+    // Blocks: apply velocity (knocked blocks slide a bit)
+    for(const blk of this.blocks){
+      if(blk.destroyed) continue;
+      blk.vy+=GRAV*.6;
+      blk.angle+=blk.angVel;
+      blk.angVel*=0.92;
+      blk.x+=blk.vx; blk.y+=blk.vy;
+      blk.vx*=0.85;
+      // Ground
+      if(blk.y+blk.h>=GROUND){blk.y=GROUND-blk.h;blk.vy*=-.15;blk.vx*=.8;blk.angVel*=.6;}
+    }
+
+    // Particles
+    this.particles=this.particles.filter(p=>{p.update();return !p.dead;});
+
+    // Pigs: simple gravity if not on ground
+    for(const pig of this.pigs){
+      if(pig.destroyed) continue;
+      if(pig.y+pig.r<GROUND){pig.y=Math.min(pig.y+GRAV*2,GROUND-pig.r);}
+    }
+  }
+
+  // ── Draw world ───────────────────────────────────────────────
+  _drawWorld(){
+    const ctx=this.ctx;
+
+    // Slingshot
+    this._drawSlingshot();
+
+    // Blocks
+    for(const blk of this.blocks) blk.draw(ctx);
+
+    // Pigs
+    for(const pig of this.pigs) pig.draw(ctx);
+
+    // Particles
+    for(const p of this.particles) p.draw(ctx);
+
+    // Queued birds (not yet launched)
+    this.birdQueue.forEach((bi,qi)=>{
+      const b=this.birds[bi];
+      const qx=80-qi*30, qy=GROUND-b.r-4;
+      b.x=qx; b.y=qy;
+      b.draw(ctx);
+    });
+
+    // Active bird
+    if(this.activeBirdIdx>=0){
+      const bird=this.birds[this.activeBirdIdx];
+      // Draw trajectory preview
+      if(!bird.active&&this.dragging&&this.aimPreview.length>0){
+        ctx.save();
+        ctx.setLineDash([6,8]);
+        ctx.strokeStyle='rgba(255,255,255,0.55)';
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        this.aimPreview.forEach((p,i)=>{
+          i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+      bird.draw(ctx);
+
+      // Draw slingshot elastic when aiming
+      if(!bird.active){
+        this._drawElastic(bird.x,bird.y);
+      }
+    }
+
+    // Extra birds (split)
+    for(let i=0;i<this.birds.length;i++){
+      if(i===this.activeBirdIdx) continue;
+      const b=this.birds[i];
+      if(b.active&&!b.dead) b.draw(ctx);
+    }
+  }
+
+  _drawSlingshot(){
+    const ctx=this.ctx;
+    const sx=SLING_X, groundY=GROUND;
+
+    // Posts
+    ctx.save();
+    ctx.strokeStyle='#6b3a10';
+    ctx.lineWidth=10;
+    ctx.lineCap='round';
+
+    // Left fork
+    ctx.beginPath();
+    ctx.moveTo(sx-22,groundY);
+    ctx.lineTo(sx-8,SLING_Y-18);
+    ctx.stroke();
+    // Right fork
+    ctx.beginPath();
+    ctx.moveTo(sx+22,groundY);
+    ctx.lineTo(sx+8,SLING_Y-18);
+    ctx.stroke();
+
+    // Fork tips
+    ctx.fillStyle='#4a2808';
+    ctx.beginPath();ctx.arc(sx-8,SLING_Y-18,6,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(sx+8,SLING_Y-18,6,0,Math.PI*2);ctx.fill();
+
+    // Main trunk
+    ctx.beginPath();
+    ctx.moveTo(sx,groundY);
+    ctx.lineTo(sx,SLING_Y+10);
+    ctx.strokeStyle='#8b4a15';
+    ctx.lineWidth=12;
+    ctx.stroke();
+
+    // Highlight
+    ctx.beginPath();
+    ctx.moveTo(sx+2,groundY);
+    ctx.lineTo(sx+2,SLING_Y+10);
+    ctx.strokeStyle='rgba(255,200,100,.3)';
+    ctx.lineWidth=4;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  _drawElastic(bx,by){
+    const ctx=this.ctx;
+    const lx=SLING_X-8, ly=SLING_Y-18;
+    const rx=SLING_X+8, ry=SLING_Y-18;
+
+    ctx.save();
+    ctx.strokeStyle='#8b6914';
+    ctx.lineWidth=3;
+    ctx.lineCap='round';
+
+    // Left band: fork tip → bird → mid
+    ctx.beginPath();
+    ctx.moveTo(lx,ly);
+    ctx.lineTo(bx,by);
+    ctx.stroke();
+
+    // Right band: fork tip → bird
+    ctx.beginPath();
+    ctx.moveTo(rx,ry);
+    ctx.lineTo(bx,by);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════
+const G = new Game();
+G.showMenu();
+</script>
+</body>
+</html>

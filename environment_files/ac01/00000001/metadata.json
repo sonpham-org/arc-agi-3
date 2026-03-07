@@ -1,0 +1,9 @@
+{
+  "game_id": "ac01-00000001",
+  "title": "ARCeption",
+  "default_fps": 20,
+  "tags": ["click", "puzzle"],
+  "baseline_actions": [],
+  "local_dir": "environment_files/ac01/00000001",
+  "date_downloaded": "2026-03-07T15:00:00.000000+00:00"
+}

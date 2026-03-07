@@ -227,7 +227,6 @@ _PORTS9 = [
     _port(24,  8, F_FRANCE),
     _port( 8, 24, F_SPAIN),
     _port(24, 24, F_DUTCH),
-    _port(16, 12, F_PIRATE),
 ]
 
 _SHORE1, _SHORE2, _SHORE3 = _shore_mask(_MAP1), _shore_mask(_MAP2), _shore_mask(_MAP3)
@@ -347,16 +346,14 @@ _LEVELS = [
         "name":         "Key & Switch",
         "map":          _MAP9, "shore": _SHORE9, "ports": _PORTS9,
         "ship":         (2, 16),
-        "treasures":    [(2, 2), (2, 29)],
+        "treasures":    [(2, 2), (2, 29), (29, 3), (29, 13), (29, 19), (29, 29)],
         # Switch groups
         "switch_a":     [(2, 8), (16, 2)],
         "switch_b":     [(2, 24), (16, 29)],
         "switch":       {"pos": [16, 4]},
-        # Orange key unlocks orange chests; red key unlocks red chests
-        "orange_chests": [(29, 3), (29, 13)],
-        "red_chests":   [(29, 19), (29, 29)],
-        "keys":         [{"pos": [29,  8], "color": "orange"},
-                         {"pos": [29, 24], "color": "red"}],
+        "orange_chests": [],
+        "red_chests":   [],
+        "keys":         [],
         "enemies":      [],
         "chasers":      [{"pos": [29, 16], "budget": 0.0}],
         "patrols":      [{"pos": [8, 16], "dir": [1, 0], "alerted": False, "budget": 0.0}],

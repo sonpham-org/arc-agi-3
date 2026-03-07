@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 import httpx as _httpx
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, make_response, render_template, request
+from flask import Flask, Response, abort, jsonify, make_response, render_template, request
 
 import arc_agi
 from arcengine import GameAction, GameState
@@ -49,7 +49,9 @@ FEATURES = {
 }
 
 # Games hidden in prod mode (non-foundation games)
-HIDDEN_GAMES = ["fd01", "fy01", "pt01"]
+HIDDEN_GAMES = ["ab01", "fd01", "fy01", "pt01", "sh02"]
+
+DEV_SECRET = os.environ.get("DEV_SECRET", "arc-dev-2026")
 
 # Will be set by CLI args; default to staging
 _server_mode = "staging"
@@ -303,7 +305,8 @@ _throttle_lock = threading.Lock()
 from db import (
     DB_PATH, _init_db, _get_db, _compress_grid, _decompress_grid,
     _db_insert_session, _db_insert_step, _db_update_session,
-    _log_llm_call, _get_session_calls,
+    _log_llm_call, _get_session_calls, _read_session_from_file,
+    _list_file_sessions,
 )
 
 def _reconstruct_session(game_id: str, actions: list[dict], capture_per_step: bool = False):
@@ -445,6 +448,13 @@ MODEL_REGISTRY: dict[str, dict] = {
         "provider": "gemini", "api_model": "gemini-3-pro-preview",
         "env_key": "GEMINI_API_KEY",
         "price": "$2/$12 per 1M tok",
+        "context_window": 1000000,
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
+    },
+    "gemini-3.1-flash-lite": {
+        "provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview",
+        "env_key": "GEMINI_API_KEY",
+        "price": "$0.25/$1.50 per 1M tok",
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
@@ -1521,14 +1531,15 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
         headers.update(extra_headers)
     body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": max_tokens}
 
-    # Retry with backoff on 429 (rate limit) — up to 3 attempts
+    # Retry with exponential backoff on 429 (rate limit) — up to 10 attempts
     last_exc = None
-    for attempt in range(3):
+    for attempt in range(10):
         resp = httpx.post(url, headers=headers, json=body, timeout=90.0)
         if resp.status_code == 429:
-            retry_after = float(resp.headers.get("retry-after", 2 ** attempt))
-            app.logger.info(f"Rate limited by {url}, retrying in {retry_after}s (attempt {attempt+1}/3)")
-            time.sleep(min(retry_after, 30))
+            retry_after = float(resp.headers.get("retry-after", min(10 * (2 ** attempt), 120)))
+            retry_after = min(retry_after, 120)
+            app.logger.info(f"Rate limited by {url}, retrying in {retry_after}s (attempt {attempt+1}/10)")
+            time.sleep(retry_after)
             last_exc = httpx.HTTPStatusError(
                 f"429 Too Many Requests", request=resp.request, response=resp)
             continue
@@ -1714,11 +1725,25 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
 
 @app.after_request
 def add_cache_headers(response):
-    if response.content_type and "text/html" in response.content_type:
+    ct = response.content_type or ""
+    if "text/html" in ct:
+        # HTML is Jinja-rendered — never cache
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    elif request.path.startswith("/static/"):
+        if get_mode() == "staging":
+            # No caching in staging — always serve fresh files
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        else:
+            # Prod: cache 1 day at CDN, 1 hour in browser
+            response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return response
+
+
+@app.route("/games/ab01")
+def game_ab01():
+    return render_template("ab01.html")
 
 
 @app.route("/")
@@ -1921,7 +1946,7 @@ def game_source(game_id):
     py_file = local_dir / f"{bare_id}.py"
     if not py_file.exists():
         return jsonify({"error": f"Source file not found for {game_id}"}), 404
-    source = py_file.read_text()
+    source = py_file.read_text(encoding="utf-8")
     return jsonify({
         "source": source,
         "class_name": env_info.class_name,
@@ -2053,6 +2078,50 @@ def reset_game():
     state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(reset)"}
     with session_lock:
         session_grids[session_id] = state.get("grid", [])
+    return jsonify(state)
+
+
+@app.route("/api/dev/jump-level", methods=["POST"])
+def dev_jump_level():
+    if not DEV_SECRET or request.headers.get("X-Dev-Secret", "") != DEV_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id")
+    target_level = payload.get("level")
+    if session_id is None or target_level is None:
+        return jsonify({"error": "session_id and level required"}), 400
+    with session_lock:
+        env = game_sessions.get(session_id)
+    if env is None:
+        return jsonify({"error": "Session not found"}), 404
+    try:
+        from arcengine import FrameDataRaw
+        game = env._game
+        target_level = int(target_level)
+        # Restore clean level state and jump
+        game._levels[target_level] = game._clean_levels[target_level].clone()
+        game.set_level(target_level)  # calls on_set_level
+        game._score = target_level
+        game._state = GameState.NOT_FINISHED
+        # Render current frame without consuming a game step
+        frame = game.camera.render(game.current_level.get_sprites())
+        frame_raw = FrameDataRaw(
+            game_id=game._game_id,
+            state=game._state,
+            levels_completed=game._score,
+            win_levels=game._win_score,
+            guid=getattr(env, "_guid", None),
+            available_actions=game._available_actions,
+        )
+        frame_raw.frame = [frame]
+        env._last_response = frame_raw
+    except (IndexError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+    state = env_state_dict(env, frame_raw)
+    state["session_id"] = session_id
+    with session_lock:
+        session_grids[session_id] = state.get("grid", [])
+        session_snapshots[session_id] = []
     return jsonify(state)
 
 
@@ -2465,20 +2534,26 @@ def import_session():
         conn = _get_db()
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json,
+                                     user_id, player_type, duration_seconds)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
                  timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json),
-                 user_id = COALESCE(excluded.user_id, sessions.user_id)""",
+                 user_id = COALESCE(excluded.user_id, sessions.user_id),
+                 player_type = COALESCE(excluded.player_type, sessions.player_type),
+                 duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
+             sess.get("branch_at_step"), prompts_json, timeline_json, user_id,
+             sess.get("player_type", "agent"), sess.get("duration_seconds")),
         )
+        llm_count = sum(1 for s in steps if s.get("llm_response"))
+        app.logger.info(f"[import] session={sess['id'][:30]} steps={len(steps)} with_llm={llm_count}")
         for s in steps:
             grid_snapshot = None
             if s.get("grid"):
@@ -2495,11 +2570,80 @@ def import_session():
                  json.dumps(s.get("llm_response")) if s.get("llm_response") else None,
                  s.get("timestamp", time.time())),
             )
+        # Extract timeline events into llm_calls rows (delete existing to avoid duplicates on re-upload)
+        conn.execute("DELETE FROM llm_calls WHERE session_id = ?", (sess["id"],))
+        calls_imported = 0
+        timeline = sess.get("timeline") or []
+        if isinstance(timeline, str):
+            try:
+                timeline = json.loads(timeline)
+            except Exception:
+                timeline = []
+
+        # Build step_num→timestamp lookup for deriving call timestamps
+        step_ts = {}
+        for s in steps:
+            sn = s.get("step_num")
+            if sn is not None:
+                step_ts[sn] = s.get("timestamp", 0)
+
+        # Map timeline event types to llm_calls rows
+        # Supported: reasoning, compact, interrupt (linear/RLM scaffolds)
+        #            as_orch_*, as_sub_* (agent_spawn scaffold)
+        for ev in timeline:
+            etype = ev.get("type", "")
+            # Determine call_type
+            if etype in ("reasoning", "compact", "interrupt"):
+                call_type = ev.get("call_type", etype)
+            elif etype.startswith("as_"):
+                call_type = etype  # e.g. as_orch_delegate, as_sub_result
+            else:
+                continue  # skip non-LLM events (act, game state, etc.)
+
+            # Derive timestamp: explicit > from step > from session start
+            ts = ev.get("timestamp") or 0
+            if not ts:
+                step_num = ev.get("stepStart") or ev.get("step_num")
+                if step_num and step_num in step_ts:
+                    ts = step_ts[step_num]
+            if not ts:
+                ts = sess.get("created_at", time.time())
+
+            # Build response_preview from available fields
+            preview = (ev.get("response_preview") or ev.get("response")
+                       or ev.get("reasoning") or ev.get("summary") or "")
+            if len(preview) > 1000:
+                preview = preview[:1000]
+
+            conn.execute(
+                """INSERT OR IGNORE INTO llm_calls
+                   (session_id, call_type, step_num, turn_num, model,
+                    prompt_preview, prompt_length, response_preview,
+                    input_tokens, output_tokens, cost, duration_ms,
+                    thinking_level, cache_active, error, attempt, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sess["id"], call_type,
+                 ev.get("stepStart") or ev.get("step_num"),
+                 ev.get("turn") or ev.get("parentTurn"),
+                 ev.get("model", ""),
+                 (ev.get("task") or "")[:500],  # use task as prompt_preview for agent_spawn
+                 ev.get("prompt_length", 0),
+                 preview,
+                 ev.get("input_tokens", 0), ev.get("output_tokens", 0),
+                 ev.get("cost", 0),
+                 ev.get("duration") or ev.get("duration_ms") or 0,
+                 ev.get("thinking_level"),
+                 int(bool(ev.get("cache_active"))),
+                 ev.get("error"), ev.get("attempt", 0), ts),
+            )
+            calls_imported += 1
+
         conn.commit()
         conn.close()
         # Also persist to Turso for durable shared replays
         _turso_import_session(payload)
-        return _cors_resp({"status": "ok", "session_id": sess["id"], "steps_imported": len(steps)})
+        return _cors_resp({"status": "ok", "session_id": sess["id"],
+                           "steps_imported": len(steps), "calls_imported": calls_imported})
     except Exception as e:
         app.logger.warning(f"Session import failed: {e}")
         return _cors_resp({"error": str(e)}, 500)
@@ -2520,7 +2664,7 @@ def resume_session():
     try:
         conn = _get_db()
         sess = conn.execute(
-            "SELECT game_id, model, parent_session_id, branch_at_step FROM sessions WHERE id = ?",
+            "SELECT game_id, model, parent_session_id, branch_at_step, timeline_json FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         if sess:
@@ -2600,6 +2744,13 @@ def resume_session():
             s["levels_completed"] = per_step_states[i]["levels_completed"]
     state["steps"] = step_list
     state["model"] = sess["model"] or ""
+    # Include timeline events for obs reconstruction
+    tl_raw = sess.get("timeline_json")
+    if tl_raw:
+        try:
+            state["timeline"] = json.loads(tl_raw) if isinstance(tl_raw, str) else tl_raw
+        except Exception:
+            state["timeline"] = []
     return jsonify(state)
 
 
@@ -2623,6 +2774,197 @@ def log_session_event(session_id):
     except Exception as e:
         app.logger.warning(f"Event log failed: {e}")
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/sessions/<session_id>/obs-events", methods=["GET", "POST"])
+@bot_protection
+def session_obs_events(session_id):
+    """GET: reconstruct obs events for replay. POST: save events from client."""
+    if request.method == "POST":
+        if not feature_enabled("session_db"):
+            return jsonify({"error": "Session DB not enabled"}), 400
+        payload = request.get_json(force=True)
+        events = payload.get("events", [])
+        cursor = payload.get("cursor", 0)
+        if not events:
+            return jsonify({"ok": True, "cursor": cursor})
+        try:
+            conn = _get_db()
+            now = time.time()
+            for i, ev in enumerate(events):
+                conn.execute(
+                    "INSERT OR IGNORE INTO obs_events (session_id, event_idx, event_json, timestamp) VALUES (?, ?, ?, ?)",
+                    (session_id, cursor + i, json.dumps(ev), now))
+            conn.commit()
+            conn.close()
+            new_cursor = cursor + len(events)
+            return jsonify({"ok": True, "cursor": new_cursor})
+        except Exception as e:
+            app.logger.warning(f"Obs events save failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # GET — reconstruct events from DB for replay
+    try:
+        conn = _get_db()
+        # Try stored obs_events first
+        stored = conn.execute(
+            "SELECT event_json FROM obs_events WHERE session_id = ? ORDER BY event_idx",
+            (session_id,),
+        ).fetchall()
+        if stored:
+            # Enrich events with grid snapshots from session_steps
+            grid_rows = conn.execute(
+                "SELECT step_num, grid_snapshot FROM session_steps "
+                "WHERE session_id = ? AND grid_snapshot IS NOT NULL ORDER BY step_num",
+                (session_id,),
+            ).fetchall()
+            conn.close()
+            step_grids = {}
+            for gr in grid_rows:
+                try:
+                    step_grids[gr["step_num"]] = _decompress_grid(gr["grid_snapshot"])
+                except Exception:
+                    pass
+            events = []
+            for r in stored:
+                ev = json.loads(r["event_json"])
+                # Attach grid to events that have a step_num (action events)
+                if not ev.get("grid") and ev.get("step_num") is not None:
+                    grid = step_grids.get(ev["step_num"])
+                    if grid:
+                        ev["grid"] = grid
+                events.append(ev)
+            return jsonify({"events": events})
+
+        # Reconstruct from llm_calls + session_steps
+        calls = conn.execute(
+            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY timestamp",
+            (session_id,),
+        ).fetchall()
+        steps = conn.execute(
+            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+
+        # Fallback: if no llm_calls rows, reconstruct from timeline_json
+        if not calls:
+            sess_row = conn.execute(
+                "SELECT timeline_json FROM sessions WHERE id = ?", (session_id,),
+            ).fetchone()
+            if sess_row and sess_row["timeline_json"]:
+                try:
+                    timeline = json.loads(sess_row["timeline_json"])
+                except Exception:
+                    timeline = []
+                # Build step_num→timestamp lookup
+                step_ts = {}
+                for s in steps:
+                    sd = dict(s)
+                    sn = sd.get("step_num")
+                    if sn is not None:
+                        step_ts[sn] = sd.get("timestamp", 0)
+                # Convert timeline events to pseudo-call dicts
+                calls = []
+                for ev in timeline:
+                    etype = ev.get("type", "")
+                    if etype in ("reasoning", "compact", "interrupt") or etype.startswith("as_"):
+                        ts = ev.get("timestamp") or 0
+                        if not ts:
+                            sn = ev.get("stepStart") or ev.get("step_num")
+                            if sn and sn in step_ts:
+                                ts = step_ts[sn]
+                        preview = (ev.get("response_preview") or ev.get("response")
+                                   or ev.get("reasoning") or ev.get("summary") or "")
+                        calls.append({
+                            "timestamp": ts,
+                            "call_type": ev.get("call_type", etype),
+                            "model": ev.get("model", ""),
+                            "input_tokens": ev.get("input_tokens", 0),
+                            "output_tokens": ev.get("output_tokens", 0),
+                            "cost": ev.get("cost", 0),
+                            "duration_ms": ev.get("duration") or ev.get("duration_ms") or 0,
+                            "step_num": ev.get("stepStart") or ev.get("step_num"),
+                            "turn_num": ev.get("turn") or ev.get("parentTurn"),
+                            "thinking_level": ev.get("thinking_level"),
+                            "response_preview": preview[:1000] if preview else "",
+                            "prompt_preview": (ev.get("task") or "")[:500],
+                        })
+
+        conn.close()
+
+        raw_events = []
+        for c in [dict(c) if not isinstance(c, dict) else c for c in calls]:
+            raw_events.append({
+                "ts": c.get("timestamp", 0),
+                "agent": c.get("call_type", "planner"),
+                "event": "llm_call",
+                "model": c.get("model", ""),
+                "input_tokens": c.get("input_tokens", 0),
+                "output_tokens": c.get("output_tokens", 0),
+                "cost": c.get("cost", 0),
+                "duration_ms": c.get("duration_ms", 0),
+                "step_num": c.get("step_num"),
+                "turn_num": c.get("turn_num"),
+                "thinking_level": c.get("thinking_level"),
+                "response": c.get("response_preview", ""),
+                "prompt_preview": c.get("prompt_preview", ""),
+            })
+        for s in [dict(s) for s in steps]:
+            grid = None
+            if s.get("grid_snapshot"):
+                try:
+                    grid = _decompress_grid(s["grid_snapshot"])
+                except Exception:
+                    pass
+            action_id = s.get("action", 0)
+            try:
+                action_name = GameAction.from_id(int(action_id)).name
+            except Exception:
+                action_name = str(action_id)
+            data = {}
+            if s.get("data_json"):
+                try:
+                    data = json.loads(s["data_json"]) if isinstance(s["data_json"], str) else s["data_json"]
+                except Exception:
+                    pass
+            if data and "x" in data and "y" in data:
+                action_name = f"{action_name}@({data['x']},{data['y']})"
+            raw_events.append({
+                "ts": s.get("timestamp", 0),
+                "agent": "executor",
+                "event": "act",
+                "action": action_name,
+                "step_num": s.get("step_num", 0),
+                "grid": grid,
+            })
+
+        if not raw_events:
+            return jsonify({"events": []})
+
+        raw_events.sort(key=lambda e: e.get("ts", 0))
+        t0 = raw_events[0]["ts"]
+        from datetime import datetime, timezone
+        events = []
+        for ev in raw_events:
+            ts = ev.pop("ts", 0)
+            ev["t"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            ev["elapsed_s"] = round(ts - t0, 2)
+            events.append(ev)
+
+        return jsonify({"events": events})
+    except Exception as e:
+        app.logger.warning(f"GET obs-events failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/browse")
+def browse_sessions():
+    """List sessions from per-session file exports (meta.json)."""
+    try:
+        sessions = _list_file_sessions()
+        return jsonify({"sessions": sessions})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/sessions/branch", methods=["POST"])
@@ -2708,16 +3050,22 @@ def list_sessions():
     if not feature_enabled("session_db"):
         return jsonify({"sessions": []})
     try:
+        player_type_filter = request.args.get("player_type")
         _sessions_query = (
             "SELECT s.id, s.game_id, s.model, s.mode, s.created_at, s.result, s.steps, s.levels, "
-            "s.parent_session_id, s.branch_at_step, s.total_cost, "
+            "s.parent_session_id, s.branch_at_step, s.total_cost, s.player_type, s.duration_seconds, "
             "(SELECT MAX(st.timestamp) - MIN(st.timestamp) FROM session_steps st WHERE st.session_id = s.id) AS duration "
-            "FROM sessions s ORDER BY s.created_at DESC LIMIT 100"
+            "FROM sessions s "
         )
+        _params = ()
+        if player_type_filter:
+            _sessions_query += "WHERE s.player_type = ? "
+            _params = (player_type_filter,)
+        _sessions_query += "ORDER BY s.created_at DESC LIMIT 100"
         sessions_by_id = {}
         # Local SQLite
         conn = _get_db()
-        rows = conn.execute(_sessions_query).fetchall()
+        rows = conn.execute(_sessions_query, _params).fetchall()
         conn.close()
         for r in rows:
             d = dict(r)
@@ -2726,7 +3074,7 @@ def list_sessions():
         turso_conn = _get_turso_db()
         if turso_conn:
             try:
-                cur = turso_conn.execute(_sessions_query)
+                cur = turso_conn.execute(_sessions_query, _params)
                 for d in _turso_dict_fetchall(cur):
                     if d["id"] not in sessions_by_id:
                         sessions_by_id[d["id"]] = d
@@ -2744,6 +3092,261 @@ def list_sessions():
         return jsonify({"sessions": merged[:100]})
     except Exception as e:
         return jsonify({"sessions": [], "error": str(e)})
+
+
+@app.route("/api/leaderboard")
+@bot_protection
+def leaderboard():
+    """Return best AI and human sessions per game for leaderboard display.
+
+    Uses ROW_NUMBER() window function to pick the single best session per
+    (game, player_type) in one pass each — no full table scan + Python grouping.
+    Covered by idx_sessions_leaderboard index.
+    """
+    try:
+        conn = _get_db()
+        # Best AI session per game (most levels, fewest steps)
+        ai_rows = conn.execute("""
+            SELECT * FROM (
+                SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
+                       s.created_at, s.duration_seconds,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
+                           ORDER BY s.levels DESC, s.steps ASC
+                       ) AS rn
+                FROM sessions s
+                WHERE COALESCE(s.player_type, 'agent') = 'agent' AND s.steps > 0
+            ) WHERE rn = 1
+        """).fetchall()
+        # Best human session per game
+        human_rows = conn.execute("""
+            SELECT * FROM (
+                SELECT s.id, s.game_id, s.result, s.steps, s.levels,
+                       s.created_at, s.duration_seconds,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
+                           ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
+                       ) AS rn
+                FROM sessions s
+                WHERE s.player_type = 'human' AND s.steps > 0
+            ) WHERE rn = 1
+        """).fetchall()
+        conn.close()
+        ai_best = {dict(r)["game_id"].split("-")[0]: dict(r) for r in ai_rows}
+        human_best = {dict(r)["game_id"].split("-")[0]: dict(r) for r in human_rows}
+        all_games = sorted(set(list(ai_best.keys()) + list(human_best.keys())))
+        rows = [{"game_id": gid, "ai": ai_best.get(gid), "human": human_best.get(gid)} for gid in all_games]
+        return jsonify({"leaderboard": rows})
+    except Exception as e:
+        return jsonify({"leaderboard": [], "error": str(e)})
+
+
+@app.route("/api/leaderboard/<game_id>")
+@bot_protection
+def leaderboard_detail(game_id):
+    """Return top AI and human attempts for a specific game."""
+    try:
+        conn = _get_db()
+        ai_rows = conn.execute("""
+            SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
+                   s.created_at, s.duration_seconds
+            FROM sessions s
+            WHERE COALESCE(s.player_type, 'agent') = 'agent'
+              AND s.steps > 0 AND s.game_id LIKE ? || '%'
+            ORDER BY s.levels DESC, s.steps ASC
+            LIMIT 20
+        """, (game_id,)).fetchall()
+        human_rows = conn.execute("""
+            SELECT s.id, s.game_id, s.result, s.steps, s.levels,
+                   s.created_at, s.duration_seconds
+            FROM sessions s
+            WHERE s.player_type = 'human'
+              AND s.steps > 0 AND s.game_id LIKE ? || '%'
+            ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
+            LIMIT 20
+        """, (game_id,)).fetchall()
+        conn.close()
+        return jsonify({
+            "game_id": game_id,
+            "ai": [dict(r) for r in ai_rows],
+            "human": [dict(r) for r in human_rows],
+        })
+    except Exception as e:
+        return jsonify({"game_id": game_id, "ai": [], "human": [], "error": str(e)})
+
+
+# ── Comments API ─────────────────────────────────────────────────────────
+
+@app.route("/api/comments/<game_id>")
+def get_comments(game_id):
+    """Get comments for a game."""
+    voter_id = request.args.get("voter_id", "")
+    try:
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT * FROM comments WHERE game_id=? ORDER BY created_at DESC LIMIT 200",
+            (game_id,),
+        ).fetchall()
+        # Get voter's votes for these comments
+        my_votes = {}
+        if voter_id and rows:
+            cids = [r["id"] for r in rows]
+            ph = ",".join("?" * len(cids))
+            vote_rows = conn.execute(
+                f"SELECT comment_id, vote FROM comment_votes WHERE voter_id=? AND comment_id IN ({ph})",
+                [voter_id] + cids,
+            ).fetchall()
+            my_votes = {r["comment_id"]: r["vote"] for r in vote_rows}
+        conn.close()
+        return jsonify([
+            {**dict(r), "my_vote": my_votes.get(r["id"], 0)} for r in rows
+        ])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/comments", methods=["POST"])
+def post_comment():
+    """Post a new comment on a game."""
+    data = request.json or {}
+    game_id = data.get("game_id", "").strip()
+    body = data.get("body", "").strip()
+    author_id = data.get("author_id", "").strip()
+    author_name = data.get("author_name", "").strip()
+    if not game_id or not body or not author_id:
+        return jsonify({"error": "Missing fields"}), 400
+    if len(body) > 2000:
+        return jsonify({"error": "Comment too long"}), 400
+    if not author_name:
+        author_name = f"anon-{author_id[:6]}"
+    try:
+        conn = _get_db()
+        cur = conn.execute(
+            "INSERT INTO comments (game_id, author_id, author_name, body, created_at) VALUES (?,?,?,?,?)",
+            (game_id, author_id, author_name, body, time.time()),
+        )
+        cid = cur.lastrowid
+        conn.commit()
+        row = conn.execute("SELECT * FROM comments WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        return jsonify({**dict(row), "my_vote": 0})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/comments/<int:comment_id>/vote", methods=["POST"])
+def vote_comment(comment_id):
+    """Upvote or downvote a comment. vote: 1, -1, or 0 (remove)."""
+    data = request.json or {}
+    voter_id = data.get("voter_id", "").strip()
+    vote = data.get("vote", 0)
+    if not voter_id or vote not in (1, -1, 0):
+        return jsonify({"error": "Invalid vote"}), 400
+    try:
+        conn = _get_db()
+        # Get existing vote
+        existing = conn.execute(
+            "SELECT vote FROM comment_votes WHERE comment_id=? AND voter_id=?",
+            (comment_id, voter_id),
+        ).fetchone()
+        old_vote = existing["vote"] if existing else 0
+        if old_vote == vote:
+            conn.close()
+            return jsonify({"ok": True})
+        # Remove old vote effect
+        if old_vote == 1:
+            conn.execute("UPDATE comments SET upvotes = upvotes - 1 WHERE id=?", (comment_id,))
+        elif old_vote == -1:
+            conn.execute("UPDATE comments SET downvotes = downvotes - 1 WHERE id=?", (comment_id,))
+        # Apply new vote
+        if vote == 0:
+            conn.execute("DELETE FROM comment_votes WHERE comment_id=? AND voter_id=?", (comment_id, voter_id))
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO comment_votes (comment_id, voter_id, vote) VALUES (?,?,?)",
+                (comment_id, voter_id, vote),
+            )
+            if vote == 1:
+                conn.execute("UPDATE comments SET upvotes = upvotes + 1 WHERE id=?", (comment_id,))
+            else:
+                conn.execute("UPDATE comments SET downvotes = downvotes + 1 WHERE id=?", (comment_id,))
+        conn.commit()
+        row = conn.execute("SELECT upvotes, downvotes FROM comments WHERE id=?", (comment_id,)).fetchone()
+        conn.close()
+        return jsonify({"ok": True, "upvotes": row["upvotes"], "downvotes": row["downvotes"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/contributors")
+def contributors():
+    """Top contributors: most comments, most human sessions, most AI sessions."""
+    try:
+        conn = _get_db()
+        # Top commenters
+        commenters = conn.execute("""
+            SELECT author_id, author_name, COUNT(*) as comment_count,
+                   SUM(upvotes) as total_upvotes
+            FROM comments GROUP BY author_id
+            ORDER BY comment_count DESC LIMIT 20
+        """).fetchall()
+        # Top human players (by number of sessions with >5 steps)
+        human_players = conn.execute("""
+            SELECT COALESCE(user_id, 'anon') as uid,
+                   COUNT(*) as session_count,
+                   SUM(duration_seconds) as total_time,
+                   SUM(steps) as total_steps,
+                   COUNT(DISTINCT SUBSTR(game_id, 1, INSTR(game_id || '-', '-') - 1)) as games_played
+            FROM sessions
+            WHERE player_type = 'human' AND steps > 5
+            GROUP BY uid ORDER BY session_count DESC LIMIT 20
+        """).fetchall()
+        # Top AI contributors (by number of agent sessions with >5 steps)
+        ai_contributors = conn.execute("""
+            SELECT COALESCE(user_id, 'anon') as uid, model,
+                   COUNT(*) as session_count,
+                   SUM(steps) as total_steps,
+                   COUNT(DISTINCT SUBSTR(game_id, 1, INSTR(game_id || '-', '-') - 1)) as games_played
+            FROM sessions
+            WHERE COALESCE(player_type, 'agent') = 'agent' AND steps > 5
+            GROUP BY uid ORDER BY session_count DESC LIMIT 20
+        """).fetchall()
+        conn.close()
+        return jsonify({
+            "commenters": [dict(r) for r in commenters],
+            "human_players": [dict(r) for r in human_players],
+            "ai_contributors": [dict(r) for r in ai_contributors],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/game-results")
+@bot_protection
+def game_results():
+    """Return human play results grouped by game and level."""
+    if not feature_enabled("session_db"):
+        return jsonify({"results": []})
+    game_id = request.args.get("game_id")
+    try:
+        conn = _get_db()
+        query = """
+            SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.duration_seconds,
+                   s.created_at, s.user_id
+            FROM sessions s
+            WHERE s.player_type = 'human' AND s.result IN ('WIN', 'GAME_OVER')
+        """
+        params = ()
+        if game_id:
+            query += " AND s.game_id = ?"
+            params = (game_id,)
+        query += " ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC LIMIT 200"
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        results = [dict(r) for r in rows]
+        return jsonify({"results": results})
+    except Exception as e:
+        return jsonify({"results": [], "error": str(e)})
 
 
 def _format_step_row(d: dict) -> dict:
@@ -2809,6 +3412,14 @@ def get_session(session_id):
                 except Exception as e:
                     app.logger.warning(f"Turso get_session failed: {e}")
 
+        # Fall back to per-session file
+        if not sess_dict:
+            file_data = _read_session_from_file(session_id)
+            if file_data:
+                sess_dict = file_data["session"]
+                for s in file_data["steps"]:
+                    step_list.append(_format_step_row(s))
+
         if not sess_dict:
             return jsonify({"error": "Session not found"}), 404
 
@@ -2863,159 +3474,42 @@ def session_calls(session_id):
 
 @app.route("/share/<session_id>")
 def share_session(session_id):
-    """Public replay page for a session — no auth required.
-    Reads from Turso first (persistent), falls back to local SQLite.
-    For branched sessions, traces back through parents to include full history."""
+    """Public replay page — renders the observatory view with auto-loaded session.
+    Verifies session exists (Turso → local DB → file), then serves obs.html."""
+    # Quick existence check (don't load all data — obs.html fetches via API)
+    found = False
     try:
-        sess = None
-        step_list = []
-
-        # Try Turso first (durable shared DB)
         turso_conn = _get_turso_db()
         if turso_conn:
             try:
-                cur = turso_conn.execute(
-                    "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
-                    "parent_session_id, branch_at_step, prompts_json, timeline_json "
-                    "FROM sessions WHERE id = ?",
-                    (session_id,),
-                )
-                sess = _turso_dict_fetchone(cur)
-                if sess:
-                    cur2 = turso_conn.execute(
-                        "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-                        (session_id,),
-                    )
-                    steps_rows = _turso_dict_fetchall(cur2)
-                    step_list = [_format_step_row(s) for s in steps_rows]
+                cur = turso_conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+                if _turso_dict_fetchone(cur):
+                    found = True
                 turso_conn.close()
-            except Exception as e:
-                app.logger.warning(f"Turso share read failed, falling back to local: {e}")
-                sess = None
-
-        # Fall back to local SQLite
-        if not sess:
+            except Exception:
+                pass
+        if not found:
             conn = _get_db()
-            sess_row = conn.execute(
-                "SELECT id, game_id, model, mode, created_at, result, steps, levels, total_cost, "
-                "parent_session_id, branch_at_step, prompts_json, timeline_json "
-                "FROM sessions WHERE id = ?",
-                (session_id,),
-            ).fetchone()
-            if not sess_row:
-                conn.close()
-                return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
+            if conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone():
+                found = True
+            conn.close()
+        if not found:
+            file_data = _read_session_from_file(session_id)
+            if file_data:
+                found = True
+    except Exception:
+        pass
+
+    if not found:
+        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
 <style>body{background:#0d1117;color:#c9d1d9;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
 .box{text-align:center;padding:40px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:400px;}
 h1{color:#f85149;font-size:24px;margin-bottom:12px;}p{color:#8b949e;margin-bottom:20px;}
 a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style></head>
 <body><div class="box"><h1>Session Not Found</h1><p>This session doesn't exist or hasn't been shared yet.</p>
 <a href="/">&#9654; Play ARC-AGI-3</a></div></body></html>""", 404
-            sess = dict(sess_row)
-            steps_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
-                (session_id,),
-            ).fetchall()
-            conn.close()
-            step_list = [_format_step_row(dict(s)) for s in steps_rows]
 
-        # Trace back through parent sessions to build full history
-        parent_steps = []
-        trace_id = sess.get("parent_session_id")
-        trace_step = sess.get("branch_at_step")
-        max_depth = 10  # prevent infinite loops
-        while trace_id and trace_step is not None and max_depth > 0:
-            max_depth -= 1
-            parent_sess = None
-            p_steps = []
-            # Try local SQLite first
-            conn = _get_db()
-            p_row = conn.execute(
-                "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
-                (trace_id,),
-            ).fetchone()
-            p_steps_rows = conn.execute(
-                "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                (trace_id, trace_step),
-            ).fetchall()
-            conn.close()
-            # Fall back to Turso if local has no steps
-            if not p_steps_rows and turso_conn:
-                try:
-                    tc = _get_turso_db()
-                    if tc:
-                        if not p_row:
-                            t_row = tc.execute(
-                                "SELECT parent_session_id, branch_at_step FROM sessions WHERE id = ?",
-                                (trace_id,),
-                            )
-                            p_row_t = _turso_dict_fetchone(t_row)
-                            if p_row_t:
-                                p_row = p_row_t
-                        t_steps = tc.execute(
-                            "SELECT * FROM session_steps WHERE session_id = ? AND step_num <= ? ORDER BY step_num",
-                            (trace_id, trace_step),
-                        )
-                        p_steps_rows = _turso_dict_fetchall(t_steps)
-                        tc.close()
-                except Exception:
-                    pass
-            if p_row:
-                parent_sess = dict(p_row) if not isinstance(p_row, dict) else p_row
-            for s in p_steps_rows:
-                st = _format_step_row(dict(s) if not isinstance(s, dict) else s)
-                st["from_parent"] = True
-                p_steps.append(st)
-            # Prepend parent steps (oldest ancestor first)
-            parent_steps = p_steps + parent_steps
-            # Continue tracing
-            if parent_sess:
-                trace_id = parent_sess.get("parent_session_id")
-                trace_step = parent_sess.get("branch_at_step")
-            else:
-                break
-
-        # Combine: parent steps first, then own steps
-        if parent_steps:
-            step_list = parent_steps + step_list
-
-        # Parse prompts and timeline from session metadata
-        prompts = None
-        timeline = None
-        if sess.get("prompts_json"):
-            try:
-                prompts = json.loads(sess["prompts_json"]) if isinstance(sess["prompts_json"], str) else sess["prompts_json"]
-            except Exception:
-                pass
-        if sess.get("timeline_json"):
-            try:
-                timeline = json.loads(sess["timeline_json"]) if isinstance(sess["timeline_json"], str) else sess["timeline_json"]
-            except Exception:
-                pass
-
-        # Fetch LLM call log for this session
-        call_log = _get_session_calls(session_id)
-        for c in call_log:
-            if c.get("response_json"):
-                try:
-                    c["response_json"] = json.loads(c["response_json"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-        return render_template(
-            "share.html",
-            session=sess,
-            steps=step_list,
-            color_map=COLOR_MAP,
-            branch_at_step=len(parent_steps) if parent_steps else 0,
-            umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
-            prompts=prompts,
-            timeline=timeline,
-            call_log=call_log,
-        )
-    except Exception as e:
-        app.logger.warning(f"Share page error: {e}")
-        return f"<h1>Error</h1><p>{e}</p>", 500
+    return render_template("obs.html", share_session_id=session_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3261,6 +3755,7 @@ def batch_status(batch_id):
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════

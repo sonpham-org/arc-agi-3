@@ -18,6 +18,7 @@ from db import _log_turn
 from scaffoldings.agent_spawn.memories import SharedMemories
 from scaffoldings.agent_spawn.orchestrator import orchestrator_decide
 from scaffoldings.agent_spawn.subagent import run_subagent
+from scaffoldings.agent_spawn.observability import AgentObserver
 from scaffoldings.agent_spawn.tools import (
     format_grid,
     validate_action,
@@ -34,7 +35,14 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
     print(f"\n{'='*65}")
     print(f"  PLAYING (agent-spawn scaffold): {game_id}")
     print(f"  Orchestrator: {effective_model(cfg, 'planner')}")
-    print(f"  Subagents:    {effective_model(cfg, 'executor')}")
+    # Show per-agent-type model overrides if any
+    rcfg = cfg.get("reasoning", {})
+    for atype in ("explorer", "theorist", "tester", "solver"):
+        override = rcfg.get(f"{atype}_model")
+        if override:
+            print(f"  {atype:12s}: {override}")
+        else:
+            print(f"  {atype:12s}: {effective_model(cfg, 'planner')}")
     print(f"{'='*65}\n")
 
     env = arcade.make(game_id)
@@ -50,12 +58,25 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
     step_num = 0
     turn_num = 0
     total_llm_calls = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
     prev_grid = None
+
+    # Initialize observability (opt-in via cfg["observability"])
+    obs = None
+    if cfg.get("observability"):
+        obs = AgentObserver(game_id=game_id, max_steps=max_steps, session_id=session_id or "")
+        obs.update_status(
+            planner_model=effective_model(cfg, "planner"),
+            executor_model=effective_model(cfg, "executor"),
+        )
 
     mcfg = cfg.get("memory", {})
     condense_every = mcfg.get("condense_every", 0)
     condense_threshold = mcfg.get("condense_threshold", 0)
     steps_since_condense = 0
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 5
 
     # Seed memories with hard memory if available
     if hard_memory:
@@ -63,16 +84,21 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
 
     while step_num < max_steps:
         grid = frame.frame[-1].tolist() if frame.frame else []
+        if obs: obs.update_grid(grid)
 
         # Check terminal states
         if frame.state == GameState.WIN:
             print(f"\n  >>> WIN! Completed {frame.win_levels} levels in {step_num} steps "
                   f"({total_llm_calls} LLM calls) <<<\n")
+            if obs: obs.close("WIN")
+
             _post_game(arcade, game_id, history, "WIN", step_num,
                        frame.levels_completed, frame.win_levels, cfg)
             return "WIN"
         if frame.state == GameState.GAME_OVER:
             print(f"\n  >>> GAME OVER at step {step_num} ({total_llm_calls} LLM calls) <<<\n")
+            if obs: obs.close("GAME_OVER")
+
             _post_game(arcade, game_id, history, "GAME_OVER", step_num,
                        frame.levels_completed, frame.win_levels, cfg)
             return "GAME_OVER"
@@ -125,8 +151,38 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
         command = decision.get("command", "think")
         print(f"    [orchestrator] command={command}")
 
+        if obs:
+            obs.orchestrator_decide(
+                turn=turn_num, step=step_num, command=command,
+                agent_type=decision.get("agent_type", ""),
+                task=decision.get("task", decision.get("next", "")),
+                input_tokens=decision.get("input_tokens", 0),
+                output_tokens=decision.get("output_tokens", 0),
+                duration_ms=decision.get("duration_ms", 0),
+                response=decision.get("raw_response", ""),
+            )
+            obs.update_level(frame.levels_completed, frame.win_levels)
+
         # ── HANDLE THINK ───────────────────────────────────────────────
         if command == "think":
+            task_text = decision.get("task", decision.get("next", ""))
+            is_error = "LLM error" in task_text or "Parse error" in task_text
+
+            if is_error:
+                consecutive_errors += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    print(f"    [orchestrator] {consecutive_errors} consecutive LLM errors — aborting game")
+                    if obs: obs.close("LLM_ERROR")
+                    _post_game(arcade, game_id, history, "LLM_ERROR", step_num,
+                               frame.levels_completed, frame.win_levels, cfg)
+                    return "LLM_ERROR"
+                # Exponential backoff: 2s, 4s, 8s, 16s, 32s
+                wait = 2 ** consecutive_errors
+                print(f"    [orchestrator] LLM error #{consecutive_errors}, backing off {wait}s...")
+                time.sleep(wait)
+            else:
+                consecutive_errors = 0
+
             for f in decision.get("facts", []):
                 memories.add_fact(f)
                 print(f"    [fact] {f[:80]}")
@@ -135,9 +191,13 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 print(f"    [hypothesis] {h[:80]}")
             # Think doesn't use any steps, loop back for next decision
             total_llm_calls += turn_llm_calls
+            total_input_tokens += turn_input_tokens
+            total_output_tokens += turn_output_tokens
+            if obs: obs.update_totals(total_llm_calls, total_input_tokens, total_output_tokens)
             continue
 
         # ── HANDLE DELEGATE (spawn subagent) ──────────────────────────
+        consecutive_errors = 0  # successful orchestrator call, reset error counter
         if command == "delegate":
             agent_type = decision.get("agent_type", "explorer")
             task = decision.get("task", "explore the game")
@@ -167,6 +227,7 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 session_id=session_id or "",
                 history=history,
                 step_callback=step_callback,
+                observer=obs,
             )
 
             # Update state from subagent
@@ -190,19 +251,31 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 if terminal == "WIN":
                     print(f"\n  >>> WIN! Completed {frame.win_levels} levels in {step_num} steps "
                           f"({total_llm_calls} LLM calls) <<<\n")
+                    if obs: obs.close("WIN")
+
                     _post_game(arcade, game_id, history, "WIN", step_num,
                                frame.levels_completed, frame.win_levels, cfg)
                     return "WIN"
                 elif terminal == "GAME_OVER":
                     print(f"\n  >>> GAME OVER at step {step_num} ({total_llm_calls} LLM calls) <<<\n")
+                    if obs: obs.close("GAME_OVER")
+
                     _post_game(arcade, game_id, history, "GAME_OVER", step_num,
                                frame.levels_completed, frame.win_levels, cfg)
                     return "GAME_OVER"
                 else:
+                    if obs: obs.close(terminal)
                     return terminal
 
         # ── LOG TURN ───────────────────────────────────────────────────
         total_llm_calls += turn_llm_calls
+        total_input_tokens += turn_input_tokens
+        total_output_tokens += turn_output_tokens
+
+        if obs:
+            obs.update_totals(total_llm_calls, total_input_tokens, total_output_tokens)
+            obs.update_memory_stats(memories)
+            obs.dump_memory(memories)
 
         if session_id:
             _log_turn(
@@ -228,6 +301,7 @@ def play_game_agent_spawn(arcade, game_id: str, cfg: dict, max_steps: int = 200,
     final_state = frame.state.value if frame and hasattr(frame.state, "value") else "TIMEOUT"
     print(f"\n  >>> Max steps reached ({max_steps}). Final: {final_state} "
           f"({total_llm_calls} LLM calls) <<<\n")
+    if obs: obs.close(final_state)
     _post_game(arcade, game_id, history, final_state, step_num,
                frame.levels_completed if frame else 0,
                frame.win_levels if frame else 0, cfg)

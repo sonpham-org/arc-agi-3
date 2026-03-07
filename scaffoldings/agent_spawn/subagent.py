@@ -51,6 +51,7 @@ def run_subagent(
     session_id: str,
     history: list,
     step_callback=None,
+    observer=None,
 ) -> dict:
     """Run a subagent with bounded budget. Returns dict with results.
 
@@ -72,8 +73,14 @@ def run_subagent(
     """
     budget = min(budget, 10)  # hard cap
     is_theorist = (agent_type == "theorist")
-    model = effective_model(cfg, "executor")
+    # Per-agent-type model override (e.g. explorer_model), fallback to planner model
+    agent_model = cfg["reasoning"].get(f"{agent_type}_model")
+    model = agent_model if agent_model else effective_model(cfg, "planner")
     system_prompt = SYSTEM_PROMPTS.get(agent_type, EXPLORER_SYSTEM)
+
+    # Per-agent thinking budgets
+    THINKING_BUDGETS = {"theorist": 16000, "solver": 16000, "tester": 8000, "explorer": 4000}
+    thinking_budget = THINKING_BUDGETS.get(agent_type, 4000)
 
     session_actions = []
     tool_results = []  # accumulates frame tool results across iterations
@@ -94,6 +101,13 @@ def run_subagent(
     max_iterations = (budget + 5) if is_theorist else (budget + 2)
 
     print(f"      [{agent_type}] starting — task: {task[:60]}, budget: {budget}")
+    if observer:
+        avail_str = ", ".join(str(a) for a in (frame.available_actions or []))
+        level_str = f"{frame.levels_completed}/{frame.win_levels}"
+        mem_str = memories.format_for_prompt()[:500] if memories else ""
+        observer.subagent_start(agent_type, task, budget, step_num,
+                                available_actions=avail_str, level=level_str,
+                                memory_summary=mem_str)
 
     for turn in range(max_iterations):
         # For non-theorists, stop when action budget or global step limit is reached
@@ -127,8 +141,13 @@ def run_subagent(
             tool_results=tool_results_text,
         )
 
-        # Call LLM
-        result = call_model_with_metadata(model, prompt, cfg, role="executor")
+        # Call LLM (with run_python tool for Gemini models)
+        result = call_model_with_metadata(
+            model, prompt, cfg, role="executor",
+            tools_enabled=True, session_id=session_id,
+            grid=grid, prev_grid=prev_grid,
+            thinking_budget=thinking_budget,
+        )
         llm_calls += 1
         total_input_tokens += result.input_tokens
         total_output_tokens += result.output_tokens
@@ -175,6 +194,8 @@ def run_subagent(
             tool_name = parsed.get("tool", "")
             tool_args = parsed.get("args", {})
             print(f"      [{agent_type}] frame_tool: {tool_name}")
+            if observer:
+                observer.subagent_frame_tool(agent_type, tool_name)
             tool_result = as_dispatch_frame_tool(tool_name, grid, prev_grid, tool_args)
             tool_results.append({
                 "tool": tool_name,
@@ -219,6 +240,20 @@ def run_subagent(
 
             new_grid = frame.frame[-1].tolist() if frame.frame else grid
             state_str = frame.state.value if hasattr(frame.state, "value") else str(frame.state)
+
+            # Update grid and log action in dashboard immediately after env.step
+            if observer:
+                observer.subagent_act(
+                    agent_type, step_num, f"{aname}{coord_str}",
+                    state=state_str,
+                    reasoning=reasoning,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    duration_ms=result.duration_ms,
+                    grid=new_grid,
+                    response=result.text or "",
+                )
+                observer.update_grid(new_grid)
 
             # Record observation
             observation = f"{aname}{coord_str} -> state={state_str}"
@@ -288,6 +323,13 @@ def run_subagent(
     )
 
     print(f"      [{agent_type}] done — {steps_used} steps, {llm_calls} calls")
+
+    if observer:
+        observer.subagent_report(
+            agent_type, steps_used, llm_calls,
+            findings=len(findings), hypotheses=len(hypotheses),
+            summary=report[:120],
+        )
 
     return {
         "steps_used": steps_used,

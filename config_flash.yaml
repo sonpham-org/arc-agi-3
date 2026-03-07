@@ -1,0 +1,43 @@
+# Flash run config — generous token limits since gemini-3-flash is cheap
+
+context:
+  full_grid: true
+  change_map: true
+  color_histogram: false
+  region_map: false
+  history_length: 0
+  reasoning_trace: false
+  max_context_tokens: 100000
+  memory_injection: true
+  memory_injection_max_chars: 1500
+
+reasoning:
+  executor_model: "gemini-3-flash"
+  condenser_model: null
+  reflector_model: null
+  temperature: 0.3
+  max_tokens: 8192
+  planning_horizon: 5
+  reflection_max_tokens: 4096
+  planner_model: null
+  monitor_model: null
+  world_model_model: null
+  planner_max_tokens: 16384
+  monitor_max_tokens: 2048
+  world_model_max_tokens: 8192
+
+memory:
+  hard_memory_file: "memory/MEMORY.md"
+  session_log_file: "memory/sessions.json"
+  allow_inline_memory_writes: true
+  reflect_after_game: true
+  condense_every: 0
+  condense_threshold: 0
+
+scaffolding:
+  mode: "single"
+  planner_max_turns: 10
+  world_model_max_turns: 5
+  world_model_update_every: 5
+  max_plan_length: 15
+  min_plan_length: 3
