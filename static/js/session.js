@@ -1772,7 +1772,7 @@ async function loadBrowseByGame() {
       const div = document.createElement('div');
       div.className = 'game-card' + (_browseGameFilter === g.game_id ? ' active' : '');
       const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
-    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag()}</div>`;
+    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag(g.game_id)}</div>`;
       div.onclick = () => loadGameSessions(g.game_id);
       listEl.appendChild(div);
     }

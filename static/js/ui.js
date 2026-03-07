@@ -467,7 +467,9 @@ function gameSource(gameId) {
   const short = (gameId || '').split('-')[0].toLowerCase();
   return _ARC_FOUNDATION_GAMES.includes(short) ? 'ARC Prize Foundation' : 'ARC Observatory';
 }
-function gameDevTag() {
+function gameDevTag(gameId) {
+  const short = (gameId || '').split('-')[0].toLowerCase();
+  if (_ARC_FOUNDATION_GAMES.includes(short)) return '';
   return '<span class="dev-tag" title="The game is currently iterating through feedback before released and open-sourced">in development</span>';
 }
 
@@ -481,7 +483,7 @@ async function loadGames() {
     const div = document.createElement('div');
     div.className = 'game-card';
     const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
-    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag()}</div>`;
+    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag(g.game_id)}</div>`;
     div.dataset.gameId = g.game_id;
     div.onclick = () => startGame(g.game_id);
     el.appendChild(div);

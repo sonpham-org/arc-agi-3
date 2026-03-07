@@ -47,7 +47,7 @@ async function _loadHumanGames() {
       const div = document.createElement('div');
       div.className = 'game-card';
       const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
-      div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag()}</div>`;
+      div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag(g.game_id)}</div>`;
       div.dataset.gameId = g.game_id;
       div.onclick = () => _humanSelectGame(g.game_id);
       el.appendChild(div);

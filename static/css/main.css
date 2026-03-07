@@ -43,8 +43,8 @@
   .game-card.active { background: #1f6feb22; border-left: 3px solid var(--accent); }
   .game-card .title { font-weight: 600; font-size: 13px; }
   .game-card .meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-  .dev-tag { font-size: 9px; color: var(--accent); opacity: 0.7; border: 1px solid var(--accent);
-    padding: 0 4px; border-radius: 3px; margin-left: 4px; cursor: help; vertical-align: middle;
+  .dev-tag { font-size: 9px; color: #fff; background: var(--accent); opacity: 0.8;
+    padding: 1px 5px; border-radius: 3px; margin-left: 4px; cursor: help; vertical-align: middle;
     letter-spacing: 0.3px; }
 
   /* ── Main area ───────────────────────────────────────────────────────── */
