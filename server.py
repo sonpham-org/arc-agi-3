@@ -3093,50 +3093,45 @@ def list_sessions():
 @app.route("/api/leaderboard")
 @bot_protection
 def leaderboard():
-    """Return best AI and human sessions per game for leaderboard display."""
+    """Return best AI and human sessions per game for leaderboard display.
+
+    Uses ROW_NUMBER() window function to pick the single best session per
+    (game, player_type) in one pass each — no full table scan + Python grouping.
+    Covered by idx_sessions_leaderboard index.
+    """
     try:
         conn = _get_db()
         # Best AI session per game (most levels, fewest steps)
         ai_rows = conn.execute("""
-            SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
-                   s.created_at, s.duration_seconds,
-                   COALESCE(s.player_type, 'agent') AS player_type
-            FROM sessions s
-            WHERE COALESCE(s.player_type, 'agent') = 'agent' AND s.steps > 0
-            ORDER BY s.game_id, s.levels DESC, s.steps ASC
+            SELECT * FROM (
+                SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
+                       s.created_at, s.duration_seconds,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
+                           ORDER BY s.levels DESC, s.steps ASC
+                       ) AS rn
+                FROM sessions s
+                WHERE COALESCE(s.player_type, 'agent') = 'agent' AND s.steps > 0
+            ) WHERE rn = 1
         """).fetchall()
         # Best human session per game
         human_rows = conn.execute("""
-            SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
-                   s.created_at, s.duration_seconds,
-                   s.player_type
-            FROM sessions s
-            WHERE s.player_type = 'human' AND s.steps > 0
-            ORDER BY s.game_id, s.levels DESC, s.duration_seconds ASC, s.steps ASC
+            SELECT * FROM (
+                SELECT s.id, s.game_id, s.result, s.steps, s.levels,
+                       s.created_at, s.duration_seconds,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
+                           ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
+                       ) AS rn
+                FROM sessions s
+                WHERE s.player_type = 'human' AND s.steps > 0
+            ) WHERE rn = 1
         """).fetchall()
         conn.close()
-        # Group: best per game
-        ai_best = {}
-        for r in ai_rows:
-            d = dict(r)
-            gid = d["game_id"].split("-")[0] if d["game_id"] else ""
-            if gid not in ai_best:
-                ai_best[gid] = d
-        human_best = {}
-        for r in human_rows:
-            d = dict(r)
-            gid = d["game_id"].split("-")[0] if d["game_id"] else ""
-            if gid not in human_best:
-                human_best[gid] = d
-        # All games
+        ai_best = {dict(r)["game_id"].split("-")[0]: dict(r) for r in ai_rows}
+        human_best = {dict(r)["game_id"].split("-")[0]: dict(r) for r in human_rows}
         all_games = sorted(set(list(ai_best.keys()) + list(human_best.keys())))
-        rows = []
-        for gid in all_games:
-            rows.append({
-                "game_id": gid,
-                "ai": ai_best.get(gid),
-                "human": human_best.get(gid),
-            })
+        rows = [{"game_id": gid, "ai": ai_best.get(gid), "human": human_best.get(gid)} for gid in all_games]
         return jsonify({"leaderboard": rows})
     except Exception as e:
         return jsonify({"leaderboard": [], "error": str(e)})

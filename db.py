@@ -144,6 +144,12 @@ def _init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session_turns_session ON session_turns(session_id)")
     except sqlite3.OperationalError:
         pass
+    # Leaderboard index: covers player_type filter + ORDER BY levels/steps
+    try:
+        conn.execute("""CREATE INDEX IF NOT EXISTS idx_sessions_leaderboard
+                        ON sessions(player_type, steps, levels DESC)""")
+    except sqlite3.OperationalError:
+        pass
     # Sync tracking table (local only — tracks what's been uploaded to Turso)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS session_sync (

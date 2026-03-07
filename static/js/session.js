@@ -1590,9 +1590,9 @@ function showAppView(view) {
   if (leaderboardView) leaderboardView.style.display = 'none';
   menuView.classList.remove('visible');
 
-  // Nav link indices: 0=Make your agent, 1=Play as Human, 2=Leaderboards, 3=Browse Sessions
+  // Nav link indices: 0=Make your agent, 1=Play as Human, 2=Browse Sessions, 3=Leaderboards
   if (view === 'browse') {
-    links[3]?.classList.add('active');
+    links[2]?.classList.add('active');
     _browseActive = true;
     _menuActive = false;
     browseView.style.display = 'flex';
@@ -1612,7 +1612,7 @@ function showAppView(view) {
       if (typeof initHumanView === 'function') initHumanView();
     }
   } else if (view === 'leaderboard') {
-    links[2]?.classList.add('active');
+    links[3]?.classList.add('active');
     _browseActive = false;
     _menuActive = false;
     outerLayout.style.display = 'none';
