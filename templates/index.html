@@ -520,14 +520,11 @@
               <span class="ad-support-msg">Support this project</span>
               <button class="ad-close-btn" onclick="toggleAdBanner()" title="Hide">&times;</button>
             </div>
-            <div class="bmc-slot" id="bmcSlot">
+            <div class="bmc-slot">
               <a href="https://buymeacoffee.com/sonphamnet" target="_blank" rel="noopener" class="bmc-link">
                 <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="bmc-img">
               </a>
               <div class="bmc-text">Enjoy the project? A coffee helps keep the development going.</div>
-            </div>
-            <div class="adsense-slot" id="adsenseSlot" style="display:none;">
-              <!-- AdSense ad unit inserted here by JS when eligible -->
             </div>
           </div>
           <div class="ad-show-btn" id="adShowBtn">
@@ -637,8 +634,7 @@ const ACTION_NAMES = {0:'RESET',1:'UP',2:'DOWN',3:'LEFT',4:'RIGHT',5:'ACT5',6:'C
 const MODE = {{ mode | tojson }};
 const FEATURES = {{ features | tojson }};
 window.PROMPTS = {{ prompts | tojson }};
-window.ARC_ADSENSE_CLIENT = {{ adsense_client | tojson }};
-window.ARC_ADSENSE_SLOT = {{ adsense_slot | tojson }};
+
 </script>
 <script>
 (function(){
