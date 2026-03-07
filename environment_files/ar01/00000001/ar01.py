@@ -1,32 +1,33 @@
 # Arbitrage Runner - Buy low, sell high across market stalls
 #
-# D-pad to move. Visit market stalls to buy goods cheap and sell them
-# at other stalls for profit. Reach the target gold amount to win.
-# Each stall has a fixed buy/sell price. Carry one good at a time.
+# D-pad to move. Visit stalls to buy stocks cheap and sell them
+# at other stalls for profit. Reach the target amount to win.
+# Each stall has a fixed buy/sell price. Carry one stock at a time.
 # Step on a buy stall = buy (costs gold). Step on sell stall = sell (earns gold).
 
 import numpy as np
 from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay
 
-CELL = 4
-C_BLACK = 0
-C_MID = 5
-C_AZURE = 8
-C_GOLD = 11
-C_WHITE = 15
-C_RED = 12
-C_GREEN = 2
-C_ORANGE = 7
-C_BLUE = 9
-C_LIME = 14
-C_GRAY = 3
-C_YELLOW = 4
+# Palette: 0=White 1=LightGray 2=Gray 3=DarkGray 4=VeryDarkGray 5=Black
+# 6=Magenta 7=LightMagenta 8=Red 9=Blue 10=LightBlue 11=Yellow
+# 12=Orange 13=Maroon 14=Green 15=Purple
 
 _DIR = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
+HUD_H = 8
+STOCK_COLORS = [8, 9, 12]  # Red, Blue, Orange for stocks 0, 1, 2
 
-# Stall: (x, y, type, good_id, price)
-# type: 0 = buy (player pays price to get good), 1 = sell (player gets price for good)
-# good_id: which good (0, 1, 2...)
+FONT = {
+    0: [0b111, 0b101, 0b101, 0b101, 0b111],
+    1: [0b010, 0b110, 0b010, 0b010, 0b111],
+    2: [0b111, 0b001, 0b111, 0b100, 0b111],
+    3: [0b111, 0b001, 0b111, 0b001, 0b111],
+    4: [0b101, 0b101, 0b111, 0b001, 0b001],
+    5: [0b111, 0b100, 0b111, 0b001, 0b111],
+    6: [0b111, 0b100, 0b111, 0b101, 0b111],
+    7: [0b111, 0b001, 0b010, 0b010, 0b010],
+    8: [0b111, 0b101, 0b111, 0b101, 0b111],
+    9: [0b111, 0b101, 0b111, 0b001, 0b111],
+}
 
 LEVELS = [
     # L1: Simple - buy for 1, sell for 3, need 5 gold (start with 1)
@@ -36,23 +37,23 @@ LEVELS = [
         "walls": set(),
         "player": (3, 3),
         "stalls": [
-            (1, 3, 0, 0, 1),   # buy good0 for 1
-            (5, 3, 1, 0, 3),   # sell good0 for 3
+            (1, 3, 0, 0, 1),   # buy stock0 for 1
+            (5, 3, 1, 0, 3),   # sell stock0 for 3
         ],
         "start_gold": 1,
         "target_gold": 5,
     },
-    # L2: Two goods, different margins
+    # L2: Two stocks, different margins
     {
         "name": "Two Markets",
         "grid_w": 8, "grid_h": 7,
         "walls": set(),
         "player": (1, 3),
         "stalls": [
-            (2, 1, 0, 0, 1),   # buy good0 for 1
-            (6, 1, 1, 0, 3),   # sell good0 for 3
-            (2, 5, 0, 1, 2),   # buy good1 for 2
-            (6, 5, 1, 1, 5),   # sell good1 for 5
+            (2, 1, 0, 0, 1),   # buy stock0 for 1
+            (6, 1, 1, 0, 3),   # sell stock0 for 3
+            (2, 5, 0, 1, 2),   # buy stock1 for 2
+            (6, 5, 1, 1, 5),   # sell stock1 for 5
         ],
         "start_gold": 2,
         "target_gold": 8,
@@ -87,7 +88,7 @@ LEVELS = [
         "start_gold": 2,
         "target_gold": 12,
     },
-    # L5: Three goods
+    # L5: Three stocks
     {
         "name": "Triple Market",
         "grid_w": 10, "grid_h": 8,
@@ -191,7 +192,18 @@ def _border(w, h):
     return s
 
 
-GOOD_COLORS = [C_RED, C_GREEN, C_BLUE]
+def _glyph(frame, x, y, rows, color):
+    for ri, row in enumerate(rows):
+        for col in range(3):
+            if row & (1 << (2 - col)):
+                px, py = x + col, y + ri
+                if 0 <= px < 64 and 0 <= py < 64:
+                    frame[py, px] = color
+
+
+def _number(frame, x, y, n, color):
+    for i, ch in enumerate(str(n)):
+        _glyph(frame, x + i * 4, y, FONT[int(ch)], color)
 
 
 class Ar01Display(RenderableUserDisplay):
@@ -199,51 +211,129 @@ class Ar01Display(RenderableUserDisplay):
         self.game = game
 
     def render_interface(self, frame):
-        frame[:, :] = C_BLACK
+        frame[:, :] = 5  # Black background
         g = self.game
-        ox = (64 - g.grid_w * CELL) // 2
-        oy = (64 - g.grid_h * CELL) // 2
 
+        # Dynamic cell size - scale grid to fill available space
+        cell = min(64 // g.grid_w, (64 - HUD_H) // g.grid_h)
+        game_h = 64 - HUD_H
+        ox = (64 - g.grid_w * cell) // 2
+        oy = HUD_H + (game_h - g.grid_h * cell) // 2
+
+        # --- Grid (dark trading floor with spreadsheet grid lines) ---
         for gy in range(g.grid_h):
             for gx in range(g.grid_w):
-                px, py = ox + gx * CELL, oy + gy * CELL
-                if px < 0 or py < 0 or px + CELL > 64 or py + CELL > 64:
+                px, py = ox + gx * cell, oy + gy * cell
+                if px + cell > 64 or py + cell > 64 or px < 0 or py < 0:
                     continue
                 if (gx, gy) in g.walls:
-                    frame[py:py + CELL, px:px + CELL] = C_WHITE
+                    frame[py:py + cell, px:px + cell] = 2  # Gray walls
+                    if cell >= 4:
+                        frame[py + 1:py + cell - 1, px + 1:px + cell - 1] = 3
                 else:
-                    frame[py:py + CELL, px:px + CELL] = C_MID
+                    frame[py:py + cell, px:px + cell] = 4  # VeryDarkGray floor
+                    frame[py, px:px + cell] = 3  # grid top edge
+                    frame[py:py + cell, px] = 3  # grid left edge
 
-        # Draw stalls
+        # --- Stalls (bright green if interactable, dark if not) ---
         for sx, sy, stype, good_id, price in g.stall_defs:
-            px, py = ox + sx * CELL, oy + sy * CELL
-            if px < 0 or py < 0 or px + CELL > 64 or py + CELL > 64:
+            px, py = ox + sx * cell, oy + sy * cell
+            if px + cell > 64 or py + cell > 64 or px < 0 or py < 0:
                 continue
-            color = GOOD_COLORS[good_id % len(GOOD_COLORS)]
-            frame[py:py + CELL, px:px + CELL] = color
-            # Buy stalls have dark center, sell stalls have bright center
+
             if stype == 0:
-                frame[py + 1:py + 3, px + 1:px + 3] = C_BLACK
+                can = g.carrying is None and g.gold >= price
             else:
-                frame[py + 1:py + 3, px + 1:px + 3] = C_GOLD
+                can = g.carrying == good_id
 
-        # Player
-        ppx = ox + g.px * CELL
-        ppy = oy + g.py * CELL
-        if 0 <= ppx and ppx + CELL <= 64 and 0 <= ppy and ppy + CELL <= 64:
+            bg = 14 if can else 3  # Green / DarkGray
+            frame[py:py + cell, px:px + cell] = bg
+
+            # Price number at top of cell
+            dx = (cell - 3) // 2
+            dy = 1 if cell >= 7 else 0
+            # Yellow = buy price, White = sell price; Gray when not interactable
+            nc = (11 if stype == 0 else 0) if can else 2
+            _glyph(frame, px + dx, py + dy, FONT[min(price, 9)], nc)
+
+            # Stock color dot (bottom-right)
+            sc = STOCK_COLORS[good_id % len(STOCK_COLORS)]
+            if cell >= 6:
+                frame[py + cell - 2, px + cell - 2] = sc
+                frame[py + cell - 2, px + cell - 3] = sc
+            elif cell >= 4:
+                frame[py + cell - 1, px + cell - 1] = sc
+
+            # Buy/sell arrow indicator (when cell big enough)
+            if cell >= 7:
+                mid = px + cell // 2
+                bot = py + cell - 1
+                if stype == 0:  # Buy: down arrow
+                    for dc in range(-1, 2):
+                        frame[bot - 1, mid + dc] = nc
+                    frame[bot, mid] = nc
+                else:  # Sell: up arrow
+                    frame[bot - 1, mid] = nc
+                    for dc in range(-1, 2):
+                        frame[bot, mid + dc] = nc
+
+        # --- Player (trader icon) ---
+        ppx, ppy = ox + g.px * cell, oy + g.py * cell
+        if 0 <= ppx and ppx + cell <= 64 and 0 <= ppy and ppy + cell <= 64:
+            # Stock color border when carrying
             if g.carrying is not None:
-                frame[ppy:ppy + CELL, ppx:ppx + CELL] = GOOD_COLORS[g.carrying % len(GOOD_COLORS)]
-                frame[ppy + 1:ppy + 3, ppx + 1:ppx + 3] = C_AZURE
-            else:
-                frame[ppy:ppy + CELL, ppx:ppx + CELL] = C_AZURE
+                sc = STOCK_COLORS[g.carrying % len(STOCK_COLORS)]
+                frame[ppy:ppy + cell, ppx:ppx + cell] = sc
+                if cell >= 4:
+                    frame[ppy + 1:ppy + cell - 1, ppx + 1:ppx + cell - 1] = 4
 
-        # HUD: gold counter
-        gold_display = min(g.gold, 25)
-        for i in range(gold_display):
-            hx = 1 + i * 2
-            if hx + 1 > 64:
-                break
-            frame[0:2, hx:hx + 1] = C_GOLD
+            # Person icon (White head, LightBlue suit)
+            cx = ppx + cell // 2
+            hc, bc = 0, 10
+            if cell >= 7:
+                frame[ppy + 1, cx] = hc
+                for dc in range(-1, 2):
+                    frame[ppy + 2, cx + dc] = bc
+                frame[ppy + 3, cx] = bc
+                frame[ppy + 4, cx - 1] = bc
+                frame[ppy + 4, cx + 1] = bc
+            elif cell >= 5:
+                frame[ppy, cx] = hc
+                for dc in range(-1, 2):
+                    frame[ppy + 1, cx + dc] = bc
+                frame[ppy + 2, cx] = bc
+                frame[ppy + 3, cx - 1] = bc
+                frame[ppy + 3, cx + 1] = bc
+            else:
+                frame[ppy + cell // 2, ppx + cell // 2] = bc
+
+        # === HUD ===
+        # Dashed green ticker line separating HUD from game
+        for x in range(0, 64, 2):
+            frame[HUD_H - 1, x] = 14
+
+        # Gold: coin icon + number in yellow
+        frame[2:4, 1:3] = 11  # 2x2 gold coin
+        _number(frame, 4, 1, g.gold, 11)
+
+        # Separator + target in light gray
+        sep = 4 + len(str(g.gold)) * 4 + 1
+        frame[1:6, sep] = 3
+        _number(frame, sep + 2, 1, g.target_gold, 1)
+
+        # Stock indicator (right side)
+        bx = 57
+        if g.carrying is not None:
+            sc = STOCK_COLORS[g.carrying % len(STOCK_COLORS)]
+            frame[1:6, bx:bx + 6] = sc
+            _glyph(frame, bx + 1, 1, FONT[g.carrying % 10], 0)
+        else:
+            frame[1:6, bx:bx + 6] = 4  # empty dark slot
+            for i in range(5):
+                if bx + i < 63:
+                    frame[1 + i, bx + i] = 3
+                if bx + 4 - i >= 0:
+                    frame[1 + i, bx + 4 - i] = 3
 
         return frame
 
@@ -261,7 +351,7 @@ class Ar01(ARCBaseGame):
             ))
         super().__init__(
             "ar01", levels,
-            Camera(0, 0, 64, 64, C_BLACK, C_BLACK, [self.display]),
+            Camera(0, 0, 64, 64, 5, 5, [self.display]),
             False, len(levels), [1, 2, 3, 4],
         )
 
@@ -272,12 +362,12 @@ class Ar01(ARCBaseGame):
         self.walls = _border(d["grid_w"], d["grid_h"]) | set(d["walls"])
         self.px, self.py = d["player"]
         self.stall_defs = d["stalls"]
-        self.stall_map = {}  # (x,y) -> (type, good_id, price)
+        self.stall_map = {}
         for sx, sy, stype, gid, price in d["stalls"]:
             self.stall_map[(sx, sy)] = (stype, gid, price)
         self.gold = d["start_gold"]
         self.target_gold = d["target_gold"]
-        self.carrying = None  # good_id or None
+        self.carrying = None
 
     def step(self):
         aid = self.action.id.value
@@ -298,11 +388,9 @@ class Ar01(ARCBaseGame):
         if (self.px, self.py) in self.stall_map:
             stype, gid, price = self.stall_map[(self.px, self.py)]
             if stype == 0 and self.carrying is None and self.gold >= price:
-                # Buy
                 self.gold -= price
                 self.carrying = gid
             elif stype == 1 and self.carrying == gid:
-                # Sell
                 self.gold += price
                 self.carrying = None
 
