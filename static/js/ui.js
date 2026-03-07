@@ -470,7 +470,7 @@ function gameSource(gameId) {
 function gameDevTag(gameId) {
   const short = (gameId || '').split('-')[0].toLowerCase();
   if (_ARC_FOUNDATION_GAMES.includes(short)) return '';
-  return '<span class="dev-tag" title="The game is currently iterating through feedback before released and open-sourced">in development</span>';
+  return '<span class="dev-tag" title="The game is currently iterating through feedback before released and open-sourced">staging</span>';
 }
 
 async function loadGames() {
@@ -504,7 +504,7 @@ function _renderGameGroup(el, label, games, onClick) {
     div.className = 'game-card';
     const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
     const tag = gameDevTag(g.game_id);
-    div.innerHTML = `<div class="title">${shortName}</div>${tag ? '<div class="meta">' + tag + '</div>' : ''}`;
+    div.innerHTML = `<div class="title">${shortName}${tag ? ' ' + tag : ''}</div>`;
     div.dataset.gameId = g.game_id;
     div.onclick = () => onClick(g);
     list.appendChild(div);

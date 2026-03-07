@@ -51,15 +51,15 @@
     margin-top: 4px; background: var(--surface2, #333); color: var(--text); font-size: 10px;
     padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 50;
     border: 1px solid var(--border); pointer-events: none; opacity: 1; letter-spacing: 0; }
-  .game-group-header { font-size: 11px; color: var(--text); text-transform: uppercase;
-    letter-spacing: 1.2px; padding: 10px 16px 6px; font-weight: 700; cursor: pointer;
+  .game-group-header { font-size: 10px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 1px; padding: 8px 16px; font-weight: 600; cursor: pointer;
     display: flex; align-items: center; gap: 6px; user-select: none;
-    border-bottom: 1px solid var(--border); }
-  .game-group-header:hover { color: var(--accent); }
-  .game-group-arrow { font-size: 10px; color: var(--text-dim); }
-  .game-group-count { font-size: 9px; color: var(--text-dim); font-weight: 400;
-    margin-left: auto; opacity: 0.6; }
+    background: var(--bg); border-bottom: 1px solid var(--border); }
+  .game-group-header:hover { color: var(--text); }
+  .game-group-arrow { font-size: 9px; }
+  .game-group-count { font-size: 9px; font-weight: 400; margin-left: auto; opacity: 0.5; }
   .game-group.collapsed .game-group-list { display: none; }
+  .game-group + .game-group .game-group-header { border-top: 1px solid var(--border); }
 
   /* ── Main area ───────────────────────────────────────────────────────── */
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
