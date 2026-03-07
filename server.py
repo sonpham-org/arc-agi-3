@@ -1725,10 +1725,15 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
 
 @app.after_request
 def add_cache_headers(response):
-    if response.content_type and "text/html" in response.content_type:
+    ct = response.content_type or ""
+    if "text/html" in ct:
+        # HTML is Jinja-rendered — never cache
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    elif request.path.startswith("/static/"):
+        # Static assets: cache 1 day at CDN, 1 hour in browser
+        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return response
 
 
@@ -2525,19 +2530,23 @@ def import_session():
         conn = _get_db()
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json,
+                                     user_id, player_type, duration_seconds)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
                  timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json),
-                 user_id = COALESCE(excluded.user_id, sessions.user_id)""",
+                 user_id = COALESCE(excluded.user_id, sessions.user_id),
+                 player_type = COALESCE(excluded.player_type, sessions.player_type),
+                 duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
+             sess.get("branch_at_step"), prompts_json, timeline_json, user_id,
+             sess.get("player_type", "agent"), sess.get("duration_seconds")),
         )
         llm_count = sum(1 for s in steps if s.get("llm_response"))
         app.logger.info(f"[import] session={sess['id'][:30]} steps={len(steps)} with_llm={llm_count}")
@@ -3037,16 +3046,22 @@ def list_sessions():
     if not feature_enabled("session_db"):
         return jsonify({"sessions": []})
     try:
+        player_type_filter = request.args.get("player_type")
         _sessions_query = (
             "SELECT s.id, s.game_id, s.model, s.mode, s.created_at, s.result, s.steps, s.levels, "
-            "s.parent_session_id, s.branch_at_step, s.total_cost, "
+            "s.parent_session_id, s.branch_at_step, s.total_cost, s.player_type, s.duration_seconds, "
             "(SELECT MAX(st.timestamp) - MIN(st.timestamp) FROM session_steps st WHERE st.session_id = s.id) AS duration "
-            "FROM sessions s ORDER BY s.created_at DESC LIMIT 100"
+            "FROM sessions s "
         )
+        _params = ()
+        if player_type_filter:
+            _sessions_query += "WHERE s.player_type = ? "
+            _params = (player_type_filter,)
+        _sessions_query += "ORDER BY s.created_at DESC LIMIT 100"
         sessions_by_id = {}
         # Local SQLite
         conn = _get_db()
-        rows = conn.execute(_sessions_query).fetchall()
+        rows = conn.execute(_sessions_query, _params).fetchall()
         conn.close()
         for r in rows:
             d = dict(r)
@@ -3055,7 +3070,7 @@ def list_sessions():
         turso_conn = _get_turso_db()
         if turso_conn:
             try:
-                cur = turso_conn.execute(_sessions_query)
+                cur = turso_conn.execute(_sessions_query, _params)
                 for d in _turso_dict_fetchall(cur):
                     if d["id"] not in sessions_by_id:
                         sessions_by_id[d["id"]] = d
@@ -3073,6 +3088,34 @@ def list_sessions():
         return jsonify({"sessions": merged[:100]})
     except Exception as e:
         return jsonify({"sessions": [], "error": str(e)})
+
+
+@app.route("/api/game-results")
+@bot_protection
+def game_results():
+    """Return human play results grouped by game and level."""
+    if not feature_enabled("session_db"):
+        return jsonify({"results": []})
+    game_id = request.args.get("game_id")
+    try:
+        conn = _get_db()
+        query = """
+            SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.duration_seconds,
+                   s.created_at, s.user_id
+            FROM sessions s
+            WHERE s.player_type = 'human' AND s.result IN ('WIN', 'GAME_OVER')
+        """
+        params = ()
+        if game_id:
+            query += " AND s.game_id = ?"
+            params = (game_id,)
+        query += " ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC LIMIT 200"
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        results = [dict(r) for r in rows]
+        return jsonify({"results": results})
+    except Exception as e:
+        return jsonify({"results": [], "error": str(e)})
 
 
 def _format_step_row(d: dict) -> dict:

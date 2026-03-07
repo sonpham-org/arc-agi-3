@@ -1579,23 +1579,39 @@ function showAppView(view) {
   const tabBar = document.getElementById('sessionTabBar');
   const emptyApp = document.getElementById('emptyAppState');
   const menuView = document.getElementById('menuView');
+  const humanView = document.getElementById('humanView');
 
   const sidebar = document.getElementById('gameSidebar');
+  const outerLayout = document.getElementById('outerLayout');
+  // Hide all views first
+  browseView.style.display = 'none';
+  if (humanView) humanView.style.display = 'none';
+  menuView.classList.remove('visible');
+
   if (view === 'browse') {
-    links[1]?.classList.add('active');
+    links[2]?.classList.add('active');
     _browseActive = true;
     _menuActive = false;
     browseView.style.display = 'flex';
-    sessionHost.style.display = 'none';
+    outerLayout.style.display = 'none';
     tabBar.style.display = 'none';
     emptyApp.style.display = 'none';
-    menuView.classList.remove('visible');
-    sidebar.style.display = 'none';
     loadBrowseView();
+  } else if (view === 'human') {
+    links[1]?.classList.add('active');
+    _browseActive = false;
+    _menuActive = false;
+    outerLayout.style.display = 'none';
+    tabBar.style.display = 'none';
+    emptyApp.style.display = 'none';
+    if (humanView) {
+      humanView.style.display = 'flex';
+      if (typeof initHumanView === 'function') initHumanView();
+    }
   } else {
     links[0]?.classList.add('active');
     _browseActive = false;
-    browseView.style.display = 'none';
+    outerLayout.style.display = '';
     tabBar.style.display = 'flex';
     if (_menuActive) {
       menuView.classList.add('visible');

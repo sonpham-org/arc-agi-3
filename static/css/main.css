@@ -713,3 +713,100 @@
   .browse-header { font-size: 11px; color: var(--text-dim); padding: 8px 14px; border-bottom: 1px solid var(--border);
     text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; background: var(--surface); flex-shrink: 0; }
   .browse-empty { padding: 40px; text-align: center; color: var(--text-dim); font-size: 13px; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     HUMAN PLAY MODE
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* Level selector grid */
+  .human-level-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+  }
+  .human-level-card {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    text-align: center;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--surface);
+  }
+  .human-level-card:hover { border-color: var(--accent); background: var(--surface2, var(--surface)); }
+  .human-level-card.active { border-color: var(--accent); background: #58a6ff18; }
+  .human-level-card .level-thumb {
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    background: #111;
+    image-rendering: pixelated;
+  }
+  .human-level-card .level-label {
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 4px;
+    color: var(--text);
+  }
+
+  /* Session recorder sidebar */
+  .human-recorder {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .recorder-timer {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--accent);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 2px;
+  }
+  .recorder-steps, .recorder-level {
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text);
+  }
+  .recorder-moves {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 4px;
+  }
+  .recorder-move-entry {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-dim);
+    padding: 2px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Game results table */
+  .human-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .human-results-table th {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+  .human-results-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .human-results-table tr:hover { background: var(--surface2, var(--surface)); }
+  .result-win { color: var(--green); font-weight: 600; }
+  .result-lose { color: var(--red); font-weight: 600; }

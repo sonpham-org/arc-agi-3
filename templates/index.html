@@ -27,7 +27,8 @@
   <!-- ── Top navigation ──────────────────────────────────────────────── -->
   <div class="top-nav">
     <span class="app-title">ARC-AGI-3 Player</span>
-    <span class="nav-link active" onclick="showAppView('play')">Play</span>
+    <span class="nav-link active" onclick="showAppView('play')">Make your agent</span>
+    <span class="nav-link" onclick="showAppView('human')">Play as Human</span>
     <span class="nav-link" onclick="showAppView('browse')">Browse Sessions</span>
     <span style="flex:1;"></span>
     <button id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;" onclick="showLoginModal()">Log in</button>
@@ -51,7 +52,7 @@
     <div class="new-session-hero" onclick="createNewSession()">
       <div class="hero-icon">+</div>
       <div>New Session</div>
-      <div style="font-size:12px;margin-top:8px;color:var(--text-dim);">Try playing ARC-AGI-3 with an agent today!</div>
+      <div style="font-size:12px;margin-top:8px;color:var(--text-dim);">Build your own LLM agent to play ARC-AGI-3</div>
     </div>
   </div>
   <!-- ── Menu view (session management) ────────────────────────────────── -->
@@ -60,7 +61,7 @@
       <div class="menu-left">
         <button class="menu-new-btn" onclick="createNewSession()">
           <div class="menu-new-title">New Session</div>
-          <div class="menu-new-subtitle">Play ARC-AGI 3 games with agents</div>
+          <div class="menu-new-subtitle">Build your LLM agent to play ARC-AGI 3</div>
         </button>
       </div>
       <div class="menu-right">
@@ -100,6 +101,96 @@
       </div>
     </div>
   </div>
+<!-- ── Human Play View ─────────────────────────────────────────────────── -->
+<div id="humanView" style="display:none;flex:1;overflow:hidden;">
+  <div class="layout" style="flex:1;">
+    <!-- Left sidebar: Games list / Session Recorder -->
+    <div class="sidebar" id="humanSidebar">
+      <div id="humanSidebarGames">
+        <h2>Games</h2>
+        <div id="humanGameList"><div class="empty-state" style="height:auto;padding:20px;">Loading...</div></div>
+      </div>
+      <div id="humanSidebarRecorder" style="display:none;">
+        <h2>Session Recorder</h2>
+        <div class="human-recorder">
+          <div class="recorder-timer" id="humanTimer">00:00</div>
+          <div class="recorder-steps" id="humanRecSteps">0 steps</div>
+          <div class="recorder-level" id="humanRecLevel">Level 1</div>
+          <div class="recorder-moves" id="humanMoveLog"></div>
+        </div>
+      </div>
+    </div>
+    <!-- Main content -->
+    <div id="humanMainLayout" style="flex:1;display:flex;flex-direction:column;min-width:0;">
+      <div class="main">
+        <div class="topbar">
+          <span id="humanGameTitle" style="font-weight:600;">No game selected</span>
+          <span id="humanGameStatus" class="status status-NOT_PLAYED">—</span>
+          <span id="humanLevelInfo" class="level-info"></span>
+          <span id="humanStepCounter" class="step-counter"></span>
+          <span style="flex:1;"></span>
+        </div>
+        <div class="game-area">
+          <div class="canvas-panel">
+            <div class="canvas-center">
+              <div id="humanEmptyState" class="empty-state">
+                Select a game from the sidebar to start playing.<br>
+                Pick a level on the right, then use the controls below.
+              </div>
+              <canvas id="humanCanvas" width="512" height="512" style="display:none;"></canvas>
+              <div id="humanControls" style="display:none;">
+                <div class="controls-inner">
+                  <button class="btn btn-danger" onclick="humanDoAction(0)">Reset <span class="kbd">R</span></button>
+                  <div class="dpad">
+                    <span class="dpad-empty"></span>
+                    <button class="btn" onclick="humanDoAction(1)">&uarr; <span class="kbd">W</span></button>
+                    <span class="dpad-empty"></span>
+                    <button class="btn" onclick="humanDoAction(3)">&larr; <span class="kbd">A</span></button>
+                    <span class="dpad-empty"></span>
+                    <button class="btn" onclick="humanDoAction(4)">&rarr; <span class="kbd">D</span></button>
+                    <span class="dpad-empty"></span>
+                    <button class="btn" onclick="humanDoAction(2)">&darr; <span class="kbd">S</span></button>
+                    <span class="dpad-empty"></span>
+                  </div>
+                  <button class="btn" onclick="humanDoAction(5)">ACT5 <span class="kbd">Z</span></button>
+                  <button class="btn" onclick="humanDoAction(7)">ACT7 <span class="kbd">X</span></button>
+                  <button class="btn btn-primary" onclick="humanDoAction(6,true)">Click grid <span class="kbd">Click</span></button>
+                </div>
+              </div>
+              <!-- Transport: Undo + New Game -->
+              <div class="transport-strip" id="humanTransport" style="display:none;">
+                <div class="transport-bar">
+                  <button class="btn" onclick="humanUndo()" id="humanUndoBtn" disabled>&#9198; Undo</button>
+                  <button class="btn" onclick="humanRestart()">&#8635; Restart Level</button>
+                  <button class="btn" onclick="humanNewGame()">New Game</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Right panel: Level selector + Game Results -->
+          <div class="right-panel" id="humanRightPanel">
+            <div class="subtab-bar">
+              <button class="active" onclick="switchHumanSubTab('levels')">Select Level</button>
+              <button onclick="switchHumanSubTab('results')">Game Results</button>
+            </div>
+            <!-- Level selector -->
+            <div class="subtab-pane active" id="humanSubLevels" style="overflow:auto;padding:10px;">
+              <div id="humanLevelGrid" class="human-level-grid">
+                <div class="empty-state" style="height:auto;font-size:12px;">Select a game first.</div>
+              </div>
+            </div>
+            <!-- Game Results -->
+            <div class="subtab-pane" id="humanSubResults" style="display:none;overflow:auto;padding:10px;">
+              <div id="humanResultsBody">
+                <div class="empty-state" style="height:auto;font-size:12px;">Play a game to see results here.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="layout" id="outerLayout">
   <!-- ── Sidebar (shared, not session-scoped) ─────────────────────────── -->
   <div class="sidebar" id="gameSidebar">
@@ -423,6 +514,7 @@ window.PROMPTS = {{ prompts | tojson }};
 <script src="/static/js/scaffolding.js"></script>
 <script src="/static/js/session.js"></script>
 <script src="/static/js/observatory.js"></script>
+<script src="/static/js/human.js"></script>
 <script src="/static/js/dev.js"></script>
 
 <!-- Dev panel (developer-only level selector) -->

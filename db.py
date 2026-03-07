@@ -60,7 +60,9 @@ def _init_db():
                       ("total_cost", "REAL DEFAULT 0"),
                       ("prompts_json", "TEXT DEFAULT NULL"),
                       ("timeline_json", "TEXT DEFAULT NULL"),
-                      ("user_id", "TEXT DEFAULT NULL")]:
+                      ("user_id", "TEXT DEFAULT NULL"),
+                      ("player_type", "TEXT DEFAULT 'agent'"),
+                      ("duration_seconds", "REAL DEFAULT NULL")]:
         try:
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
@@ -416,7 +418,9 @@ def _init_turso_db():
         # Schema migration: add columns (idempotent)
         for col, defn in [("prompts_json", "TEXT DEFAULT NULL"),
                           ("timeline_json", "TEXT DEFAULT NULL"),
-                          ("user_id", "TEXT DEFAULT NULL")]:
+                          ("user_id", "TEXT DEFAULT NULL"),
+                          ("player_type", "TEXT DEFAULT 'agent'"),
+                          ("duration_seconds", "REAL DEFAULT NULL")]:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {defn}")
             except Exception:
@@ -481,19 +485,23 @@ def _turso_import_session(payload):
         user_id = sess.get("user_id")
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
-                                     parent_session_id, branch_at_step, prompts_json, timeline_json, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     parent_session_id, branch_at_step, prompts_json, timeline_json,
+                                     user_id, player_type, duration_seconds)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  prompts_json = COALESCE(excluded.prompts_json, sessions.prompts_json),
                  timeline_json = COALESCE(excluded.timeline_json, sessions.timeline_json),
-                 user_id = COALESCE(excluded.user_id, sessions.user_id)""",
+                 user_id = COALESCE(excluded.user_id, sessions.user_id),
+                 player_type = COALESCE(excluded.player_type, sessions.player_type),
+                 duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
-             sess.get("branch_at_step"), prompts_json, timeline_json, user_id),
+             sess.get("branch_at_step"), prompts_json, timeline_json, user_id,
+             sess.get("player_type", "agent"), sess.get("duration_seconds")),
         )
         for s in steps:
             grid_snapshot = None
