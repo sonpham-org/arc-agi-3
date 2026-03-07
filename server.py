@@ -1732,8 +1732,12 @@ def add_cache_headers(response):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
     elif request.path.startswith("/static/"):
-        # Static assets: cache 1 day at CDN, 1 hour in browser
-        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+        if get_mode() == "staging":
+            # No caching in staging — always serve fresh files
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        else:
+            # Prod: cache 1 day at CDN, 1 hour in browser
+            response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return response
 
 

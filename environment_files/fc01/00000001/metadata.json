@@ -1,9 +1,0 @@
-{
-  "game_id": "fc01-00000001",
-  "title": "Frontline Courier",
-  "default_fps": 5,
-  "baseline_actions": [8, 16, 20, 24, 30, 40, 45, 50, 55, 65],
-  "tags": ["puzzle", "delivery", "grid", "stealth"],
-  "local_dir": "environment_files/fc01/00000001",
-  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
-}

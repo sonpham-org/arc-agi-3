@@ -38,6 +38,19 @@
 ## vc33
 
 ## ls20-cb3b57cc
+- White (0) pixels are mentioned near the player's position, possibly as targets or obstacles.
+- Actions (ACTION1, ACTION2, ACTION3, ACTION4) do not always result in player movement, suggesting movement might be conditional or blocked.
+- ACTION1 can move the player 3 steps down (e.g., from (32,17) to (32,20)).
+- The player is a LightGray (1) pixel.
+- Player coordinates in history are inconsistent with RLE grid. Trust RLE. White (0) pixels are likely collectibles or part of the path.
+- Player (1) is at (32,17). White (0) items at (32,18) and (32,19) are immediately below. Previous ACTION3 (LEFT) did not move player, despite path being DarkGray (3).
+- ACTION2 appears to be an observation or null action, as it provides descriptions of the environment without advancing levels or indicating player movement.
+- There are 7 levels in total for this game.
+- The player is a 3x3 object composed of colors 0 and 1.
+- The game grid is a maze where paths are color 3 and walls are color 4.
+- Player is a 3x3 object (colors 0,1). Movement is 1 cell at a time. Goal is to collect 5x5 blocks (colors 9,12).
+- Player is a single blue pixel (9). Player coordinates are (column, row). Walls are colors 3, 4, 5. Targets are white (0) and light gray (1) pixels.
+- Player is at (37, 12) (row, col). Movement actions (UP/DOWN/LEFT/RIGHT) are currently blocked. Changes at (61,13) and (62,13) (color 3) are far from player, possibly a global effect.
 - The player is represented by a 1x1 white (0) pixel.
 - The game environment is a maze-like structure with dark gray (4) walls and gray (3) pathways.
 - ACTION2 and ACTION3 are used for observing and describing the grid state, player position, and colors; they do not appear to modify the grid.
@@ -566,3 +579,22 @@
 - The player (5) moves within a grid of light gray (1) lines on a blue (9) background.
 
 - Player is black pixel (5) at (31, 26). Background is blue (9). Orange bars at bottom may be energy.
+
+## px01-00000001
+- The initial levels of this game (at least level 0 and 1) feature a grid consistently divided into a top section of color 4 and a bottom section of color 3.
+- Repeatedly using ACTION6 can lead to level advancement (e.g., from level 0 to level 1), suggesting it might contribute to progress or that progress can occur even with descriptive actions.
+- ACTION6 provides textual descriptions of the grid's layout, often identifying distinct colored sections (e.g., top color 4, bottom color 3).
+- Clicking non-white blocks might cause new blocks to appear, potentially including white ones, which are needed to advance levels.
+- Clicking a 4x4 colored block in the bottom grid causes it to disappear. The coordinates in descriptions might be approximate.
+
+- Clicking a colored block in the grid causes it to disappear and a new block of a different color to appear in an adjacent cell.
+
+## fr01
+- The objective involves moving the player to a goal area, though the specific nature of the goal is not yet clear.
+- ACTION3 provides status updates, including the player's current position and information about the goal.
+- The game grid has a mostly red (8) background.
+- The player is a 2x2 block of VeryDarkGray (4).
+- Player is a 2x2 block of VeryDarkGray (4). Goal is to collect Purple (15) pixels by moving onto them.
+- Player is a 2x2 block of VeryDarkGray (4). Goal is to collect Purple (15) pixels by moving onto them.
+
+- Player is 2x2 VeryDarkGray (4). Targets are Purple (15). Goal is to collect all Purple (15) pixels.

@@ -1,9 +1,0 @@
-{
-  "game_id": "mk01-00000001",
-  "title": "Morph Knight",
-  "default_fps": 5,
-  "baseline_actions": [3, 4, 6, 6, 4, 4, 4, 6, 8, 6],
-  "tags": ["puzzle", "chess", "grid"],
-  "local_dir": "environment_files/mk01/00000001",
-  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
-}

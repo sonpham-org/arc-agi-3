@@ -151,6 +151,60 @@ Every `{ type: 'model-select', id: '...' }` field in `SCAFFOLDING_SCHEMAS` **mus
 
 This has been missed repeatedly (Three-System selects, REPL selects, etc.). When adding a new `model-select` to any scaffold, always update all three places.
 
+## Building New Games
+
+When creating a new ARC-AGI-3 game, follow this checklist:
+
+### File Structure
+- Directory: `environment_files/<game_id>/00000001/`
+- Game file: `<game_id>.py` with class named in PascalCase from the ID (e.g., `mk01` → `Mk01`)
+- Metadata: `metadata.json` with `game_id`, `title`, `default_fps`, `baseline_actions`, `tags`, `local_dir`, `date_downloaded`
+
+### Game Class Requirements
+- Extend `ARCBaseGame` from `arcengine`
+- Class name MUST match the game ID in PascalCase (e.g., `Mk01`, `Ls20`) — Pyodide loads it by this name
+- Override `step()` and call `self.complete_action()` at the end of every code path
+- Override `on_set_level()` for level-specific setup
+- Use `self.next_level()` for win, `self.lose()` for game over
+- `available_actions` in constructor: `[1,2,3,4]` for d-pad, `[6]` for click-only, `[1,2,3,4,6]` for both
+
+### Mandatory Smoke Test
+After building or modifying any game, run this automated playthrough that **wins every level** using the game's actual movement system:
+
+```bash
+source venv/bin/activate && python -c "
+import sys; sys.path.insert(0, 'environment_files/<game_id>/00000001')
+import <game_id>
+g = <game_id>.<ClassName>()
+from arcengine.enums import ActionInput, GameAction
+
+# For click games (ACTION6):
+def click(gx, gy):
+    ox, oy = g.current_level.get_data('ox'), g.current_level.get_data('oy')
+    CELL = 5  # or whatever cell size the game uses
+    return g.perform_action(ActionInput(id=GameAction.ACTION6, data={'x': ox+gx*CELL+2, 'y': oy+gy*CELL+2}))
+
+# For d-pad games (ACTION1-4):
+UP, DOWN, LEFT, RIGHT = GameAction.ACTION1, GameAction.ACTION2, GameAction.ACTION3, GameAction.ACTION4
+A = lambda a: g.perform_action(ActionInput(id=a))
+
+# ... solve every level ...
+# Final check must show GameState.WIN
+"
+```
+
+This test must:
+1. Solve **every single level** in sequence
+2. End with `GameState.WIN`
+3. Use the actual movement system (clicks for click games, d-pad for d-pad games)
+
+### Design Rules (reiterated)
+- Fully deterministic — no RNG
+- All state defined as constants
+- Sprites: use `tags=[]` in constructor (tags property has no setter)
+- For click games: store valid moves dict, validate clicks against it
+- Guards/moving enemies: move AFTER player, check collision after guard movement, check win BEFORE guard movement
+
 ## After Every Fix
 
 After completing any fix or feature, **always**:

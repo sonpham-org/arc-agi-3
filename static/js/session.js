@@ -1568,6 +1568,7 @@ function renderPromptsTab() {
 
 let _browseActive = false;
 let _menuActive = false;
+let _currentView = 'play';  // tracks which top-level view is active
 let _browseGlobalCache = null;  // cache server sessions
 let _browseGameFilter = null;   // currently selected game in By Game tab
 
@@ -1582,6 +1583,7 @@ function showAppView(view, skipHash) {
     if (location.hash !== '#' + hash) history.replaceState(null, '', '#' + hash);
   }
 
+  _currentView = view;
   document.querySelectorAll('.top-nav .nav-link').forEach(l => l.classList.remove('active'));
   const links = document.querySelectorAll('.top-nav .nav-link');
   const browseView = document.getElementById('browseView');
@@ -1653,12 +1655,6 @@ function _routeFromHash() {
   if (view) showAppView(view, true);
 }
 window.addEventListener('hashchange', _routeFromHash);
-// On page load, route from hash (deferred so DOM is ready)
-window.addEventListener('DOMContentLoaded', () => {
-  if (location.hash && location.hash !== '#' && location.hash !== '#agent') {
-    setTimeout(_routeFromHash, 0);
-  }
-});
 
 // ── Menu view ─────────────────────────────────────────────────────────────
 
@@ -2160,6 +2156,7 @@ function updateEmptyAppState() {
   const sessionHost = document.getElementById('sessionViewHost');
   const menuView = document.getElementById('menuView');
   if (!empty || !sessionHost) return;
+  if (_currentView !== 'play') return; // only applies to agent view
   if (_browseActive) return; // browse view handles its own display
   if (_menuActive) return; // menu view handles its own display
   if (sessions.size === 0) {
@@ -2261,7 +2258,14 @@ async function initApp() {
   if (FEATURES.puter_js) puterKvCheckResume();
 
   restoreSessionsFromLocalStorage();
-  updateEmptyAppState();
+
+  // Route from hash BEFORE showing default view — prevents flash of agent UI
+  // when loading #leaderboards, #human, or #sessions directly
+  if (location.hash && location.hash !== '#' && location.hash !== '#agent') {
+    _routeFromHash();
+  } else {
+    showAppView('play');
+  }
 
   // Auth: check login status (async, doesn't block init)
   checkAuthStatus();

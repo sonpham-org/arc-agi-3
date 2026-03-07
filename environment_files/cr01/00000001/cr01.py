@@ -1,6 +1,7 @@
 # Crumbling Route - A turn-based pathfinding puzzle
 #
-# D-pad to move. Every tile you step off of falls into the abyss.
+# D-pad to move. Every tile you step off of cracks.
+# Step off a cracked tile and it falls into the abyss.
 # Collect all keys before reaching the exit door.
 # Plan your route carefully - one wrong step and you're stuck!
 
@@ -12,32 +13,23 @@ CELL = 4  # 4x4 pixels per cell, fits up to 16x16 grids in 64x64
 
 # --- Colors (ARC palette indices) ---
 C_BLACK   = 0   # abyss / fallen tile
-C_GRAY    = 3   # cracked tile (one step left before falling)
-C_MID     = 5   # normal floor
+C_DBLUE   = 1   # mortar lines / HUD background
+C_YELLOW  = 4   # teleporter
+C_MID     = 5   # normal floor base
 C_ORANGE  = 7   # key
 C_AZURE   = 8   # player
+C_MAROON  = 9   # cracked tile base
 C_GOLD    = 11  # exit door
-C_YELLOW  = 4   # teleporter
-C_WHITE   = 15  # sturdy floor (never crumbles)
 C_RED     = 12  # exit locked indicator
 C_LIME    = 14  # exit open indicator
-C_DBLUE   = 1   # HUD background
+C_WHITE   = 15  # sturdy floor
 
 # --- Tile types ---
 T_ABYSS   = 0
-T_FLOOR   = 1
-T_STURDY  = 2
-T_CRACKED = 3   # survives one step-off, then becomes floor, then abyss
+T_FLOOR   = 1   # healthy stone: step off -> cracked (2 uses total)
+T_STURDY  = 2   # never crumbles
+T_CRACKED = 3   # already damaged: step off -> abyss (1 use only)
 T_TELEPORT = 4
-
-# Tile color map
-TILE_COLORS = {
-    T_ABYSS:   C_BLACK,
-    T_FLOOR:   C_MID,
-    T_STURDY:  C_WHITE,
-    T_CRACKED: C_GRAY,
-    T_TELEPORT: C_YELLOW,
-}
 
 # ============================================================================
 # Level definitions
@@ -91,12 +83,6 @@ LEVELS = [
     },
 
     # Level 3: 6x5, 3 keys, need careful routing
-    # Layout (S = sturdy):
-    #   P . . . . .
-    #   . _ . K . .
-    #   . . . . _ .
-    #   . K . . . .
-    #   . . . K . E
     {
         "name": "Winding Path",
         "grid_w": 6, "grid_h": 5,
@@ -131,8 +117,8 @@ LEVELS = [
         "teleporters": [],
     },
 
-    # Level 5: Introduces cracked tiles (survive one step-off)
-    # 6x4 grid with cracked tiles forming alternate routes
+    # Level 5: Introduces cracked tiles (only 1 step before falling!)
+    # 6x4 grid with cracked tiles on alternate routes
     {
         "name": "Cracked Ground",
         "grid_w": 6, "grid_h": 4,
@@ -166,15 +152,14 @@ LEVELS = [
         "teleporters": [],
     },
 
-    # Level 7: Introduces teleporters
+    # Level 7: Introduces teleporters + cracked tiles near warps
     # Two halves separated by gap at col 4. Teleporter bridges them.
-    # Solution path (one-way trip): D*4(0,4)[key],R*3(3,4),U*2(3,2)[tp->5,2],U*2(5,0),R*2(7,0),D*4(7,4)[exit]
     {
         "name": "Warp Zone",
         "grid_w": 8, "grid_h": 5,
         "tiles": {
             (0,0): T_FLOOR, (1,0): T_FLOOR, (2,0): T_FLOOR, (3,0): T_FLOOR,                  (5,0): T_FLOOR, (6,0): T_FLOOR, (7,0): T_FLOOR,
-            (0,1): T_FLOOR, (1,1): T_FLOOR, (2,1): T_FLOOR, (3,1): T_FLOOR,                  (5,1): T_FLOOR, (6,1): T_FLOOR, (7,1): T_FLOOR,
+            (0,1): T_FLOOR, (1,1): T_CRACKED, (2,1): T_FLOOR, (3,1): T_FLOOR,                  (5,1): T_FLOOR, (6,1): T_CRACKED, (7,1): T_FLOOR,
             (0,2): T_FLOOR, (1,2): T_FLOOR, (2,2): T_FLOOR, (3,2): T_TELEPORT,               (5,2): T_TELEPORT, (6,2): T_FLOOR, (7,2): T_FLOOR,
             (0,3): T_FLOOR, (1,3): T_FLOOR, (2,3): T_FLOOR, (3,3): T_FLOOR,                  (5,3): T_FLOOR, (6,3): T_FLOOR, (7,3): T_FLOOR,
             (0,4): T_FLOOR, (1,4): T_FLOOR, (2,4): T_FLOOR, (3,4): T_FLOOR,                  (5,4): T_FLOOR, (6,4): T_FLOOR, (7,4): T_FLOOR,
@@ -187,8 +172,6 @@ LEVELS = [
 
     # Level 8: Teleporters + cracked tiles
     # Three islands connected by two teleporters. One-way path through each.
-    # Solution: D*5(0,5)[key],R*2(2,5),U*5(2,0)[tp->4,0],D*5(4,5)[key],
-    #   R*2(6,5)[tp->8,0],R(9,0)[key],D*5(9,5)[exit]
     {
         "name": "Warp Maze",
         "grid_w": 10, "grid_h": 6,
@@ -196,34 +179,28 @@ LEVELS = [
             (0,0): T_FLOOR,   (1,0): T_FLOOR,   (2,0): T_TELEPORT,                  (4,0): T_TELEPORT, (5,0): T_FLOOR, (6,0): T_FLOOR,                     (8,0): T_TELEPORT, (9,0): T_FLOOR,
             (0,1): T_FLOOR,   (1,1): T_CRACKED,  (2,1): T_FLOOR,                     (4,1): T_FLOOR,   (5,1): T_CRACKED, (6,1): T_FLOOR,                    (8,1): T_FLOOR, (9,1): T_FLOOR,
             (0,2): T_FLOOR,   (1,2): T_FLOOR,    (2,2): T_FLOOR,                     (4,2): T_FLOOR,   (5,2): T_FLOOR, (6,2): T_FLOOR,                      (8,2): T_FLOOR, (9,2): T_FLOOR,
-            (0,3): T_FLOOR,   (1,3): T_FLOOR,    (2,3): T_FLOOR,                     (4,3): T_FLOOR,   (5,3): T_FLOOR, (6,3): T_CRACKED,                    (8,3): T_FLOOR, (9,3): T_FLOOR,
+            (0,3): T_FLOOR,   (1,3): T_CRACKED,  (2,3): T_FLOOR,                     (4,3): T_FLOOR,   (5,3): T_FLOOR, (6,3): T_CRACKED,                    (8,3): T_FLOOR, (9,3): T_CRACKED,
             (0,4): T_FLOOR,   (1,4): T_FLOOR,    (2,4): T_FLOOR,                     (4,4): T_FLOOR,   (5,4): T_FLOOR, (6,4): T_FLOOR,                      (8,4): T_FLOOR, (9,4): T_FLOOR,
             (0,5): T_FLOOR,   (1,5): T_FLOOR,    (2,5): T_FLOOR,                     (4,5): T_FLOOR,   (5,5): T_FLOOR, (6,5): T_TELEPORT,                   (8,5): T_FLOOR, (9,5): T_FLOOR,
         },
         "player_start": (0, 0),
         "keys": [(0, 5), (4, 5), (9, 0)],
-        # Solution: D*5(0,5)[key], R*2(2,5), U*5(2,0)[tp->4,0], D*5(4,5)[key],
-        # R*2(6,5)[tp->8,5]... wait, tp at (6,5) paired with (8,0)?
-        # Actually let me pair: (2,0)<->(4,0) and (6,5)<->(8,0)
-        # After tp from (6,5) to (8,0): at (8,0). Then R(9,0)[key], D*5(9,5)[exit]
         "exit_pos": (9, 5),
         "teleporters": [((2, 0), (4, 0)), ((6, 5), (8, 0))],
     },
 
     # Level 9: Large S-shaped maze with cracked and sturdy tiles
     # 10x7 grid. Sturdy column at x=4 enables return trips.
-    # Solution: R*9(9,0)[key]->D*3(9,3)[key]->L*9(0,3)->D*3(0,6)[key]->R*4(4,6)->U*2(4,4)[sturdy]
-    # ->U*2(4,2)[sturdy+key]->D*2(4,4)[sturdy]->D*2(4,6)->R*5(9,6)[exit]
     {
         "name": "The Labyrinth",
         "grid_w": 10, "grid_h": 7,
         "tiles": {
             (0,0): T_FLOOR, (1,0): T_FLOOR, (2,0): T_FLOOR, (3,0): T_FLOOR, (4,0): T_FLOOR, (5,0): T_FLOOR, (6,0): T_FLOOR, (7,0): T_FLOOR, (8,0): T_FLOOR, (9,0): T_FLOOR,
-            (0,1): T_FLOOR, (1,1): T_FLOOR, (2,1): T_CRACKED, (3,1): T_FLOOR, (4,1): T_FLOOR, (5,1): T_FLOOR, (6,1): T_FLOOR, (7,1): T_CRACKED, (8,1): T_FLOOR, (9,1): T_FLOOR,
+            (0,1): T_FLOOR, (1,1): T_FLOOR, (2,1): T_CRACKED, (3,1): T_FLOOR, (4,1): T_FLOOR, (5,1): T_CRACKED, (6,1): T_FLOOR, (7,1): T_CRACKED, (8,1): T_FLOOR, (9,1): T_FLOOR,
             (0,2): T_FLOOR, (1,2): T_FLOOR, (2,2): T_FLOOR, (3,2): T_FLOOR, (4,2): T_STURDY, (5,2): T_FLOOR, (6,2): T_FLOOR, (7,2): T_FLOOR, (8,2): T_FLOOR, (9,2): T_FLOOR,
             (0,3): T_FLOOR, (1,3): T_FLOOR, (2,3): T_FLOOR, (3,3): T_CRACKED, (4,3): T_FLOOR, (5,3): T_FLOOR, (6,3): T_CRACKED, (7,3): T_FLOOR, (8,3): T_FLOOR, (9,3): T_FLOOR,
             (0,4): T_FLOOR, (1,4): T_FLOOR, (2,4): T_FLOOR, (3,4): T_FLOOR, (4,4): T_STURDY, (5,4): T_FLOOR, (6,4): T_FLOOR, (7,4): T_FLOOR, (8,4): T_FLOOR, (9,4): T_FLOOR,
-            (0,5): T_FLOOR, (1,5): T_CRACKED, (2,5): T_FLOOR, (3,5): T_FLOOR, (4,5): T_FLOOR, (5,5): T_FLOOR, (6,5): T_FLOOR, (7,5): T_FLOOR, (8,5): T_CRACKED, (9,5): T_FLOOR,
+            (0,5): T_FLOOR, (1,5): T_CRACKED, (2,5): T_FLOOR, (3,5): T_FLOOR, (4,5): T_FLOOR, (5,5): T_CRACKED, (6,5): T_FLOOR, (7,5): T_FLOOR, (8,5): T_CRACKED, (9,5): T_FLOOR,
             (0,6): T_FLOOR, (1,6): T_FLOOR, (2,6): T_FLOOR, (3,6): T_FLOOR, (4,6): T_FLOOR, (5,6): T_FLOOR, (6,6): T_FLOOR, (7,6): T_FLOOR, (8,6): T_FLOOR, (9,6): T_FLOOR,
         },
         "player_start": (0, 0),
@@ -233,20 +210,18 @@ LEVELS = [
     },
 
     # Level 10: Grand finale - double S-shape with all mechanics
-    # 10x8 grid. Clean S-path through cracked tiles.
-    # Solution: R*9(9,0)[key], D*2(9,2), L*9(0,2)[key], D*3(0,5)[key],
-    #   R*9(9,5)[key], D*2(9,7)[key], L*5(4,7)[exit]
+    # 10x8 grid. Many pre-cracked tiles on critical paths.
     {
         "name": "The Gauntlet",
         "grid_w": 10, "grid_h": 8,
         "tiles": {
             (0,0): T_FLOOR, (1,0): T_FLOOR, (2,0): T_FLOOR, (3,0): T_CRACKED, (4,0): T_FLOOR, (5,0): T_FLOOR, (6,0): T_FLOOR, (7,0): T_CRACKED, (8,0): T_FLOOR, (9,0): T_FLOOR,
-            (0,1): T_FLOOR, (1,1): T_FLOOR, (2,1): T_FLOOR, (3,1): T_FLOOR, (4,1): T_FLOOR, (5,1): T_FLOOR, (6,1): T_FLOOR, (7,1): T_FLOOR, (8,1): T_FLOOR, (9,1): T_FLOOR,
+            (0,1): T_FLOOR, (1,1): T_FLOOR, (2,1): T_FLOOR, (3,1): T_FLOOR, (4,1): T_FLOOR, (5,1): T_CRACKED, (6,1): T_FLOOR, (7,1): T_FLOOR, (8,1): T_FLOOR, (9,1): T_FLOOR,
             (0,2): T_FLOOR, (1,2): T_CRACKED, (2,2): T_FLOOR, (3,2): T_FLOOR, (4,2): T_FLOOR, (5,2): T_FLOOR, (6,2): T_FLOOR, (7,2): T_FLOOR, (8,2): T_CRACKED, (9,2): T_FLOOR,
-            (0,3): T_FLOOR, (1,3): T_FLOOR, (2,3): T_FLOOR, (3,3): T_CRACKED, (4,3): T_FLOOR, (5,3): T_FLOOR, (6,3): T_FLOOR, (7,3): T_FLOOR, (8,3): T_FLOOR, (9,3): T_FLOOR,
+            (0,3): T_FLOOR, (1,3): T_FLOOR, (2,3): T_FLOOR, (3,3): T_CRACKED, (4,3): T_FLOOR, (5,3): T_CRACKED, (6,3): T_FLOOR, (7,3): T_FLOOR, (8,3): T_FLOOR, (9,3): T_FLOOR,
             (0,4): T_FLOOR, (1,4): T_FLOOR, (2,4): T_FLOOR, (3,4): T_FLOOR, (4,4): T_FLOOR, (5,4): T_FLOOR, (6,4): T_CRACKED, (7,4): T_FLOOR, (8,4): T_FLOOR, (9,4): T_FLOOR,
             (0,5): T_FLOOR, (1,5): T_CRACKED, (2,5): T_FLOOR, (3,5): T_FLOOR, (4,5): T_FLOOR, (5,5): T_FLOOR, (6,5): T_FLOOR, (7,5): T_FLOOR, (8,5): T_FLOOR, (9,5): T_FLOOR,
-            (0,6): T_FLOOR, (1,6): T_FLOOR, (2,6): T_CRACKED, (3,6): T_FLOOR, (4,6): T_FLOOR, (5,6): T_FLOOR, (6,6): T_FLOOR, (7,6): T_FLOOR, (8,6): T_CRACKED, (9,6): T_FLOOR,
+            (0,6): T_FLOOR, (1,6): T_FLOOR, (2,6): T_CRACKED, (3,6): T_FLOOR, (4,6): T_FLOOR, (5,6): T_CRACKED, (6,6): T_FLOOR, (7,6): T_FLOOR, (8,6): T_CRACKED, (9,6): T_FLOOR,
             (0,7): T_FLOOR, (1,7): T_FLOOR, (2,7): T_FLOOR, (3,7): T_FLOOR, (4,7): T_FLOOR, (5,7): T_FLOOR, (6,7): T_FLOOR, (7,7): T_FLOOR, (8,7): T_FLOOR, (9,7): T_FLOOR,
         },
         "player_start": (0, 0),
@@ -264,6 +239,33 @@ class Cr01Display(RenderableUserDisplay):
     def __init__(self, game: "Cr01"):
         self.game = game
 
+    def _draw_tile(self, frame, px, py, ttype):
+        """Draw a single tile with texture at pixel position (px, py)."""
+        if ttype == T_FLOOR:
+            # Stone brick: gray base with dark blue mortar on right and bottom
+            frame[py:py + CELL, px:px + CELL] = C_MID
+            frame[py:py + CELL, px + CELL - 1] = C_DBLUE   # right mortar
+            frame[py + CELL - 1, px:px + CELL] = C_DBLUE   # bottom mortar
+        elif ttype == T_CRACKED:
+            # Damaged stone: maroon base with black zigzag crack
+            frame[py:py + CELL, px:px + CELL] = C_MAROON
+            frame[py,     px + 1] = C_BLACK
+            frame[py + 1, px + 2] = C_BLACK
+            frame[py + 2, px + 1] = C_BLACK
+            frame[py + 3, px + 2] = C_BLACK
+        elif ttype == T_STURDY:
+            # Reinforced stone: white with gray corners (diamond shape)
+            frame[py:py + CELL, px:px + CELL] = C_WHITE
+            frame[py,          px]            = C_MID   # corner
+            frame[py,          px + CELL - 1] = C_MID   # corner
+            frame[py + CELL - 1, px]          = C_MID   # corner
+            frame[py + CELL - 1, px + CELL - 1] = C_MID # corner
+        elif ttype == T_TELEPORT:
+            # Portal: yellow border with white center
+            frame[py:py + CELL, px:px + CELL] = C_YELLOW
+            frame[py + 1:py + 3, px + 1:px + 3] = C_WHITE  # 2x2 portal center
+        # T_ABYSS: stays black (already cleared)
+
     def render_interface(self, frame: np.ndarray) -> np.ndarray:
         g = self.game
         ox, oy = g._offset_x, g._offset_y
@@ -271,13 +273,12 @@ class Cr01Display(RenderableUserDisplay):
         # Clear to black (abyss)
         frame[:, :] = C_BLACK
 
-        # Draw tiles
+        # Draw tiles with textures
         for (gx, gy), ttype in g.grid.items():
             px, py = ox + gx * CELL, oy + gy * CELL
             if px < 0 or py < 0 or px + CELL > 64 or py + CELL > 64:
                 continue
-            color = TILE_COLORS.get(ttype, C_BLACK)
-            frame[py:py + CELL, px:px + CELL] = color
+            self._draw_tile(frame, px, py, ttype)
 
         # Draw keys (orange dot in center of tile)
         for (kx, ky) in g.remaining_keys:
@@ -338,7 +339,6 @@ class Cr01(ARCBaseGame):
         self.teleporter_map = {} # (gx,gy) -> (dest_gx, dest_gy)
         self._offset_x = 0
         self._offset_y = 0
-        self._cracked_stepped = set()  # cracked tiles that have been stepped off once
 
         levels = []
         for ldef in LEVELS:
@@ -388,9 +388,6 @@ class Cr01(ARCBaseGame):
             self.teleporter_map[a] = b
             self.teleporter_map[b] = a
 
-        # Cracked tile tracking
-        self._cracked_stepped = set()
-
     def step(self) -> None:
         aid = self.action.id.value
 
@@ -424,22 +421,15 @@ class Cr01(ARCBaseGame):
         self.player_pos = (ngx, ngy)
 
         # Handle tile the player LEFT (crumble logic)
-        # Don't crumble if it's a sturdy tile
         old_tile = self.grid.get(old_pos, T_ABYSS)
         if old_tile == T_FLOOR:
-            # Normal floor falls immediately when left
-            self.grid[old_pos] = T_ABYSS
+            # Normal floor cracks when left (still walkable once more)
+            self.grid[old_pos] = T_CRACKED
         elif old_tile == T_CRACKED:
-            if old_pos in self._cracked_stepped:
-                # Already cracked once - now it falls
-                self.grid[old_pos] = T_ABYSS
-                self._cracked_stepped.discard(old_pos)
-            else:
-                # First step off - becomes a normal floor (visually cracks more)
-                self._cracked_stepped.add(old_pos)
-                self.grid[old_pos] = T_FLOOR
+            # Already cracked - falls into the abyss
+            self.grid[old_pos] = T_ABYSS
         elif old_tile == T_TELEPORT:
-            # Teleporter tiles also crumble when left
+            # Teleporter tiles crumble immediately when left
             self.grid[old_pos] = T_ABYSS
             # Also remove from teleporter map
             if old_pos in self.teleporter_map:
@@ -459,7 +449,6 @@ class Cr01(ARCBaseGame):
             dest = self.teleporter_map[self.player_pos]
             # Only teleport if destination exists and is not abyss
             if dest in self.grid and self.grid[dest] != T_ABYSS:
-                # The teleporter tile we're on will crumble (handled above on next move)
                 # Warp to destination
                 self.player_pos = dest
                 # Check if there's a key at the teleport destination

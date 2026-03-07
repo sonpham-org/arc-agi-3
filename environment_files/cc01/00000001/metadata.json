@@ -1,9 +1,0 @@
-{
-  "game_id": "cc01-00000001",
-  "title": "Checkmate Chaser",
-  "default_fps": 5,
-  "baseline_actions": [],
-  "tags": ["puzzle", "chess", "grid", "sliding"],
-  "local_dir": "environment_files/cc01/00000001",
-  "date_downloaded": "2026-03-06T12:00:00.000000+00:00"
-}
