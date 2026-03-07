@@ -462,6 +462,15 @@ async function fetchJSON(url, body, signal) {
   return r.json();
 }
 
+const _ARC_FOUNDATION_GAMES = ['ls20', 'vc33', 'ft09', 'lp85'];
+function gameSource(gameId) {
+  const short = (gameId || '').split('-')[0].toLowerCase();
+  return _ARC_FOUNDATION_GAMES.includes(short) ? 'ARC Prize Foundation' : 'ARC Observatory';
+}
+function gameDevTag() {
+  return '<span class="dev-tag" title="The game is currently iterating through feedback before released and open-sourced">in development</span>';
+}
+
 async function loadGames() {
   let games = await fetchJSON('/api/games');
   // Hide "Find the Difference" on the online/global server for now
@@ -472,8 +481,7 @@ async function loadGames() {
     const div = document.createElement('div');
     div.className = 'game-card';
     const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
-    const source = g.game_id.startsWith('fd01') ? 'ARC-AGI-3 Player' : 'ARC Prize Foundation';
-    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${source}</div>`;
+    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag()}</div>`;
     div.dataset.gameId = g.game_id;
     div.onclick = () => startGame(g.game_id);
     el.appendChild(div);

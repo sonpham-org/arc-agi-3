@@ -1772,8 +1772,7 @@ async function loadBrowseByGame() {
       const div = document.createElement('div');
       div.className = 'game-card' + (_browseGameFilter === g.game_id ? ' active' : '');
       const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
-      const source = g.game_id.startsWith('fd01') ? 'ARC-AGI-3 Player' : 'ARC Prize Foundation';
-    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${source}</div>`;
+    div.innerHTML = `<div class="title">${shortName}</div><div class="meta">${gameSource(g.game_id)} ${gameDevTag()}</div>`;
       div.onclick = () => loadGameSessions(g.game_id);
       listEl.appendChild(div);
     }
