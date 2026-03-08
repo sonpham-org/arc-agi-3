@@ -88,6 +88,8 @@ def _init_db():
             input_tokens INTEGER DEFAULT 0,
             output_json TEXT,
             output_tokens INTEGER DEFAULT 0,
+            thinking_tokens INTEGER DEFAULT 0,
+            thinking_json TEXT,
             cost REAL DEFAULT 0,
             duration_ms INTEGER DEFAULT 0,
             error TEXT,
@@ -331,6 +333,18 @@ def _migrate_schema(conn):
             log.info("Migrated llm_calls: added parent_call_id")
         except Exception:
             pass
+    if "thinking_tokens" not in llm_cols and llm_cols:
+        try:
+            conn.execute("ALTER TABLE llm_calls ADD COLUMN thinking_tokens INTEGER DEFAULT 0")
+            log.info("Migrated llm_calls: added thinking_tokens")
+        except Exception:
+            pass
+    if "thinking_json" not in llm_cols and llm_cols:
+        try:
+            conn.execute("ALTER TABLE llm_calls ADD COLUMN thinking_json TEXT")
+            log.info("Migrated llm_calls: added thinking_json")
+        except Exception:
+            pass
 
     # ── 4. comments: rename game_id → location, author_id → user_id ───────────
     comment_cols = _get_table_columns(conn, "comments")
@@ -454,6 +468,8 @@ def _log_llm_call(session_id: str, agent_type: str, model: str, *,
                    input_tokens: int = 0,
                    output_json: str | None = None,
                    output_tokens: int = 0,
+                   thinking_tokens: int = 0,
+                   thinking_json: str | None = None,
                    cost: float = 0,
                    duration_ms: int = 0,
                    error: str | None = None) -> int | None:
@@ -464,12 +480,14 @@ def _log_llm_call(session_id: str, agent_type: str, model: str, *,
             "INSERT INTO llm_calls "
             "(session_id, agent_type, agent_id, step_num, turn_num, parent_call_id, model, "
             " input_json, input_tokens, output_json, output_tokens, "
+            " thinking_tokens, thinking_json, "
             " cost, duration_ms, error, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id, agent_type, agent_id,
                 step_num, turn_num, parent_call_id, model,
                 input_json, input_tokens, output_json, output_tokens,
+                thinking_tokens, thinking_json,
                 cost, duration_ms, error, time.time(),
             ),
         )
