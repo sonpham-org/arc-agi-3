@@ -43,6 +43,11 @@ const OBS_AGENT_COLORS = {
 };
 const OBS_DEFAULT_COLOR = '#6b7280';
 
+/** Check if observatory view is currently active */
+function isObsModeActive() {
+  return document.getElementById('outerLayout')?.classList.contains('view-observatory') || false;
+}
+
 let obsAutoScroll = true;
 let obsTimelineZoom = 1.0;
 let obsTimelineAutoScroll = true;
@@ -92,7 +97,7 @@ function emitObsEvent(ss, partial) {
   };
   ss._obsEvents.push(ev);
   // Update UI if obs screen is visible
-  if (document.getElementById('obsScreen')?.style.display === 'flex') {
+  if (isObsModeActive()) {
     appendObsLogRow(ev, ss._obsEvents.length - 1);
     renderObsSwimlane(ss);
     updateObsStatus(ss);
@@ -108,12 +113,8 @@ function enterObsMode(ss) {
   ss._obsEvents = ss._obsEvents || [];
   ss._obsSyncCursor = ss._obsSyncCursor || 0;
 
-  // Hide game area + sidebar + right panel, show obs screen
-  const _ml = document.getElementById('mainLayout');
-  _ml.querySelector('.game-area')?.style.setProperty('display', 'none');
-  document.getElementById('gameSidebar')?.style.setProperty('display', 'none', 'important');
-  _ml.querySelector('.right-panel')?.style.setProperty('display', 'none');
-  document.getElementById('obsScreen').style.display = 'flex';
+  // Toggle to observatory view via CSS class (hides sidebar + game-area + right-panel, shows obs-screen)
+  document.getElementById('outerLayout')?.classList.add('view-observatory');
 
   // Move the game canvas into the obs right panel
   const canvasEl = document.getElementById('gameCanvas');
@@ -164,8 +165,8 @@ function exitObsMode() {
   if (_obsElapsedTimer) { clearInterval(_obsElapsedTimer); _obsElapsedTimer = null; }
   if (window._obsReasoningObserver) { window._obsReasoningObserver.disconnect(); window._obsReasoningObserver = null; }
 
-  const obsScreen = document.getElementById('obsScreen');
-  obsScreen.style.display = 'none';
+  // Toggle back to settings view via CSS class
+  document.getElementById('outerLayout')?.classList.remove('view-observatory');
 
   // Move canvas back
   const canvasEl = document.getElementById('gameCanvas');
@@ -174,14 +175,6 @@ function exitObsMode() {
   if (canvasEl && canvasCenter) {
     canvasCenter.appendChild(canvasEl);
   }
-
-  // Show game area + sidebar + right panel
-  const gameArea = _ml.querySelector('.game-area');
-  if (gameArea) gameArea.style.display = '';
-  const sidebar = document.getElementById('gameSidebar');
-  if (sidebar) sidebar.style.display = '';
-  const rightPanel = _ml.querySelector('.right-panel');
-  if (rightPanel) rightPanel.style.display = '';
   unlockSettings();
 
   // Show "Back to Observatory" button in transport bar

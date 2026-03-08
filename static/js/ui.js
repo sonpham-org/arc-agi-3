@@ -640,7 +640,7 @@ function updateUI(data) {
   currentGrid = data.grid;
   currentChangeMap = data.change_map || null;
   // If viewing historical step via either scrubber, don't render live grid
-  const _inObsMode = document.getElementById('obsScreen')?.style.display === 'flex';
+  const _inObsMode = isObsModeActive();
   const _scrubPaused = _inObsMode ? !_obsScrubLive : !_liveScrubMode;
   if (_scrubPaused) {
     if (!_inObsMode) _liveScrubLiveGrid = data.grid;

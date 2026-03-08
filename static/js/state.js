@@ -1381,7 +1381,7 @@ function restoreSessionFromState(s) {
   updateGameListLock();
 
   // Re-render obs swimlane if obs mode is active
-  if (document.getElementById('obsScreen')?.style.display === 'flex') {
+  if (isObsModeActive()) {
     updateObsStatus(s);
   }
 

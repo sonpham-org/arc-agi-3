@@ -296,6 +296,14 @@
   .as-legend-item { display: flex; align-items: center; gap: 4px; }
   .as-legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
 
+  /* ── View Mode Toggle ───────────────────────────────────────────────── */
+  /* Settings View (default): sidebar + game-area + right-panel visible, obs hidden */
+  /* Observatory View (.view-observatory on #outerLayout): sidebar + game-area + right-panel hidden, obs visible */
+  #outerLayout.view-observatory > #gameSidebar { display: none !important; }
+  #outerLayout.view-observatory .game-area { display: none !important; }
+  #outerLayout.view-observatory .right-panel { display: none !important; }
+  #outerLayout.view-observatory .obs-screen { display: flex !important; }
+
   /* ── Observability Screen ────────────────────────────────────────────── */
   .obs-screen { display: none; flex: 1; overflow: hidden; background: var(--bg); }
   .obs-left { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
