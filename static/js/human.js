@@ -26,7 +26,7 @@ let _humanGames = [];          // cached game list
 let _humanLevelStats = [];     // per-level stats: [{ level, startStep, endStep, startTime, endTime }]
 let _humanLiveMode = false;    // true when playing in live mode (auto-tick ACT7)
 let _humanLiveInterval = null; // interval handle for live mode auto-tick
-let _humanLiveFps = 10;        // tick rate for live mode (from game metadata)
+let _humanLiveFps = 10;        // tick rate for live mode (user-adjustable, default 10)
 let _humanGameHasLive = false; // true if current game supports live mode
 
 const _humanCanvas = () => document.getElementById('humanCanvas');
@@ -116,9 +116,12 @@ async function _humanSelectGame(gameId) {
   // Check if game supports live mode
   const gameMeta = _humanGames.find(g => g.game_id === gameId || g.game_id.split('-')[0] === gameId.split('-')[0]);
   _humanGameHasLive = (gameMeta?.tags || []).includes('live');
-  _humanLiveFps = gameMeta?.default_fps || 10;
+  _humanLiveFps = 10; // default 10 FPS
   const liveBtn = document.getElementById('humanStartLiveBtn');
+  const liveFpsWrap = document.getElementById('humanLiveFpsWrap');
   if (liveBtn) liveBtn.style.display = _humanGameHasLive ? '' : 'none';
+  if (liveFpsWrap) liveFpsWrap.style.display = _humanGameHasLive ? '' : 'none';
+  _humanUpdateFpsLabel();
 
   // Enable right panel (was greyed out before game selection)
   const rightPanel = document.getElementById('humanRightPanel');
@@ -387,16 +390,28 @@ function _setupHumanKeyboard() {
     // Only handle when human view is visible
     const hv = document.getElementById('humanView');
     if (!hv || hv.style.display === 'none') return;
-    if (!_humanSessionId || !_humanRecording || _humanPaused || _humanProcessing) return;
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    // Enter = Start Session, Shift+Enter = Start Live Session (before recording starts)
+    if (e.key === 'Enter' && _humanGameId && !_humanRecording) {
+      e.preventDefault();
+      if (e.shiftKey && _humanGameHasLive) {
+        humanStartLiveSession();
+      } else {
+        humanStartSession();
+      }
+      return;
+    }
+
+    if (!_humanSessionId || !_humanRecording || _humanPaused || _humanProcessing) return;
 
     const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 6, 'c': 7 };
     const action = keyMap[e.key];
     if (action !== undefined) {
       e.preventDefault();
-      // In live mode, reset the tick timer so ACT7 doesn't fire right after user input
-      if (_humanLiveMode && _humanLiveInterval && action !== 7) {
+      // In live mode, reset the tick timer so ACTION6 doesn't fire right after user input
+      if (_humanLiveMode && _humanLiveInterval && action !== 6) {
         clearInterval(_humanLiveInterval);
         const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
         _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
@@ -509,6 +524,8 @@ function _humanUnlockPlay() {
 
 function _humanSetProcessing(on) {
   _humanProcessing = on;
+  // In live mode, never gray out buttons — actions are registered at interval
+  if (_humanLiveMode) return;
   const ctrl = document.getElementById('humanControls');
   const canvas = _humanCanvas();
   if (on) {
@@ -675,11 +692,35 @@ async function humanStartLiveSession() {
   } catch (e) {
     console.error('[HumanPlay] Start live session reset failed:', e);
   }
+  // Show 3-2-1-GO countdown before starting live mode
+  await _humanLiveCountdown();
   _humanLiveMode = true;
   _humanLockPlay();
-  // Start auto-tick interval (ACT7 fires when no user action is processing)
+  // Start auto-tick interval (ACTION6 fires as no-op tick when no user action is processing)
   const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
   _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
+}
+
+function _humanLiveCountdown() {
+  return new Promise(resolve => {
+    const el = document.getElementById('humanCountdown');
+    if (!el) { resolve(); return; }
+    const label = el.querySelector('span');
+    el.style.display = 'flex';
+    const seq = ['3', '2', '1', 'GO'];
+    let i = 0;
+    label.textContent = seq[0];
+    const timer = setInterval(() => {
+      i++;
+      if (i < seq.length) {
+        label.textContent = seq[i];
+      } else {
+        clearInterval(timer);
+        el.style.display = 'none';
+        resolve();
+      }
+    }, 700);
+  });
 }
 
 function _humanLiveTick() {
@@ -688,7 +729,7 @@ function _humanLiveTick() {
     _humanStopLive();
     return;
   }
-  humanDoAction(7, false, true);
+  humanDoAction(6, false, true);
 }
 
 function _humanStopLive() {
@@ -696,6 +737,24 @@ function _humanStopLive() {
     clearInterval(_humanLiveInterval);
     _humanLiveInterval = null;
   }
+}
+
+function humanSetLiveFps(val) {
+  _humanLiveFps = parseInt(val) || 10;
+  _humanUpdateFpsLabel();
+  // If already running live, restart interval at new rate
+  if (_humanLiveMode && _humanLiveInterval) {
+    clearInterval(_humanLiveInterval);
+    const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
+    _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
+  }
+}
+
+function _humanUpdateFpsLabel() {
+  const label = document.getElementById('humanFpsLabel');
+  if (label) label.textContent = _humanLiveFps + ' FPS';
+  const slider = document.getElementById('humanFpsSlider');
+  if (slider) slider.value = _humanLiveFps;
 }
 
 function humanFinishSession() {
@@ -971,6 +1030,7 @@ function _humanBuildPayload() {
       duration_seconds: _humanDuration,
       user_id: (typeof currentUser !== 'undefined' && currentUser?.id) || null,
       live_mode: _humanLiveMode,
+      live_fps: _humanLiveMode ? _humanLiveFps : null,
     },
     steps: _humanStepsBuffer,
   };

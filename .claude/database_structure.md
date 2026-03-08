@@ -27,6 +27,7 @@ Each game session (human or AI) gets one row. Loaded per-user for session browsi
 | `parent_session_id` | TEXT | If branched: parent session |
 | `branch_at_step` | INTEGER | If branched: step number where branch occurred |
 | `live_mode` | INTEGER | `1` if human session was played in live mode (auto-tick ACT7), `0` otherwise |
+| `live_fps` | INTEGER | FPS used during live mode (null if not live mode) |
 
 ### `session_actions` — Game actions
 

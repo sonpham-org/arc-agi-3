@@ -48,7 +48,7 @@
     padding: 0 4px; border-radius: 3px; cursor: help; letter-spacing: 0.3px; position: relative;
     display: inline-block; margin-top: 2px; }
   .dev-tag:hover { opacity: 1; }
-  .live-tag { font-size: 9px; color: #f85149; border: 1px solid #f85149; padding: 0 4px;
+  .live-tag { font-size: 9px; color: #d29922; border: 1px solid #d29922; padding: 0 4px;
     border-radius: 3px; letter-spacing: 0.3px; display: inline-block; margin-top: 2px;
     font-weight: 600; animation: live-pulse 2s ease-in-out infinite; }
   @keyframes live-pulse { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }

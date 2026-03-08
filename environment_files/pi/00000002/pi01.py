@@ -591,7 +591,7 @@ class Pi01(ARCBaseGame):
             Camera(0, 0, 64, 64, 0, 0, [self.display]),
             False,
             len(levels),
-            [1, 2, 3, 4, 7],
+            [1, 2, 3, 4, 6],
         )
 
     # ── Level setup ──────────────────────────────────────────────────────────

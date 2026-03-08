@@ -146,6 +146,7 @@
     .center-panel { padding: 12px; }
     canvas { max-height: 50vh; }
   }
+  @keyframes live-pulse { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -174,6 +175,7 @@
       <span class="meta" id="stepInfo">{{ session.steps }} steps</span>
       <span class="meta">{{ session.duration_seconds | default(0) }}s</span>
       <span class="human-label">Human Replay</span>
+      {% if session.live_mode %}<span class="live-tag" style="font-size:10px;padding:1px 5px;border:1px solid #d29922;color:#d29922;border-radius:4px;animation:live-pulse 2s infinite;">LIVE</span>{% endif %}
       <span class="spacer"></span>
       <button class="theme-btn" id="themeToggle" title="Toggle light/dark mode"></button>
     </div>
@@ -224,6 +226,9 @@
   let currentStep = 0;
   let autoInterval = null;
   let playTimeout = null;
+  const IS_LIVE = !!(SESSION.live_mode);
+  const PLAY_MS = IS_LIVE ? Math.round(1000 / (SESSION.live_fps || 10)) : 500;
+  const AUTO_MS = IS_LIVE ? Math.round(1000 / (SESSION.live_fps || 10)) : 200;
 
   // ── Theme toggle ────────────────────────────────────────────────
   const themeBtn = document.getElementById('themeToggle');
@@ -378,7 +383,7 @@
     if (!playing) return;
     if (currentStep < STEPS.length - 1) {
       goToStep(currentStep + 1);
-      playTimeout = setTimeout(playTick, 500);
+      playTimeout = setTimeout(playTick, PLAY_MS);
     } else {
       stopPlay();
     }
@@ -404,7 +409,7 @@
       } else {
         goToStep(0); // loop
       }
-    }, 200);
+    }, AUTO_MS);
   }
 
   function stopAuto() {

@@ -1717,8 +1717,9 @@ function renderMenuSessions() {
     const result = s.result || 'NOT_FINISHED';
     const badgeClass = 'ms-badge-' + result.replace(/\s/g, '_');
     const date = s.created_at ? new Date(s.created_at * 1000).toLocaleDateString() : '';
+    const liveTag = s.live_mode ? ' <span class="live-tag" style="font-size:9px;padding:1px 4px;">LIVE</span>' : '';
     row.innerHTML = `
-      <span class="ms-game">${gameName}</span>
+      <span class="ms-game">${gameName}${liveTag}</span>
       <span class="ms-steps">${steps} steps</span>
       <span class="ms-badge ${badgeClass}">${result.replace(/_/g, ' ')}</span>
       <span class="ms-date">${date}</span>
@@ -1914,10 +1915,12 @@ function buildSessionRow(s, isLocal) {
   const branchHtml = s.parent_session_id
     ? `<span class="s-branch">&#8627; branch@${s.branch_at_step || '?'}</span>` : '';
   const isHuman = s.player_type === 'human';
+  const isLive = s.live_mode === 1 || s.live_mode === true;
   const durationStr = (s.duration_seconds || s.duration) ? formatDuration(s.duration_seconds || s.duration) : '';
   let metaParts;
   if (isHuman) {
     metaParts = [
+      isLive ? 'LIVE' : null,
       `${s.steps || 0} steps`,
       durationStr,
       dateStr,
@@ -1936,6 +1939,7 @@ function buildSessionRow(s, isLocal) {
   div.innerHTML = `
     ${branchHtml}
     <span class="s-game">${gameShortName(s.game_id) || '?'}</span>
+    ${isLive ? '<span class="live-tag" style="font-size:9px;padding:1px 4px;">LIVE</span>' : ''}
     <span class="s-result ${resultClass}">${result}</span>
     ${isHuman ? '' : `<span class="s-model">${s.model || '\u2014'}</span>`}
     <span class="s-meta">${metaParts}</span>

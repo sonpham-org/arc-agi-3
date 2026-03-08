@@ -1753,8 +1753,8 @@ def import_session():
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
                                      parent_session_id, branch_at_step, scaffolding_json,
-                                     user_id, player_type, duration_seconds, live_mode)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     user_id, player_type, duration_seconds, live_mode, live_fps)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
@@ -1762,14 +1762,16 @@ def import_session():
                  user_id = COALESCE(excluded.user_id, sessions.user_id),
                  player_type = COALESCE(excluded.player_type, sessions.player_type),
                  duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds),
-                 live_mode = COALESCE(excluded.live_mode, sessions.live_mode)""",
+                 live_mode = COALESCE(excluded.live_mode, sessions.live_mode),
+                 live_fps = COALESCE(excluded.live_fps, sessions.live_fps)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
              sess.get("branch_at_step"), scaffolding_json, user_id,
              sess.get("player_type", "agent"), sess.get("duration_seconds"),
-             1 if sess.get("live_mode") else 0),
+             1 if sess.get("live_mode") else 0,
+             sess.get("live_fps")),
         )
         app.logger.info(f"[import] session={sess['id'][:30]} steps={len(steps)}")
         for s in steps:
@@ -2153,6 +2155,7 @@ def list_sessions():
         _sessions_query = (
             "SELECT s.id, s.game_id, s.model, s.mode, s.created_at, s.result, s.steps, s.levels, "
             "s.parent_session_id, s.branch_at_step, s.total_cost, s.player_type, s.duration_seconds, "
+            "s.live_mode, s.live_fps, "
             "(SELECT MAX(st.timestamp) - MIN(st.timestamp) FROM session_actions st WHERE st.session_id = s.id) AS duration "
             "FROM sessions s "
         )
@@ -2614,7 +2617,8 @@ def list_public_sessions():
         conn = _get_db()
         rows = conn.execute("""
             SELECT s.id, s.game_id, s.model, s.mode, s.created_at, s.result,
-                   s.steps, s.levels, s.player_type, s.duration_seconds
+                   s.steps, s.levels, s.player_type, s.duration_seconds,
+                   s.live_mode, s.live_fps
             FROM sessions s
             WHERE s.steps > 0
             ORDER BY s.created_at DESC

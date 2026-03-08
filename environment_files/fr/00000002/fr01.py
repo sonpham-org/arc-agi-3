@@ -244,7 +244,7 @@ class Fr01(ARCBaseGame):
         super().__init__(
             'fr', levels,
             Camera(0, 0, GW, GH, C_BLACK, C_BLACK, [self.display]),
-            False, len(levels), [1, 2, 3, 4, 7],
+            False, len(levels), [1, 2, 3, 4, 6],
         )
 
     def on_set_level(self, level):

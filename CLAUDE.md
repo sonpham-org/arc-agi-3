@@ -39,6 +39,17 @@ When updating reasoning rendering in one place, update ALL others to match. Key 
 - **Always push to the `staging` branch first.** Never push directly to `master`.
 - Only switch to `master` or merge into `master` when explicitly told to by the user.
 
+## Live Mode
+
+Some games support **live mode** — the game world advances in real-time via ACT7 auto-ticks, rather than waiting for player input.
+
+- Games opt in by including `7` in `available_actions` and adding `"live"` to their metadata `tags` array.
+- ACT7 acts as a "tick" — enemies move, timers tick, collisions happen, but the player stays still.
+- Default tick rate is **10 FPS**. Users can adjust 2–30 FPS via a slider before or during play.
+- Session metadata stores `live_mode` (0/1) and `live_fps` (integer) in the `sessions` table.
+- Keyboard shortcuts: **Enter** = Start Session, **Shift+Enter** = Start Live Mode.
+- Currently enabled for: **Feeding Frenzy** (`fr01` v2) and **Pirate Ship** (`pi01` v2).
+
 ## Game Design Rules
 
 All games must be **fully deterministic** — no random elements of any kind:

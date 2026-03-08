@@ -56,7 +56,8 @@ def _init_db():
             parent_session_id TEXT,
             branch_at_step INTEGER,
             mode TEXT DEFAULT 'local',
-            live_mode INTEGER DEFAULT 0
+            live_mode INTEGER DEFAULT 0,
+            live_fps INTEGER
         );
 
         -- Game actions (replaces session_steps)
@@ -244,6 +245,12 @@ def _migrate_schema(conn):
         try:
             conn.execute("ALTER TABLE sessions ADD COLUMN live_mode INTEGER DEFAULT 0")
             log.info("Migrated sessions: added live_mode")
+        except Exception:
+            pass
+    if "live_fps" not in sess_cols and sess_cols:
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN live_fps INTEGER")
+            log.info("Migrated sessions: added live_fps")
         except Exception:
             pass
 
@@ -750,7 +757,7 @@ def get_user_sessions(user_id: str) -> list[dict]:
         rows = conn.execute(
             "SELECT id, game_id, model, mode, created_at, result, steps, levels, "
             "parent_session_id, branch_at_step, total_cost, user_id, player_type, "
-            "steps_per_level_json, duration_seconds "
+            "steps_per_level_json, duration_seconds, live_mode, live_fps "
             "FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 200",
             (user_id,),
         ).fetchall()
