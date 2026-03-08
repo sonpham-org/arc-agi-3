@@ -1558,6 +1558,7 @@ let _browseActive = false;
 let _menuActive = false;
 let _currentView = 'human';  // tracks which top-level view is active (default: human)
 let _browseGlobalCache = null;  // cache server sessions
+let _browseGameFilter = null;   // currently selected game filter (game_id prefix)
 
 // Hash-to-view mapping
 const _VIEW_HASHES = { agent: 'play', human: 'human', sessions: 'browse', leaderboards: 'leaderboard', contributors: 'contributors', feedback: 'feedback' };
@@ -1734,6 +1735,60 @@ function menuResume(sid) {
 }
 
 function loadBrowseView() {
+  _loadBrowseGameList();
+  _loadBrowseColumns();
+}
+
+// ── Game sidebar ─────────────────────────────────────────────────────────
+
+async function _loadBrowseGameList() {
+  const el = document.getElementById('browseGameList');
+  if (el.children.length > 1) return; // already loaded
+  try {
+    let games = await fetchJSON('/api/games');
+    if (MODE === 'prod') games = games.filter(g => g.game_id !== 'fd01-00000001');
+    el.innerHTML = '';
+    const foundation = games.filter(g => _ARC_FOUNDATION_GAMES.includes(g.game_id.split('-')[0].toLowerCase()));
+    const observatory = games.filter(g => !_ARC_FOUNDATION_GAMES.includes(g.game_id.split('-')[0].toLowerCase()));
+    const sortByTitle = (a, b) => ((a.title || a.game_id).localeCompare(b.title || b.game_id));
+    foundation.sort(sortByTitle);
+    observatory.sort(sortByTitle);
+    _renderGameGroup(el, 'ARC Prize Foundation', foundation, g => _browseSelectGame(g.game_id));
+    _renderGameGroup(el, 'ARC Observatory', observatory, g => _browseSelectGame(g.game_id));
+  } catch { el.innerHTML = '<div class="browse-empty" style="padding:12px;">Failed to load games.</div>'; }
+}
+
+function _browseSelectGame(gameId) {
+  // Extract short prefix for filtering (e.g. "ls20-cb3b57cc" → "ls20")
+  const prefix = gameId.split('-')[0].toLowerCase();
+  _browseGameFilter = prefix;
+
+  // Highlight in sidebar
+  document.querySelectorAll('#browseGameList .game-card').forEach(c => {
+    const cid = (c.dataset.gameId || '').split('-')[0].toLowerCase();
+    c.classList.toggle('active', cid === prefix);
+  });
+
+  // Show clear button
+  document.getElementById('browseFilterClear').style.display = '';
+
+  _loadBrowseColumns();
+}
+
+function clearBrowseGameFilter() {
+  _browseGameFilter = null;
+  document.querySelectorAll('#browseGameList .game-card').forEach(c => c.classList.remove('active'));
+  document.getElementById('browseFilterClear').style.display = 'none';
+  _loadBrowseColumns();
+}
+
+function _matchesGameFilter(s) {
+  if (!_browseGameFilter) return true;
+  const sid = (s.game_id || '').split('-')[0].toLowerCase();
+  return sid === _browseGameFilter;
+}
+
+function _loadBrowseColumns() {
   loadBrowseHuman();
   loadBrowseAI();
   loadBrowseMy();
@@ -1743,13 +1798,16 @@ function loadBrowseView() {
 
 async function loadBrowseHuman() {
   const el = document.getElementById('browseHumanList');
+  const countEl = document.getElementById('browseHumanCount');
   el.innerHTML = '<div class="browse-empty">Loading...</div>';
   try {
     const data = await fetchJSON('/api/sessions?player_type=human');
     let sessions = (data.sessions || []).filter(s => (s.steps || 0) >= 1);
     if (MODE === 'prod') sessions = sessions.filter(s => s.game_id !== 'fd01-00000001');
+    sessions = sessions.filter(_matchesGameFilter);
+    countEl.textContent = sessions.length ? `(${sessions.length})` : '';
     if (!sessions.length) {
-      el.innerHTML = '<div class="browse-empty">No human sessions yet.</div>';
+      el.innerHTML = `<div class="browse-empty">${_browseGameFilter ? 'No human sessions for this game.' : 'No human sessions yet.'}</div>`;
       return;
     }
     el.innerHTML = '';
@@ -1763,13 +1821,16 @@ async function loadBrowseHuman() {
 
 async function loadBrowseAI() {
   const el = document.getElementById('browseAIList');
+  const countEl = document.getElementById('browseAICount');
   el.innerHTML = '<div class="browse-empty">Loading...</div>';
   try {
     const data = await fetchJSON('/api/sessions?player_type=agent');
     let sessions = (data.sessions || []).filter(s => (s.steps || 0) >= 5);
     if (MODE === 'prod') sessions = sessions.filter(s => s.game_id !== 'fd01-00000001');
+    sessions = sessions.filter(_matchesGameFilter);
+    countEl.textContent = sessions.length ? `(${sessions.length})` : '';
     if (!sessions.length) {
-      el.innerHTML = '<div class="browse-empty">No AI sessions with 5+ steps yet.</div>';
+      el.innerHTML = `<div class="browse-empty">${_browseGameFilter ? 'No AI sessions for this game.' : 'No AI sessions with 5+ steps yet.'}</div>`;
       return;
     }
     el.innerHTML = '';
@@ -1783,6 +1844,7 @@ async function loadBrowseAI() {
 
 async function loadBrowseMy() {
   const el = document.getElementById('browseMyList');
+  const countEl = document.getElementById('browseMyCount');
 
   // If logged in, fetch user's sessions from server
   if (currentUser) {
@@ -1795,9 +1857,11 @@ async function loadBrowseMy() {
       const byId = {};
       for (const s of serverSessions) byId[s.id] = s;
       for (const s of localSessions) { if (!byId[s.id]) byId[s.id] = s; }
-      const merged = Object.values(byId).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      let merged = Object.values(byId).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      merged = merged.filter(_matchesGameFilter);
+      countEl.textContent = merged.length ? `(${merged.length})` : '';
       if (!merged.length) {
-        el.innerHTML = '<div class="browse-empty">No sessions yet. Play a game to see sessions here.</div>';
+        el.innerHTML = `<div class="browse-empty">${_browseGameFilter ? 'No sessions for this game.' : 'No sessions yet.'}</div>`;
         return;
       }
       el.innerHTML = '';
@@ -1809,9 +1873,10 @@ async function loadBrowseMy() {
   }
 
   // Not logged in — show local-only sessions
-  const localSessions = getLocalSessions();
+  let localSessions = getLocalSessions().filter(_matchesGameFilter);
+  countEl.textContent = localSessions.length ? `(${localSessions.length})` : '';
   if (!localSessions.length) {
-    el.innerHTML = '<div class="browse-empty">Log in to see your sessions across devices, or play a game to save sessions locally.</div>';
+    el.innerHTML = `<div class="browse-empty">${_browseGameFilter ? 'No local sessions for this game.' : 'Log in to see sessions across devices, or play a game.'}</div>`;
     return;
   }
   el.innerHTML = '';
@@ -2250,33 +2315,39 @@ function restoreSessionsFromLocalStorage() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function initApp() {
-  // Render scaffolding settings (must happen before loadModels populates selects)
-  migrateOldSettingsToScaffolding();
-  const savedScaffolding = localStorage.getItem('arc_scaffolding_type') || 'linear';
-  renderScaffoldingSettings(savedScaffolding);
-  loadScaffoldingFromStorage(savedScaffolding);
+  console.log('[INIT] initApp starting');
+  try {
+    // Render scaffolding settings (must happen before loadModels populates selects)
+    migrateOldSettingsToScaffolding();
+    const savedScaffolding = localStorage.getItem('arc_scaffolding_type') || 'linear';
+    renderScaffoldingSettings(savedScaffolding);
+    loadScaffoldingFromStorage(savedScaffolding);
 
-  loadGames();
-  await loadModels();  // await so selects are populated before template capture
-  // Capture populated DOM as clonable template for new sessions
-  captureSessionTemplate();
+    loadGames();
+    await loadModels();  // await so selects are populated before template capture
+    // Capture populated DOM as clonable template for new sessions
+    captureSessionTemplate();
 
-  if (FEATURES.copilot) checkCopilotStatus();
-  if (FEATURES.puter_js) puterKvCheckResume();
+    if (FEATURES.copilot) checkCopilotStatus();
+    if (FEATURES.puter_js) puterKvCheckResume();
 
-  // Establish view FIRST so _currentView is set before session restore
-  // Default to human view for empty hash, #human, or #agent (old default)
-  if (location.hash && location.hash !== '#' && location.hash !== '#human' && location.hash !== '#agent') {
-    _routeFromHash();
-  } else {
-    showAppView('human');
+    // Establish view FIRST so _currentView is set before session restore
+    // Default to human view for empty hash, #human, or #agent (old default)
+    if (location.hash && location.hash !== '#' && location.hash !== '#human' && location.hash !== '#agent') {
+      _routeFromHash();
+    } else {
+      showAppView('human');
+    }
+
+    // Restore sessions AFTER view is set (auto-resume only fires in agent/play view)
+    restoreSessionsFromLocalStorage();
+
+    // Auth: check login status (async, doesn't block init)
+    checkAuthStatus();
+    console.log('[INIT] initApp completed');
+  } catch (e) {
+    console.error('[INIT] initApp crashed:', e);
   }
-
-  // Restore sessions AFTER view is set (auto-resume only fires in agent/play view)
-  restoreSessionsFromLocalStorage();
-
-  // Auth: check login status (async, doesn't block init)
-  checkAuthStatus();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2313,13 +2384,24 @@ document.addEventListener('click', (e) => {
 });
 
 function showLoginModal() {
-  const modal = document.getElementById('loginModal');
-  modal.style.display = 'flex';
-  document.getElementById('loginStep1').style.display = '';
-  document.getElementById('loginStep2').style.display = 'none';
-  document.getElementById('loginError').style.display = 'none';
-  const emailEl = document.getElementById('loginEmail');
-  if (emailEl) { emailEl.value = ''; emailEl.focus(); }
+  try {
+    console.log('[AUTH] showLoginModal called');
+    const modal = document.getElementById('loginModal');
+    if (!modal) { console.error('[AUTH] loginModal element not found!'); return; }
+    modal.style.display = 'flex';
+    console.log('[AUTH] modal display set to flex');
+    const s1 = document.getElementById('loginStep1');
+    const s2 = document.getElementById('loginStep2');
+    const err = document.getElementById('loginError');
+    if (s1) s1.style.display = '';
+    if (s2) s2.style.display = 'none';
+    if (err) err.style.display = 'none';
+    const emailEl = document.getElementById('loginEmail');
+    if (emailEl) { emailEl.value = ''; emailEl.focus(); }
+    console.log('[AUTH] modal opened successfully', { s1: !!s1, s2: !!s2, err: !!err, email: !!emailEl });
+  } catch (e) {
+    console.error('[AUTH] showLoginModal error:', e);
+  }
 }
 
 function hideLoginModal() {
