@@ -1610,7 +1610,7 @@ function showAppView(view, skipHash) {
   emptyApp.style.display = 'none';
   menuView.classList.remove('visible');
 
-  // Nav link indices: 0=Make your agent, 1=Play as Human, 2=Browse Sessions, 3=Leaderboards, 4=Contributors
+  // Nav link indices: 0=Play as Human, 1=Play as Agent, 2=Browse Sessions, 3=Leaderboards, 4=Contributors
   if (view === 'browse') {
     links[2]?.classList.add('active');
     _browseActive = true;
@@ -1618,7 +1618,7 @@ function showAppView(view, skipHash) {
     browseView.style.display = 'flex';
     loadBrowseView();
   } else if (view === 'human') {
-    links[1]?.classList.add('active');
+    links[0]?.classList.add('active');
     _browseActive = false;
     _menuActive = false;
     if (humanView) {
@@ -1652,7 +1652,7 @@ function showAppView(view, skipHash) {
     }
   } else {
     // Default: agent / play
-    links[0]?.classList.add('active');
+    links[1]?.classList.add('active');
     _browseActive = false;
     outerLayout.style.display = '';
     tabBar.style.display = 'flex';
