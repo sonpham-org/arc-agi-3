@@ -193,6 +193,9 @@ class PlannerSystem:
                     output_json=(raw or "")[:1000],
                     input_tokens=llm_result.input_tokens,
                     output_tokens=llm_result.output_tokens,
+                    thinking_tokens=llm_result.thinking_tokens,
+                    thinking_json=(llm_result.thinking_text or "")[:5000] if llm_result.thinking_text else None,
+                    cost=llm_result.cost,
                     duration_ms=llm_result.duration_ms,
                     error=llm_result.error,
                 )
@@ -412,6 +415,9 @@ class MonitorSystem:
                 output_json=(raw or "")[:1000],
                 input_tokens=llm_result.input_tokens,
                 output_tokens=llm_result.output_tokens,
+                thinking_tokens=llm_result.thinking_tokens,
+                thinking_json=(llm_result.thinking_text or "")[:5000] if llm_result.thinking_text else None,
+                cost=llm_result.cost,
                 duration_ms=llm_result.duration_ms,
                 error=llm_result.error,
             )
@@ -486,6 +492,9 @@ class WorldModelSystem:
                     output_json=(raw or "")[:1000],
                     input_tokens=llm_result.input_tokens,
                     output_tokens=llm_result.output_tokens,
+                    thinking_tokens=llm_result.thinking_tokens,
+                    thinking_json=(llm_result.thinking_text or "")[:5000] if llm_result.thinking_text else None,
+                    cost=llm_result.cost,
                     duration_ms=llm_result.duration_ms,
                     error=llm_result.error,
                 )
@@ -582,6 +591,9 @@ If uncertain, say "uncertain — <best guess>". Keep each prediction under 100 c
                 output_json=(raw or "")[:1000],
                 input_tokens=llm_result.input_tokens,
                 output_tokens=llm_result.output_tokens,
+                thinking_tokens=llm_result.thinking_tokens,
+                thinking_json=(llm_result.thinking_text or "")[:5000] if llm_result.thinking_text else None,
+                cost=llm_result.cost,
                 duration_ms=llm_result.duration_ms,
                 error=llm_result.error,
             )

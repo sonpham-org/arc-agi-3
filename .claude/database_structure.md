@@ -62,8 +62,10 @@ Every individual LLM API call, tagged by which agent made it.
 | `input_json` | TEXT | Full prompt/messages sent |
 | `input_tokens` | INTEGER | Token count |
 | `output_json` | TEXT | Full response received |
-| `output_tokens` | INTEGER | Token count |
-| `cost` | REAL | USD cost of this call |
+| `output_tokens` | INTEGER | Token count (response text only, excludes thinking) |
+| `thinking_tokens` | INTEGER | Thinking/reasoning token count (Gemini thinking, Claude extended thinking) |
+| `thinking_json` | TEXT | Thinking/reasoning text content (truncated to 5000 chars) |
+| `cost` | REAL | USD cost of this call (input + output + thinking tokens) |
 | `duration_ms` | INTEGER | Latency |
 | `error` | TEXT | Error message if failed |
 | `timestamp` | REAL NOT NULL | When the call was made |

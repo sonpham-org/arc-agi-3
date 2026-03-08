@@ -645,7 +645,7 @@ function checkSessionEndAndUpload() {
 
 function showShareLink(sid) {
   const base = (MODE === 'staging') ? 'https://arc3.sonpham.net' : '';
-  const url = `${base}/share/${sid}`;
+  const url = `${base}/share?id=${sid}`;
   // Remove existing share banner if any
   const old = document.getElementById('shareBanner');
   if (old) old.remove();
@@ -1849,7 +1849,7 @@ function buildSessionRow(s, isLocal) {
   const branchHtml = s.parent_session_id
     ? `<span class="s-branch">&#8627; branch@${s.branch_at_step || '?'}</span>` : '';
   const isHuman = s.player_type === 'human';
-  const durationStr = s.duration ? formatDuration(s.duration) : '';
+  const durationStr = (s.duration_seconds || s.duration) ? formatDuration(s.duration_seconds || s.duration) : '';
   let metaParts;
   if (isHuman) {
     metaParts = [

@@ -728,25 +728,8 @@ function _humanCheckEnd() {
 // ── Persistence ─────────────────────────────────────────────────────────
 
 function _humanSaveSession() {
-  if (!_humanSessionId || !_humanGameId) return;
-  if (_humanStepsBuffer.length < 1) return;
-
-  const payload = {
-    session: {
-      id: _humanSessionId,
-      game_id: _humanState.game_id || _humanGameId,
-      model: '',
-      mode: MODE,
-      created_at: (_humanStartTime || Date.now()) / 1000,
-      result: _humanState.state || 'NOT_FINISHED',
-      steps: _humanStepCount,
-      levels: _humanState.levels_completed || 0,
-      player_type: 'human',
-      duration_seconds: _humanDuration,
-      user_id: (typeof currentUser !== 'undefined' && currentUser?.id) || null,
-    },
-    steps: _humanStepsBuffer,
-  };
+  const payload = _humanBuildPayload();
+  if (!payload) return;
 
   // Save to localStorage
   try {
@@ -758,7 +741,7 @@ function _humanSaveSession() {
     localStorage.setItem('arc_human_session_data:' + _humanSessionId, JSON.stringify(payload));
   } catch {}
 
-  // Upload to server (fire-and-forget, all human sessions)
+  // Upload to server (fire-and-forget)
   _humanUploadPayload(payload);
 }
 
