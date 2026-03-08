@@ -2355,6 +2355,7 @@ async function initApp() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function updateAuthUI() {
+  console.log('[AUTH] updateAuthUI called, currentUser:', currentUser);
   const loginBtn = document.getElementById('loginBtn');
   const userBadge = document.getElementById('userBadge');
   if (currentUser) {
@@ -2471,20 +2472,21 @@ async function doLogout() {
 }
 
 async function checkAuthStatus() {
+  console.log('[AUTH] checkAuthStatus called');
   try {
     const resp = await fetch('/api/auth/status');
     const data = await resp.json();
+    console.log('[AUTH] status response:', data);
     if (data.authenticated && data.user) {
       currentUser = data.user;
       updateAuthUI();
-      // Claim local sessions
       claimLocalSessions();
     } else {
       currentUser = null;
       updateAuthUI();
     }
   } catch (e) {
-    console.warn('Auth status check failed:', e);
+    console.warn('[AUTH] checkAuthStatus failed:', e);
     currentUser = null;
     updateAuthUI();
   }
