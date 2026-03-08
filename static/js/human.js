@@ -24,6 +24,10 @@ let _humanLevelCount = 0;      // total levels in game
 let _humanCurrentLevel = 0;    // currently selected level
 let _humanGames = [];          // cached game list
 let _humanLevelStats = [];     // per-level stats: [{ level, startStep, endStep, startTime, endTime }]
+let _humanLiveMode = false;    // true when playing in live mode (auto-tick ACT7)
+let _humanLiveInterval = null; // interval handle for live mode auto-tick
+let _humanLiveFps = 10;        // tick rate for live mode (from game metadata)
+let _humanGameHasLive = false; // true if current game supports live mode
 
 const _humanCanvas = () => document.getElementById('humanCanvas');
 const _humanCtx = () => _humanCanvas()?.getContext('2d');
@@ -108,6 +112,13 @@ async function _humanSelectGame(gameId) {
   _humanDuration = 0;
   _humanAvailableActions = data.available_actions || [];
   _humanAction6Mode = _humanAvailableActions.includes(6);
+
+  // Check if game supports live mode
+  const gameMeta = _humanGames.find(g => g.game_id === gameId || g.game_id.split('-')[0] === gameId.split('-')[0]);
+  _humanGameHasLive = (gameMeta?.tags || []).includes('live');
+  _humanLiveFps = gameMeta?.default_fps || 10;
+  const liveBtn = document.getElementById('humanStartLiveBtn');
+  if (liveBtn) liveBtn.style.display = _humanGameHasLive ? '' : 'none';
 
   // Show canvas + controls (locked until Start Session)
   _humanPaused = false;
@@ -375,7 +386,16 @@ function _setupHumanKeyboard() {
 
     const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 6, 'c': 7 };
     const action = keyMap[e.key];
-    if (action !== undefined) { e.preventDefault(); humanDoAction(action, false, true); }
+    if (action !== undefined) {
+      e.preventDefault();
+      // In live mode, reset the tick timer so ACT7 doesn't fire right after user input
+      if (_humanLiveMode && _humanLiveInterval && action !== 7) {
+        clearInterval(_humanLiveInterval);
+        const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
+        _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
+      }
+      humanDoAction(action, false, true);
+    }
     // Ctrl+Z for undo
     if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); humanUndo(); }
   });
@@ -427,6 +447,8 @@ function _humanLockPlay() {
   const pauseBtn = document.getElementById('humanPauseBtn');
   const finishBtn = document.getElementById('humanFinishSessionBtn');
   if (startBtn) startBtn.style.display = 'none';
+  const liveBtn = document.getElementById('humanStartLiveBtn');
+  if (liveBtn) liveBtn.style.display = 'none';
   if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.textContent = 'Pause'; pauseBtn.classList.remove('btn-primary'); }
   if (finishBtn) finishBtn.style.display = '';
 
@@ -468,8 +490,12 @@ function _humanUnlockPlay() {
   const pauseBtn = document.getElementById('humanPauseBtn');
   const finishBtn = document.getElementById('humanFinishSessionBtn');
   if (startBtn) startBtn.style.display = '';
+  const liveBtn = document.getElementById('humanStartLiveBtn');
+  if (liveBtn) liveBtn.style.display = _humanGameHasLive ? '' : 'none';
   if (pauseBtn) pauseBtn.style.display = 'none';
   if (finishBtn) finishBtn.style.display = 'none';
+  _humanStopLive();
+  _humanLiveMode = false;
 }
 
 // ── Processing Lock (blocks input while game step is running) ────────────
@@ -518,10 +544,17 @@ function humanTogglePause() {
     // Hide level thumbnails and top bar info to prevent peeking
     if (levelGrid) levelGrid.classList.add('paused-hidden');
     if (topBar) topBar.classList.add('paused-hidden');
+    // Pause live mode tick
+    _humanStopLive();
   } else {
     // Resume timer from accumulated duration, unlock controls, restore canvas
     _humanStartTime = Date.now() - _humanDuration * 1000;
     _humanTimerInterval = setInterval(_humanUpdateTimer, 100);
+    // Resume live mode tick
+    if (_humanLiveMode && !_humanLiveInterval) {
+      const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
+      _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
+    }
     if (btn) { btn.textContent = 'Pause'; btn.classList.remove('btn-primary'); }
     if (ctrl) ctrl.classList.remove('controls-locked');
     if (_humanGrid) _humanRenderGrid(_humanGrid);
@@ -613,6 +646,51 @@ async function humanStartSession() {
   _humanLockPlay();
 }
 
+async function humanStartLiveSession() {
+  if (!_humanGameId || _humanRecording || !_humanGameHasLive) return;
+  // Reset level to clean state before recording
+  try {
+    let state;
+    if (FEATURES.pyodide_game && _pyodideGameActive) {
+      state = await _sendGameWorkerMsg({ type: 'jump_level', level: _humanCurrentLevel });
+    } else {
+      state = await fetchJSON('/api/start', { game_id: _humanGameId });
+      _humanSessionId = state.session_id;
+    }
+    if (state && !state.error) {
+      _humanState = state;
+      _humanGrid = state.grid;
+      _humanAvailableActions = state.available_actions || [];
+      _humanAction6Mode = _humanAvailableActions.includes(6);
+      _humanRenderGrid(state.grid);
+      _humanUpdateTopBar();
+    }
+  } catch (e) {
+    console.error('[HumanPlay] Start live session reset failed:', e);
+  }
+  _humanLiveMode = true;
+  _humanLockPlay();
+  // Start auto-tick interval (ACT7 fires when no user action is processing)
+  const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
+  _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
+}
+
+function _humanLiveTick() {
+  if (!_humanRecording || _humanPaused || _humanProcessing) return;
+  if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') {
+    _humanStopLive();
+    return;
+  }
+  humanDoAction(7, false, true);
+}
+
+function _humanStopLive() {
+  if (_humanLiveInterval) {
+    clearInterval(_humanLiveInterval);
+    _humanLiveInterval = null;
+  }
+}
+
 function humanFinishSession() {
   if (_humanRecording) _humanSaveSession();
   humanNewGame();
@@ -634,6 +712,8 @@ function humanNewGame() {
   _humanDuration = 0;
   _humanAction6Mode = false;
   _humanLevelStats = [];
+  _humanStopLive();
+  _humanLiveMode = false;
 
   // Reset UI
   const endOverlay = document.getElementById('humanEndOverlay');
@@ -799,6 +879,9 @@ function _humanCheckEnd() {
       overlay.style.display = 'block';
     }
 
+    // Stop live mode on game end
+    _humanStopLive();
+
     // Confetti on win
     if (st === 'WIN') _humanFireConfetti();
 
@@ -876,6 +959,7 @@ function _humanBuildPayload() {
       player_type: 'human',
       duration_seconds: _humanDuration,
       user_id: (typeof currentUser !== 'undefined' && currentUser?.id) || null,
+      live_mode: _humanLiveMode,
     },
     steps: _humanStepsBuffer,
   };
