@@ -35,12 +35,7 @@ function updateThemeBtn() {
 // OBSERVABILITY SCREEN
 // ═══════════════════════════════════════════════════════════════════════════
 
-const OBS_AGENT_COLORS = {
-  executor: '#58a6ff', planner: '#58a6ff', monitor: '#d29922',
-  world_model: '#bc8cff', repl: '#3fb950', compact: '#bc8cff',
-  interrupt: '#d29922', orchestrator: '#3b82f6', explorer: '#22c55e',
-  theorist: '#a855f7', tester: '#f97316', solver: '#ef4444',
-};
+// Agent colors now provided by reasoning.js agentColor()
 const OBS_DEFAULT_COLOR = '#6b7280';
 
 /** Check if observatory view is currently active */
@@ -56,7 +51,7 @@ let _obsElapsedTimer = null;
 
 function obsAgentColor(agent) {
   if (!agent) return OBS_DEFAULT_COLOR;
-  return OBS_AGENT_COLORS[agent.toLowerCase()] || OBS_DEFAULT_COLOR;
+  return agentColor(agent);
 }
 
 function obsAgentBadge(agent) {
@@ -364,20 +359,16 @@ function appendObsLogRow(ev, evIdx) {
 }
 
 function obsBuildDetails(ev) {
-  switch (ev.event) {
-    case 'llm_call': return `model: ${ev.model || '?'}${ev.summary ? ' — ' + ev.summary : ''}`;
-    case 'act': return ev.action || '';
-    case 'compact': return 'context compacted';
-    case 'interrupt': return ev.summary || 'interrupt check';
-    case 'repl_exec': return ev.summary || 'REPL execution';
-    case 'monitor_call': return ev.summary || 'monitor check';
-    case 'wm_update': return ev.summary || 'world model update';
-    case 'planner_call': return ev.summary || 'planner REPL';
-    default:
-      const skip = new Set(['t','elapsed_s','event','agent','grid','input_tokens','output_tokens','duration_ms','cost','step_num','turn','model','summary','error','response_preview','action']);
-      const extra = Object.entries(ev).filter(([k]) => !skip.has(k) && ev[k] != null);
-      return extra.map(([k,v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
-  }
+  // Universal: use agent_type + event to build detail string
+  if (ev.event === 'llm_call') return `model: ${ev.model || '?'}${ev.summary ? ' — ' + ev.summary : ''}`;
+  if (ev.event === 'act') return ev.action || '';
+  if (ev.summary) return ev.summary;
+  // Fallback: show agent_type or extra fields
+  const agentStr = ev.agent ? agentLabel(ev.agent) : '';
+  if (agentStr) return agentStr;
+  const skip = new Set(['t','elapsed_s','event','agent','agent_type','grid','input_tokens','output_tokens','duration_ms','cost','step_num','turn','model','summary','error','response_preview','action']);
+  const extra = Object.entries(ev).filter(([k]) => !skip.has(k) && ev[k] != null);
+  return extra.map(([k,v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
 }
 
 // ── Obs scrubber (in-app observatory) ──

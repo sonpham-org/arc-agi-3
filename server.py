@@ -2458,9 +2458,18 @@ def session_calls(session_id):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.route("/share/<session_id>")
-def share_session(session_id):
+@app.route("/share")
+def share_session(session_id=None):
     """Public replay page — renders the observatory view with auto-loaded session.
-    Verifies session exists (local DB → file), then serves obs.html."""
+    Supports both /share/<id> and /share?id=<id> for shareable links.
+    Without an ID, shows the session browser."""
+    # Support query parameter: /share?id=abc123
+    if session_id is None:
+        session_id = request.args.get("id")
+    if session_id is None:
+        # No session specified — show session browser
+        return render_template("obs.html", share_session_id="", browse_mode=True)
+
     # Quick existence check (don't load all data — obs.html fetches via API)
     found = False
     try:
@@ -2482,9 +2491,30 @@ def share_session(session_id):
 h1{color:#f85149;font-size:24px;margin-bottom:12px;}p{color:#8b949e;margin-bottom:20px;}
 a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style></head>
 <body><div class="box"><h1>Session Not Found</h1><p>This session doesn't exist or hasn't been shared yet.</p>
-<a href="/">&#9654; Play ARC-AGI-3</a></div></body></html>""", 404
+<a href="/share">&#9654; Browse Sessions</a></div></body></html>""", 404
 
     return render_template("obs.html", share_session_id=session_id)
+
+
+@app.route("/api/sessions/public")
+def list_public_sessions():
+    """List sessions available for public replay (no auth required).
+    Returns lightweight metadata only — no grid data."""
+    try:
+        conn = _get_db()
+        rows = conn.execute("""
+            SELECT s.id, s.game_id, s.model, s.mode, s.created_at, s.result,
+                   s.steps, s.levels, s.player_type, s.duration_seconds
+            FROM sessions s
+            WHERE s.steps > 0
+            ORDER BY s.created_at DESC
+            LIMIT 200
+        """).fetchall()
+        conn.close()
+        sessions = [dict(r) for r in rows]
+        return jsonify({"sessions": sessions})
+    except Exception as e:
+        return jsonify({"sessions": [], "error": str(e)})
 
 
 # ═══════════════════════════════════════════════════════════════════════════

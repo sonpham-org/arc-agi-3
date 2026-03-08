@@ -146,17 +146,16 @@ def handle_rlm_scaffolding(payload: dict, settings: dict, *,
             # Log main RLM iteration call and set parent_call_id for sub-calls
             rlm_call_id = log_llm_call(
                 session_id, "rlm_main", model_key,
-                prompt_preview=prompt[:500], prompt_length=len(prompt),
-                response_preview=response_text[:1000],
+                input_json=prompt[:500],
+                output_json=response_text[:1000],
                 duration_ms=rlm_dur,
-                thinking_level=thinking_level,
             )
             repl['parent_call_id'] = rlm_call_id
         except Exception as e:
             logger.error(f"RLM iteration {iteration} LLM call failed: {e}")
             log_llm_call(
                 session_id, "rlm_main", model_key,
-                prompt_preview=prompt[:500], prompt_length=len(prompt),
+                input_json=prompt[:500],
                 error=str(e),
             )
             iterations_log.append({

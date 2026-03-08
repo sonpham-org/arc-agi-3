@@ -146,40 +146,12 @@ def list_sessions_for_obs():
 def get_session_obs_events(session_id):
     try:
         conn = _get_db()
-        stored = conn.execute(
-            "SELECT event_json FROM obs_events WHERE session_id = ? ORDER BY event_idx",
-            (session_id,),
-        ).fetchall()
-        if stored:
-            # Enrich events with grid snapshots from session_steps
-            grid_rows = conn.execute(
-                "SELECT step_num, grid_snapshot FROM session_steps "
-                "WHERE session_id = ? AND grid_snapshot IS NOT NULL ORDER BY step_num",
-                (session_id,),
-            ).fetchall()
-            conn.close()
-            step_grids = {}
-            for gr in grid_rows:
-                try:
-                    step_grids[gr["step_num"]] = _decompress_grid(gr["grid_snapshot"])
-                except Exception:
-                    pass
-            events = []
-            for r in stored:
-                ev = json.loads(r["event_json"])
-                if not ev.get("grid") and ev.get("step_num") is not None:
-                    grid = step_grids.get(ev["step_num"])
-                    if grid:
-                        ev["grid"] = grid
-                events.append(ev)
-            return jsonify({"events": events})
-
         calls = conn.execute(
             "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY timestamp",
             (session_id,),
         ).fetchall()
         steps = conn.execute(
-            "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+            "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num",
             (session_id,),
         ).fetchall()
         conn.close()
@@ -193,7 +165,7 @@ def get_session_obs_events(session_id):
                     (session_id,),
                 ).fetchall()
                 steps = alt_conn.execute(
-                    "SELECT * FROM session_steps WHERE session_id = ? ORDER BY step_num",
+                    "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num",
                     (session_id,),
                 ).fetchall()
                 alt_conn.close()
@@ -203,7 +175,7 @@ def get_session_obs_events(session_id):
             c = dict(c)
             raw_events.append({
                 "ts": c.get("timestamp", 0),
-                "agent": c.get("call_type", "planner"),
+                "agent": c.get("agent_type", c.get("call_type", "planner")),
                 "event": "llm_call",
                 "model": c.get("model", ""),
                 "input_tokens": c.get("input_tokens", 0),
@@ -212,14 +184,19 @@ def get_session_obs_events(session_id):
                 "duration_ms": c.get("duration_ms", 0),
                 "step_num": c.get("step_num"),
                 "turn_num": c.get("turn_num"),
-                "thinking_level": c.get("thinking_level"),
-                "response": c.get("response_preview", ""),
-                "prompt_preview": c.get("prompt_preview", ""),
+                "response": (c.get("output_json") or c.get("response_preview") or "")[:1000],
             })
         for s in steps:
             s = dict(s)
             grid = None
-            if s.get("grid_snapshot"):
+            if s.get("states_json"):
+                try:
+                    states = json.loads(s["states_json"])
+                    if states and isinstance(states, list) and states[0].get("grid"):
+                        grid = _decompress_grid(states[0]["grid"])
+                except Exception:
+                    pass
+            elif s.get("grid_snapshot"):
                 try:
                     grid = _decompress_grid(s["grid_snapshot"])
                 except Exception:
@@ -229,14 +206,8 @@ def get_session_obs_events(session_id):
                 action_name = GameAction.from_id(int(action_id)).name
             except Exception:
                 action_name = str(action_id)
-            data = {}
-            if s.get("data_json"):
-                try:
-                    data = json.loads(s["data_json"]) if isinstance(s["data_json"], str) else s["data_json"]
-                except Exception:
-                    pass
-            if data and "x" in data and "y" in data:
-                action_name = f"{action_name}@({data['x']},{data['y']})"
+            if s.get("row") is not None and s.get("col") is not None:
+                action_name = f"{action_name}@({s['col']},{s['row']})"
             raw_events.append({
                 "ts": s.get("timestamp", 0),
                 "agent": "executor",
