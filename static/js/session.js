@@ -2197,6 +2197,8 @@ function updateEmptyAppState() {
     // Show menu view instead of hero when no sessions
     empty.style.display = 'none';
     sessionHost.style.display = 'none';
+    const sidebar = document.getElementById('gameSidebar');
+    if (sidebar) sidebar.style.display = 'none';
     _menuActive = true;
     menuView.classList.add('visible');
     renderMenuSessions();
@@ -2204,6 +2206,8 @@ function updateEmptyAppState() {
   } else {
     empty.style.display = 'none';
     menuView.classList.remove('visible');
+    const sidebar = document.getElementById('gameSidebar');
+    if (sidebar) sidebar.style.display = '';
     sessionHost.style.display = '';
   }
 }
