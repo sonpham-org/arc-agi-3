@@ -109,9 +109,10 @@ function enterObsMode(ss) {
   ss._obsSyncCursor = ss._obsSyncCursor || 0;
 
   // Hide game area + sidebar + right panel, show obs screen
-  document.querySelector('.game-area')?.style.setProperty('display', 'none');
+  const _ml = document.getElementById('mainLayout');
+  _ml.querySelector('.game-area')?.style.setProperty('display', 'none');
   document.getElementById('gameSidebar')?.style.setProperty('display', 'none', 'important');
-  document.querySelector('.right-panel')?.style.setProperty('display', 'none');
+  _ml.querySelector('.right-panel')?.style.setProperty('display', 'none');
   document.getElementById('obsScreen').style.display = 'flex';
 
   // Move the game canvas into the obs right panel
@@ -168,17 +169,18 @@ function exitObsMode() {
 
   // Move canvas back
   const canvasEl = document.getElementById('gameCanvas');
-  const canvasCenter = document.querySelector('.canvas-center');
+  const _ml = document.getElementById('mainLayout');
+  const canvasCenter = _ml.querySelector('.canvas-center');
   if (canvasEl && canvasCenter) {
     canvasCenter.appendChild(canvasEl);
   }
 
   // Show game area + sidebar + right panel
-  const gameArea = document.querySelector('.game-area');
+  const gameArea = _ml.querySelector('.game-area');
   if (gameArea) gameArea.style.display = '';
   const sidebar = document.getElementById('gameSidebar');
   if (sidebar) sidebar.style.display = '';
-  const rightPanel = document.querySelector('.right-panel');
+  const rightPanel = _ml.querySelector('.right-panel');
   if (rightPanel) rightPanel.style.display = '';
   unlockSettings();
 
