@@ -402,6 +402,8 @@
     background: var(--yellow); color: #000; font-size: 11px; font-weight: 600;
     padding: 3px 10px; border-radius: 4px; margin-top: 4px; }
 
+  .bmc-bottom { margin-top: auto; border-top: 1px solid var(--border); padding: 8px 14px;
+    background: var(--surface); flex-shrink: 0; text-align: center; }
   .ad-banner { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--surface); flex-shrink: 0; }
   .ad-banner-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
   .ad-support-msg { font-size: 9px; color: var(--dim); font-style: italic; }

@@ -39,16 +39,7 @@ function switchSubTab(tab) {
   if (tab === 'prompts') renderPromptsTab();
 }
 
-function toggleAdBanner() {
-  const banner = document.getElementById('adBanner');
-  const showBtn = document.getElementById('adShowBtn');
-  const hidden = !banner.classList.contains('hidden');
-  banner.classList.toggle('hidden', hidden);
-  showBtn.style.display = hidden ? 'block' : 'none';
-  try { localStorage.setItem('adHidden', hidden ? '1' : ''); } catch {}
-}
-// Restore ad preference
-try { if (localStorage.getItem('adHidden') === '1') toggleAdBanner(); } catch {}
+function toggleAdBanner() {} // legacy no-op
 
 
 // ═══════════════════════════════════════════════════════════════════════════
