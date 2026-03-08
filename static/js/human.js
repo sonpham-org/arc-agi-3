@@ -222,11 +222,11 @@ async function _humanJumpToLevel(levelIndex) {
 
 // ── Action Execution ────────────────────────────────────────────────────
 
-async function humanDoAction(actionId, isClick) {
+async function humanDoAction(actionId, isClick, direct = false) {
   if (!_humanSessionId) return;
   if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
 
-  if (isClick || actionId === 6) {
+  if (!direct && (isClick || actionId === 6)) {
     _humanAction6Mode = true;
     const c = _humanCanvas();
     if (c) c.style.cursor = 'crosshair';
@@ -359,7 +359,7 @@ function _setupHumanKeyboard() {
 
     const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 6, 'c': 7 };
     const action = keyMap[e.key];
-    if (action !== undefined) { e.preventDefault(); humanDoAction(action); }
+    if (action !== undefined) { e.preventDefault(); humanDoAction(action, false, true); }
     // Ctrl+Z for undo
     if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); humanUndo(); }
   });
