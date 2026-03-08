@@ -788,6 +788,12 @@
   }
   .human-level-card:hover { border-color: var(--accent); background: var(--surface2, var(--surface)); }
   .human-level-card.active { border-color: var(--accent); background: #58a6ff18; }
+  .human-level-card.completed { border-color: #3fb950; background: #3fb95018; }
+  .human-level-card.completed .level-label { color: #3fb950; }
+
+  /* Hide content when paused (no peeking!) */
+  .paused-hidden { visibility: hidden !important; }
+
   .human-level-card .level-thumb {
     width: 100%;
     height: auto;

@@ -486,8 +486,10 @@ function humanTogglePause() {
   const btn = document.getElementById('humanPauseBtn');
   const ctrl = document.getElementById('humanControls');
   const canvas = _humanCanvas();
+  const levelGrid = document.getElementById('humanLevelGrid');
+  const topBar = document.getElementById('humanTopBar');
   if (_humanPaused) {
-    // Freeze timer, lock controls, black out canvas
+    // Freeze timer, lock controls, black out canvas + hide info
     if (_humanTimerInterval) { clearInterval(_humanTimerInterval); _humanTimerInterval = null; }
     _humanDuration = (Date.now() - _humanStartTime) / 1000;
     if (btn) { btn.textContent = 'Resume'; btn.classList.add('btn-primary'); }
@@ -501,6 +503,9 @@ function humanTogglePause() {
       ctx.textAlign = 'center';
       ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
     }
+    // Hide level thumbnails and top bar info to prevent peeking
+    if (levelGrid) levelGrid.classList.add('paused-hidden');
+    if (topBar) topBar.classList.add('paused-hidden');
   } else {
     // Resume timer from accumulated duration, unlock controls, restore canvas
     _humanStartTime = Date.now() - _humanDuration * 1000;
@@ -508,6 +513,9 @@ function humanTogglePause() {
     if (btn) { btn.textContent = 'Pause'; btn.classList.remove('btn-primary'); }
     if (ctrl) ctrl.classList.remove('controls-locked');
     if (_humanGrid) _humanRenderGrid(_humanGrid);
+    // Restore level thumbnails and top bar
+    if (levelGrid) levelGrid.classList.remove('paused-hidden');
+    if (topBar) topBar.classList.remove('paused-hidden');
   }
 }
 
@@ -661,6 +669,21 @@ function _humanUpdateTopBar() {
   const total = _humanState.win_levels || _humanLevelCount || '?';
   document.getElementById('humanLevelInfo').textContent = `Level ${levels}/${total}`;
   document.getElementById('humanStepCounter').textContent = `Step ${_humanStepCount}`;
+
+  // Update level card highlighting to reflect current progress
+  _humanUpdateLevelCards();
+}
+
+function _humanUpdateLevelCards() {
+  const levelsCompleted = _humanState.levels_completed || 0;
+  document.querySelectorAll('.human-level-card').forEach((card, i) => {
+    card.classList.remove('active', 'completed');
+    if (i < levelsCompleted) {
+      card.classList.add('completed');
+    } else if (i === levelsCompleted) {
+      card.classList.add('active');
+    }
+  });
 }
 
 // ── Session Recorder ────────────────────────────────────────────────────
@@ -736,12 +759,47 @@ function _humanSaveSession() {
   } catch {}
 
   // Upload to server (fire-and-forget, all human sessions)
+  _humanUploadPayload(payload);
+}
+
+function _humanUploadPayload(payload) {
   fetch('/api/sessions/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   }).catch(() => {});
 }
+
+function _humanBuildPayload() {
+  if (!_humanSessionId || !_humanGameId || _humanStepsBuffer.length < 1) return null;
+  return {
+    session: {
+      id: _humanSessionId,
+      game_id: _humanState.game_id || _humanGameId,
+      model: '',
+      mode: MODE,
+      created_at: (_humanStartTime || Date.now()) / 1000,
+      result: _humanState.state || 'NOT_FINISHED',
+      steps: _humanStepCount,
+      levels: _humanState.levels_completed || 0,
+      player_type: 'human',
+      duration_seconds: _humanDuration,
+      user_id: (typeof currentUser !== 'undefined' && currentUser?.id) || null,
+    },
+    steps: _humanStepsBuffer,
+  };
+}
+
+// Auto-upload on page close / tab close
+window.addEventListener('beforeunload', () => {
+  if (_humanRecording && _humanStepsBuffer.length > 0) {
+    const payload = _humanBuildPayload();
+    if (payload) {
+      navigator.sendBeacon('/api/sessions/import',
+        new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+    }
+  }
+});
 
 // ── Game Results ────────────────────────────────────────────────────────
 

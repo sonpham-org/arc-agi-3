@@ -124,7 +124,7 @@ async function loadSessionHistory() {
         <span class="h-meta">${date}</span>
 `;
       div.style.cursor = 'pointer';
-      div.onclick = () => window.open(`/share/${s.id}`, '_blank');
+      div.onclick = () => window.open(`/share?id=${s.id}`, '_blank');
       // Replay button (in-app)
       const replayBtn = document.createElement('button');
       replayBtn.className = 'btn';
@@ -1558,7 +1558,6 @@ let _browseActive = false;
 let _menuActive = false;
 let _currentView = 'human';  // tracks which top-level view is active (default: human)
 let _browseGlobalCache = null;  // cache server sessions
-let _browseGameFilter = null;   // currently selected game in By Game tab
 
 // Hash-to-view mapping
 const _VIEW_HASHES = { agent: 'play', human: 'human', sessions: 'browse', leaderboards: 'leaderboard', contributors: 'contributors', feedback: 'feedback' };
@@ -1586,6 +1585,11 @@ function showAppView(view, skipHash) {
 
   const sidebar = document.getElementById('gameSidebar');
   const outerLayout = document.getElementById('outerLayout');
+
+  // Auto-pause human session when navigating away
+  if (view !== 'human' && typeof _humanRecording !== 'undefined' && _humanRecording && !_humanPaused) {
+    humanTogglePause();
+  }
 
   // Hide everything first
   outerLayout.style.display = 'none';
@@ -1729,96 +1733,56 @@ function menuResume(sid) {
   browseResume(sid);
 }
 
-function switchBrowseTab(tab) {
-  document.querySelectorAll('.browse-tabs button').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.browse-pane').forEach(p => p.classList.remove('active'));
-  const idx = { byGame: 0, global: 1, local: 2 }[tab] || 0;
-  const btns = document.querySelectorAll('.browse-tabs button');
-  if (btns[idx]) btns[idx].classList.add('active');
-  const paneMap = { byGame: 'browseByGame', global: 'browseGlobal', local: 'browseLocal' };
-  const pane = document.getElementById(paneMap[tab]);
-  if (pane) pane.classList.add('active');
-  if (tab === 'global') loadBrowseGlobal();
-  if (tab === 'local') loadBrowseLocal();
-  if (tab === 'byGame') loadBrowseByGame();
-}
-
 function loadBrowseView() {
-  // Load whichever tab is active
-  const activeBtn = document.querySelector('.browse-tabs button.active');
-  const tab = activeBtn?.textContent?.trim();
-  if (tab === 'Public Sessions') loadBrowseGlobal();
-  else if (tab === 'My Sessions') loadBrowseLocal();
-  else loadBrowseByGame();
+  loadBrowseHuman();
+  loadBrowseAI();
+  loadBrowseMy();
 }
 
-// ── By Game tab ──────────────────────────────────────────────────────────
+// ── Human Sessions column ────────────────────────────────────────────────
 
-async function loadBrowseByGame() {
-  const listEl = document.getElementById('browseGameList');
-  // Populate game list
-  try {
-    let games = await fetchJSON('/api/games');
-    if (MODE === 'prod') games = games.filter(g => g.game_id !== 'fd01-00000001');
-    listEl.innerHTML = '';
-    const foundation = games.filter(g => _ARC_FOUNDATION_GAMES.includes(g.game_id.split('-')[0].toLowerCase()));
-    const observatory = games.filter(g => !_ARC_FOUNDATION_GAMES.includes(g.game_id.split('-')[0].toLowerCase()));
-    _renderGameGroup(listEl, 'ARC Prize Foundation', foundation, g => loadGameSessions(g.game_id));
-    _renderGameGroup(listEl, 'ARC Observatory', observatory, g => loadGameSessions(g.game_id));
-  } catch { listEl.innerHTML = '<div class="browse-empty">Failed to load games.</div>'; }
-}
-
-async function loadGameSessions(gameId) {
-  _browseGameFilter = gameId;
-  // Highlight active game
-  document.querySelectorAll('#browseGameList .game-card').forEach(c => c.classList.remove('active'));
-  document.querySelectorAll('#browseGameList .game-card').forEach(c => {
-    if (c.querySelector('.title')?.textContent === gameShortName(gameId)) c.classList.add('active');
-  });
-  const el = document.getElementById('browseGameSessions');
-  el.innerHTML = '<div class="browse-empty">Loading sessions...</div>';
-  try {
-    // Fetch all sessions then filter by game
-    const allSessions = await fetchAllSessions();
-    const gameSessions = allSessions.filter(s => s.game_id === gameId);
-    if (!gameSessions.length) {
-      el.innerHTML = `<div class="browse-empty">No sessions for ${gameShortName(gameId)} yet.</div>`;
-      return;
-    }
-    el.innerHTML = '';
-    for (const s of gameSessions) el.appendChild(buildSessionRow(s));
-  } catch (e) {
-    el.innerHTML = `<div class="browse-empty">Error: ${e.message}</div>`;
-  }
-}
-
-// ── Public Sessions tab ──────────────────────────────────────────────────
-
-async function loadBrowseGlobal() {
-  const el = document.getElementById('browseGlobalList');
+async function loadBrowseHuman() {
+  const el = document.getElementById('browseHumanList');
   el.innerHTML = '<div class="browse-empty">Loading...</div>';
   try {
-    const allSessions = await fetchAllSessions(true);
-    let filtered = allSessions.filter(s => (s.steps || 0) >= 20);
-    if (MODE === 'prod') filtered = filtered.filter(s => s.game_id !== 'fd01-00000001');
-    const header = document.getElementById('browseGlobalHeader');
-    header.textContent = `All sessions from server (${filtered.length} with 20+ steps)`;
-    if (!filtered.length) {
-      el.innerHTML = '<div class="browse-empty">No sessions with 20+ steps found.</div>';
+    const data = await fetchJSON('/api/sessions?player_type=human');
+    let sessions = (data.sessions || []).filter(s => (s.steps || 0) >= 1);
+    if (MODE === 'prod') sessions = sessions.filter(s => s.game_id !== 'fd01-00000001');
+    if (!sessions.length) {
+      el.innerHTML = '<div class="browse-empty">No human sessions yet.</div>';
       return;
     }
     el.innerHTML = '';
-    for (const s of filtered) el.appendChild(buildSessionRow(s));
+    for (const s of sessions) el.appendChild(buildSessionRow(s));
   } catch (e) {
     el.innerHTML = `<div class="browse-empty">Error: ${e.message}</div>`;
   }
 }
 
-// ── My Sessions tab ──────────────────────────────────────────────────────
+// ── AI Sessions column ───────────────────────────────────────────────────
 
-async function loadBrowseLocal() {
-  const el = document.getElementById('browseLocalList');
-  const header = document.getElementById('browseLocalHeader');
+async function loadBrowseAI() {
+  const el = document.getElementById('browseAIList');
+  el.innerHTML = '<div class="browse-empty">Loading...</div>';
+  try {
+    const data = await fetchJSON('/api/sessions?player_type=agent');
+    let sessions = (data.sessions || []).filter(s => (s.steps || 0) >= 5);
+    if (MODE === 'prod') sessions = sessions.filter(s => s.game_id !== 'fd01-00000001');
+    if (!sessions.length) {
+      el.innerHTML = '<div class="browse-empty">No AI sessions with 5+ steps yet.</div>';
+      return;
+    }
+    el.innerHTML = '';
+    for (const s of sessions) el.appendChild(buildSessionRow(s));
+  } catch (e) {
+    el.innerHTML = `<div class="browse-empty">Error: ${e.message}</div>`;
+  }
+}
+
+// ── My Sessions column ──────────────────────────────────────────────────
+
+async function loadBrowseMy() {
+  const el = document.getElementById('browseMyList');
 
   // If logged in, fetch user's sessions from server
   if (currentUser) {
@@ -1832,7 +1796,6 @@ async function loadBrowseLocal() {
       for (const s of serverSessions) byId[s.id] = s;
       for (const s of localSessions) { if (!byId[s.id]) byId[s.id] = s; }
       const merged = Object.values(byId).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-      header.textContent = `My sessions (${merged.length})`;
       if (!merged.length) {
         el.innerHTML = '<div class="browse-empty">No sessions yet. Play a game to see sessions here.</div>';
         return;
@@ -1847,7 +1810,6 @@ async function loadBrowseLocal() {
 
   // Not logged in — show local-only sessions
   const localSessions = getLocalSessions();
-  header.textContent = `My sessions (${localSessions.length})`;
   if (!localSessions.length) {
     el.innerHTML = '<div class="browse-empty">Log in to see your sessions across devices, or play a game to save sessions locally.</div>';
     return;
@@ -1886,25 +1848,34 @@ function buildSessionRow(s, isLocal) {
   const resultClass = `s-result-${result}`;
   const branchHtml = s.parent_session_id
     ? `<span class="s-branch">&#8627; branch@${s.branch_at_step || '?'}</span>` : '';
-  const costStr = (s.total_cost || s.cost || 0) > 0
-    ? `$${(s.total_cost || s.cost || 0).toFixed(4)}` : '';
+  const isHuman = s.player_type === 'human';
   const durationStr = s.duration ? formatDuration(s.duration) : '';
-  const metaParts = [
-    `${s.steps || 0} steps`,
-    s.model || '',
-    costStr,
-    durationStr,
-    dateStr,
-  ].filter(Boolean).join(' · ');
+  let metaParts;
+  if (isHuman) {
+    metaParts = [
+      `${s.steps || 0} steps`,
+      durationStr,
+      dateStr,
+    ].filter(Boolean).join(' \u00b7 ');
+  } else {
+    const costStr = (s.total_cost || s.cost || 0) > 0
+      ? `$${(s.total_cost || s.cost || 0).toFixed(4)}` : '';
+    metaParts = [
+      `${s.steps || 0} steps`,
+      s.model || '',
+      costStr,
+      dateStr,
+    ].filter(Boolean).join(' \u00b7 ');
+  }
 
   div.innerHTML = `
     ${branchHtml}
     <span class="s-game">${gameShortName(s.game_id) || '?'}</span>
     <span class="s-result ${resultClass}">${result}</span>
-    <span class="s-model">${s.model || '—'}</span>
+    ${isHuman ? '' : `<span class="s-model">${s.model || '\u2014'}</span>`}
     <span class="s-meta">${metaParts}</span>
     <span class="s-actions">
-      <button class="btn" onclick="event.stopPropagation(); window.open('/share/${s.id}','_blank');">Shareable Replay</button>
+      <button class="btn" onclick="event.stopPropagation(); window.open('/share?id=${s.id}','_blank');">Shareable Replay</button>
       ${result === 'NOT_FINISHED' ? `<button class="btn btn-primary" onclick="event.stopPropagation(); browseResume('${s.id}');">&#9654; Resume playing</button>` : ''}
       ${isLocal ? `<button class="btn btn-danger" onclick="event.stopPropagation(); browseDeleteLocal('${s.id}', this);">Delete</button>` : ''}
     </span>`;
@@ -1941,10 +1912,6 @@ function browseDeleteLocal(sid, btn) {
   deleteLocalSession(sid);
   const row = btn.closest('.session-row');
   if (row) row.remove();
-  // Update header count
-  const header = document.getElementById('browseLocalHeader');
-  const count = getLocalSessions().length;
-  header.textContent = `Sessions stored in this browser (${count})`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
