@@ -60,15 +60,16 @@ for m in range(8):
         REFLECT[m][d] = None if out == d else out
 
 # Mirror pixel patterns within a 4x4 cell: list of (col, row) offsets
+# Surface angles: M0=0, M1=22.5, M2=45, M3=67.5, M4=90, M5=112.5, M6=135, M7=157.5
 MIRROR_PIXELS = {
     0: [(0, 2), (1, 2), (2, 2), (3, 2)],             # M0: horizontal ---
-    1: [(0, 3), (1, 2), (2, 1), (3, 0)],              # M1: gentle backslash (shallow)
-    2: [(0, 0), (1, 1), (2, 2), (3, 3)],              # M2: classic backslash
-    3: [(1, 0), (1, 1), (2, 2), (2, 3)],              # M3: steep backslash
+    1: [(0, 1), (1, 2), (2, 2), (3, 3)],              # M1: shallow \ (barely tilted)
+    2: [(0, 0), (1, 1), (2, 2), (3, 3)],              # M2: classic \ diagonal
+    3: [(1, 0), (1, 1), (2, 2), (2, 3)],              # M3: steep \ (nearly vertical)
     4: [(2, 0), (2, 1), (2, 2), (2, 3)],              # M4: vertical |
-    5: [(2, 0), (2, 1), (1, 2), (1, 3)],              # M5: steep slash
-    6: [(3, 0), (2, 1), (1, 2), (0, 3)],              # M6: classic /
-    7: [(3, 3), (2, 2), (1, 1), (0, 0)],              # M7: gentle slash (shallow)
+    5: [(2, 0), (2, 1), (1, 2), (1, 3)],              # M5: steep / (nearly vertical)
+    6: [(3, 0), (2, 1), (1, 2), (0, 3)],              # M6: classic / diagonal
+    7: [(3, 1), (2, 2), (1, 2), (0, 3)],              # M7: shallow / (barely tilted)
 }
 
 # Beam line pixels within a 4x4 cell by line-type (direction pairs share a line)

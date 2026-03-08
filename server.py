@@ -45,6 +45,7 @@ import llm_providers
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+_STATIC_VERSION = str(int(time.time()))  # cache-bust static files on each deploy
 app.logger.setLevel(logging.INFO)
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -821,7 +822,8 @@ def index():
                            turnstile_site_key=ts_key,
                            mode=mode, features=features,
                            umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
-                           prompts=_load_prompts())
+                           prompts=_load_prompts(),
+                           static_v=_STATIC_VERSION)
 
 
 @app.route("/api/turnstile/verify", methods=["POST"])

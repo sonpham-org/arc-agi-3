@@ -7,13 +7,19 @@ ACTION1 (^): Move cursor up
 ACTION2 (v): Move cursor down
 ACTION3 (<): Move cursor left
 ACTION4 (>): Move cursor right
-ACTION5    : Place tower at cursor (costs 50 money)
+ACTION5    : Place tower at cursor
+ACTION6    : Cycle tower type (normal 50g → slow 25g → laser 75g)
+ACTION7    : Sell tower under cursor (refund 25g)
 
 Goal: Survive 5 waves of enemies.
-- Start with 100 money; tower costs 50, each kill earns 25.
+- Start with 100 money; each kill earns 25.
 - Enemies march from the gate along the path to the castle.
 - Castle has 10 HP; each enemy that reaches it deals 1 damage.
 - Place towers on green cells to auto-attack enemies in range.
+- Normal tower: fires pellets that deal 1 HP damage.
+- Slow tower: fires pellets that slow enemies for 20 steps.
+- Laser tower: fires a beam that sets enemies on fire — burns for
+  10 steps, draining 10% of current HP each step.
 - Three levels with increasingly complex paths.
 """
 
@@ -29,30 +35,36 @@ GL = 32   # logical grid size → 64×64 pixel frame (2×2 per cell)
 #  6=pink   7=orange     8=azure   9=blue      11=bright-yellow
 # 12=red   14=lime       15=white
 
-GRASS_C     = 2    # green – placeable field
-PATH_C      = 3    # dark-gray – enemy road
-GATE_C      = 14   # lime – enemy spawn point
-CASTLE_C        = 9    # blue – player castle
-TOWER_C         = 7    # orange – normal tower base
-TOWER_TOP_C     = 11   # bright-yellow – normal tower tip / pellet
-SLOW_TOWER_C    = 8    # azure – slow tower base
-SLOW_TOWER_TOP_C= 15   # white – slow tower tip
-SLOW_PELLET_C   = 1    # dark-blue – slow tower pellet
-ENEMY_C         = 12   # red – enemy
-SLOWED_ENEMY_C  = 6    # pink – slowed enemy
-CURSOR_C        = 9    # purple – valid placement cursor
-CURSOR_NO_C     = 5    # gray – invalid placement cursor
-MONEY_C         = 11   # bright-yellow – HUD money
-HP_C            = 12   # red – HUD castle HP
-WAVE_C          = 8    # azure – HUD wave dots
+GRASS_C          = 2    # green – placeable field
+PATH_C           = 3    # dark-gray – enemy road
+GATE_C           = 14   # lime – enemy spawn point
+CASTLE_C         = 9    # blue – player castle
+TOWER_C          = 7    # orange – normal tower base
+TOWER_TOP_C      = 11   # bright-yellow – normal tower tip / pellet
+SLOW_TOWER_C     = 8    # azure – slow tower base
+SLOW_TOWER_TOP_C = 15   # white – slow tower tip
+SLOW_PELLET_C    = 1    # dark-blue – slow tower pellet
+LASER_TOWER_C    = 12   # red – laser tower base
+LASER_TOWER_TOP_C= 4    # yellow – laser tower tip
+LASER_PELLET_C   = 4    # yellow – laser beam pellet
+ENEMY_C          = 12   # red – enemy
+SLOWED_ENEMY_C   = 6    # pink – slowed enemy
+BURNED_ENEMY_C   = 7    # orange – burning enemy
+CURSOR_C         = 9    # purple – valid placement cursor
+CURSOR_NO_C      = 5    # gray – invalid placement cursor
+MONEY_C          = 11   # bright-yellow – HUD money
+HP_C             = 12   # red – HUD castle HP
+WAVE_C           = 8    # azure – HUD wave dots
 
 # ── Game constants ────────────────────────────────────────────────────────────
 TOWER_RANGE      = 3.0   # Euclidean attack range in cells
 TOWER_COST       = 50
 SLOW_TOWER_COST  = 25
+LASER_TOWER_COST = 75
 TOWER_SELL_PRICE = 25
 KILL_REWARD      = 25
 WAVES_PER_LEVEL  = 5
+BURN_DURATION    = 10   # steps an enemy stays burning after laser hit
 
 # HP values for each enemy in each wave (index = spawn order)
 WAVE_HEALTH = [
@@ -208,14 +220,24 @@ class Td01Display(RenderableUserDisplay):
         # ── Tower range circles ───────────────────────────────────────────────
         for (tx, ty) in g.towers:
             kind = g.tower_types.get((tx, ty), 'normal')
-            ring_c = SLOW_TOWER_C if kind == 'slow' else 8
+            if kind == 'slow':
+                ring_c = SLOW_TOWER_C
+            elif kind == 'laser':
+                ring_c = LASER_TOWER_C
+            else:
+                ring_c = 8
             _draw_range_circle(frame, tx, ty, TOWER_RANGE, ring_c)
 
         # ── Attack pellets ────────────────────────────────────────────────────
         for p in g.pellets:
             px = int(p['x'] * 2 + 1)
             py = int(p['y'] * 2 + 1)
-            pellet_c = SLOW_PELLET_C if p['kind'] == 'slow' else TOWER_TOP_C
+            if p['kind'] == 'slow':
+                pellet_c = SLOW_PELLET_C
+            elif p['kind'] == 'laser':
+                pellet_c = LASER_PELLET_C
+            else:
+                pellet_c = TOWER_TOP_C
             for dy in range(2):
                 for dx in range(2):
                     if 0 <= px + dx < 64 and 0 <= py + dy < 64:
@@ -227,6 +249,9 @@ class Td01Display(RenderableUserDisplay):
             if kind == 'slow':
                 _fill(frame, tx, ty, SLOW_TOWER_C)
                 frame[ty * 2, tx * 2 + 1] = SLOW_TOWER_TOP_C
+            elif kind == 'laser':
+                _fill(frame, tx, ty, LASER_TOWER_C)
+                frame[ty * 2, tx * 2 + 1] = LASER_TOWER_TOP_C
             else:
                 _fill(frame, tx, ty, TOWER_C)
                 frame[ty * 2, tx * 2 + 1] = TOWER_TOP_C
@@ -234,7 +259,13 @@ class Td01Display(RenderableUserDisplay):
         # ── Enemies ───────────────────────────────────────────────────────────
         for e in g.enemies:
             ep = path[e["idx"]]
-            _fill(frame, ep[0], ep[1], SLOWED_ENEMY_C if e["slowed"] > 0 else ENEMY_C)
+            if e["burn"] > 0:
+                color = BURNED_ENEMY_C
+            elif e["slowed"] > 0:
+                color = SLOWED_ENEMY_C
+            else:
+                color = ENEMY_C
+            _fill(frame, ep[0], ep[1], color)
 
         # ── Cursor (always visible) ───────────────────────────────────────────
         cc = CURSOR_NO_C if g._cursor_invalid() else CURSOR_C
@@ -247,7 +278,12 @@ class Td01Display(RenderableUserDisplay):
             frame[0:2, 1 + i * 4: 1 + i * 4 + 3] = MONEY_C
 
         # ── HUD: selected tower type indicator (cols 50-51) ──────────────────
-        sel_c = SLOW_TOWER_C if g.selected_tower == 'slow' else TOWER_C
+        if g.selected_tower == 'slow':
+            sel_c = SLOW_TOWER_C
+        elif g.selected_tower == 'laser':
+            sel_c = LASER_TOWER_C
+        else:
+            sel_c = TOWER_C
         frame[0:2, 50:52] = sel_c
 
         # ── HUD: wave counter (top-right, rows 0-1, cols 52-63) ──────────────
@@ -371,9 +407,19 @@ class Td01(ARCBaseGame):
                     })
 
     def _move_enemies(self):
-        """Advance enemies along the path; slowed enemies move less frequently."""
+        """Advance enemies along the path; apply burn damage; slowed enemies move less."""
         reached = []
+        burn_killed = []
         for e in self.enemies:
+            # Burn damage: 10% of current HP per step, min 1
+            if e["burn"] > 0:
+                dmg = max(1, int(e["hp"] * 0.1))
+                e["hp"] -= dmg
+                e["burn"] -= 1
+                if e["hp"] <= 0:
+                    burn_killed.append(e)
+                    continue
+
             if e["slowed"] > 0:
                 e["slowed"] -= 1
             interval = SLOWED_MOVE_EVERY if e["slowed"] > 0 else ENEMY_MOVE_EVERY
@@ -383,9 +429,15 @@ class Td01(ARCBaseGame):
                 e["idx"] += 1
                 if e["idx"] >= len(self.path):
                     reached.append(e)
+
+        for e in burn_killed:
+            if e in self.enemies:
+                self.enemies.remove(e)
+                self.money = min(200, self.money + e['reward'])
         for e in reached:
-            self.enemies.remove(e)
-            self.castle_hp -= 1
+            if e in self.enemies:
+                self.enemies.remove(e)
+                self.castle_hp -= 1
 
     def _try_spawn(self):
         """Spawn one enemy at the gate if the spawn timer allows."""
@@ -398,7 +450,7 @@ class Td01(ARCBaseGame):
         hp = wave_hps[self.enemies_spawned]
         reward = hp // 2 * KILL_REWARD
         self.enemies.append({"idx": 0, "hp": hp, "reward": reward,
-                             "move_timer": 0, "slowed": 0})
+                             "move_timer": 0, "slowed": 0, "burn": 0})
         self.enemies_spawned += 1
         self.spawn_timer = SPAWN_INTERVAL
 
@@ -417,6 +469,8 @@ class Td01(ARCBaseGame):
                 if t in self.enemies:
                     if p['kind'] == 'slow':
                         t['slowed'] = SLOW_DURATION
+                    elif p['kind'] == 'laser':
+                        t['burn'] = BURN_DURATION   # ignite / refresh burn
                     else:
                         t['hp'] -= 1
                         if t['hp'] <= 0:
@@ -441,15 +495,25 @@ class Td01(ARCBaseGame):
         elif aid == 4 and cx < GL - 1:
             self.cursor = (cx + 1, cy)
         elif aid == 5:
-            cost = SLOW_TOWER_COST if self.selected_tower == 'slow' else TOWER_COST
+            if self.selected_tower == 'slow':
+                cost = SLOW_TOWER_COST
+            elif self.selected_tower == 'laser':
+                cost = LASER_TOWER_COST
+            else:
+                cost = TOWER_COST
             if not self._cursor_invalid() and self.money >= cost:
                 self.towers.append((cx, cy))
                 self.tower_set.add((cx, cy))
                 self.tower_types[(cx, cy)] = self.selected_tower
                 self.money -= cost
         elif aid == 6:
-            # Cycle tower type: normal ↔ slow
-            self.selected_tower = 'slow' if self.selected_tower == 'normal' else 'normal'
+            # Cycle tower type: normal → slow → laser → normal
+            if self.selected_tower == 'normal':
+                self.selected_tower = 'slow'
+            elif self.selected_tower == 'slow':
+                self.selected_tower = 'laser'
+            else:
+                self.selected_tower = 'normal'
         elif aid == 7:
             # Sell tower under cursor
             if (cx, cy) in self.tower_set:

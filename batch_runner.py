@@ -566,7 +566,7 @@ def main():
     import db as _db_module
     from datetime import datetime
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    _db_module.DB_PATH = Path(__file__).parent / "data" / f"sessions_{ts}.db"
+    _db_module.DB_PATH = _db_module._DATA_DIR / f"sessions_{ts}.db"
     _db_module._init_db()
     print(f"  DB: {_db_module.DB_PATH}")
 

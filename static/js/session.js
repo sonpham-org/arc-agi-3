@@ -1568,7 +1568,7 @@ function renderPromptsTab() {
 
 let _browseActive = false;
 let _menuActive = false;
-let _currentView = 'play';  // tracks which top-level view is active
+let _currentView = 'human';  // tracks which top-level view is active (default: human)
 let _browseGlobalCache = null;  // cache server sessions
 let _browseGameFilter = null;   // currently selected game in By Game tab
 
@@ -1665,6 +1665,11 @@ function showAppView(view, skipHash) {
       sidebar.style.display = '';
       updateEmptyAppState();
       if (sessions.size > 0) sessionHost.style.display = '';
+      // Lazy-resume: if active session hasn't been loaded from server yet, resume now
+      if (activeSessionId && !activeSessionId.startsWith('pending_')) {
+        const _s = sessions.get(activeSessionId);
+        if (_s && !_s.currentGrid) resumeSession(activeSessionId);
+      }
     }
   }
 }
@@ -2246,8 +2251,9 @@ function restoreSessionsFromLocalStorage() {
   }
   renderSessionTabs();
 
-  // Auto-resume the active session so the game grid + progress loads
-  if (activeSessionId && !activeSessionId.startsWith('pending_')) {
+  // Auto-resume only if we're about to show the agent/play view
+  // (avoids async resume overwriting human view on default load)
+  if (_currentView === 'play' && activeSessionId && !activeSessionId.startsWith('pending_')) {
     resumeSession(activeSessionId);
   } else {
     updateGameListLock();
@@ -2273,15 +2279,16 @@ async function initApp() {
   if (FEATURES.copilot) checkCopilotStatus();
   if (FEATURES.puter_js) puterKvCheckResume();
 
-  restoreSessionsFromLocalStorage();
-
-  // Route from hash BEFORE showing default view
+  // Establish view FIRST so _currentView is set before session restore
   // Default to human view for empty hash, #human, or #agent (old default)
   if (location.hash && location.hash !== '#' && location.hash !== '#human' && location.hash !== '#agent') {
     _routeFromHash();
   } else {
     showAppView('human');
   }
+
+  // Restore sessions AFTER view is set (auto-resume only fires in agent/play view)
+  restoreSessionsFromLocalStorage();
 
   // Auth: check login status (async, doesn't block init)
   checkAuthStatus();

@@ -22,7 +22,8 @@ log = logging.getLogger(__name__)
 # LOCAL SQLite
 # ═══════════════════════════════════════════════════════════════════════════
 
-DB_PATH = Path(__file__).parent / "data" / "sessions.db"
+_DATA_DIR = Path(os.environ.get("DB_DATA_DIR", Path(__file__).parent / "data"))
+DB_PATH = _DATA_DIR / "sessions.db"
 
 
 def _init_db():
@@ -1069,7 +1070,7 @@ def _get_session_turns(session_id: str) -> list[dict]:
 # PER-SESSION FILE EXPORT
 # ═══════════════════════════════════════════════════════════════════════════
 
-SESSIONS_DIR = Path(__file__).parent / "data" / "sessions"
+SESSIONS_DIR = _DATA_DIR / "sessions"
 
 
 def _export_session_to_file(session_id: str) -> Path | None:
