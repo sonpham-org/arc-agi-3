@@ -507,9 +507,8 @@ function _renderGameGroup(el, label, games, onClick) {
     div.className = 'game-card';
     const shortName = g.title || g.game_id.split('-')[0].toUpperCase();
     const tag = gameDevTag(g.game_id);
-    const bareId = g.game_id.split('-')[0];
-    const versionStr = g.version != null ? `${bareId}-v${g.version}` : bareId;
-    div.innerHTML = `<div class="title">${shortName}${tag ? ' ' + tag : ''}</div><div class="game-id-label">${versionStr}</div>`;
+    const gameLabel = g.game_id.split('-')[0].toUpperCase();
+    div.innerHTML = `<div class="title">${shortName}${tag ? ' ' + tag : ''}</div><div class="game-id-label">${gameLabel}</div>`;
     div.dataset.gameId = g.game_id;
     div.onclick = () => onClick(g);
     list.appendChild(div);

@@ -1056,10 +1056,15 @@ def auth_claim_sessions():
 def list_games():
     arc = get_arcade()
     envs = arc.get_environments()
+    # Deduplicate: prefer short IDs (ls20) over old hash IDs (ls20-cb3b57cc)
+    seen = {}
+    for e in envs:
+        short = e.game_id.split("-")[0]
+        if short not in seen or len(e.game_id) < len(seen[short].game_id):
+            seen[short] = e
     games = [
-        {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps,
-         "version": get_game_version(e.game_id)}
-        for e in envs
+        {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps}
+        for e in seen.values()
     ]
     # In prod mode, hide non-foundation games unless ?show_all=1
     if get_mode() == "prod" and request.args.get("show_all") != "1":
@@ -1079,8 +1084,9 @@ def game_source(game_id):
     if env_info is None:
         return jsonify({"error": f"Game {game_id} not found"}), 404
     local_dir = Path(env_info.local_dir)
-    # .py file is named after the game_id (e.g. lb03.py, ls20.py)
-    py_file = local_dir / f"{env_info.game_id}.py"
+    # .py file is named after the canonical game_id (e.g. lb03.py, ls20.py, ft09.py)
+    canonical_id = env_info.game_id.split("-")[0]
+    py_file = local_dir / f"{canonical_id}.py"
     if not py_file.exists():
         return jsonify({"error": f"Source file not found for {game_id}"}), 404
     source = py_file.read_text(encoding="utf-8")
