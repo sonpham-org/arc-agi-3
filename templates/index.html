@@ -34,7 +34,11 @@
     <a class="nav-link" href="#contributors" onclick="event.preventDefault();showAppView('contributors')">&#128150; Contributors</a>
     <span style="flex:1;"></span>
     <a class="nav-link" href="#feedback" onclick="event.preventDefault();showAppView('feedback')">Roadmap / Feedback</a>
+    {% if google_client_id %}
+    <a id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;text-decoration:none;" href="/api/auth/google">Log in</a>
+    {% else %}
     <button id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;" onclick="showLoginModal()">Log in</button>
+    {% endif %}
     <div id="userBadge" style="display:none;position:relative;">
       <button class="btn" style="font-size:11px;padding:2px 10px;" onclick="toggleUserMenu()">
         <span id="userBadgeLabel"></span> ▾
@@ -183,17 +187,24 @@
   </div>
   <!-- ── Browse Sessions view ────────────────────────────────────────── -->
   <div id="browseView">
+    <div class="browse-sidebar" id="browseSidebar">
+      <div class="browse-sidebar-header">
+        <span>Games</span>
+        <button class="browse-filter-clear" id="browseFilterClear" style="display:none;" onclick="clearBrowseGameFilter()" title="Show all sessions">&times; All</button>
+      </div>
+      <div class="browse-sidebar-list" id="browseGameList"></div>
+    </div>
     <div class="browse-columns">
       <div class="browse-column">
-        <div class="browse-column-header">Human Sessions</div>
+        <div class="browse-column-header">Human Sessions <span class="browse-column-count" id="browseHumanCount"></span></div>
         <div class="browse-column-content" id="browseHumanList"><div class="browse-empty">Loading...</div></div>
       </div>
       <div class="browse-column">
-        <div class="browse-column-header">AI Sessions</div>
+        <div class="browse-column-header">AI Sessions <span class="browse-column-count" id="browseAICount"></span></div>
         <div class="browse-column-content" id="browseAIList"><div class="browse-empty">Loading...</div></div>
       </div>
       <div class="browse-column">
-        <div class="browse-column-header">My Sessions</div>
+        <div class="browse-column-header">My Sessions <span class="browse-column-count" id="browseMyCount"></span></div>
         <div class="browse-column-content" id="browseMyList"><div class="browse-empty">Loading...</div></div>
       </div>
     </div>
