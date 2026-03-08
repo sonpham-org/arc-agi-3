@@ -33,20 +33,12 @@ def test_level(lvl_idx):
 
         cx = int(p['x']) + 2
         cy = int(p['y']) + sn01.HUD_H
-        g2.perform_action(ActionInput(id=GameAction.ACTION6, data={'x': cx, 'y': cy}))
-        if not g2._sim_running:
-            continue
 
-        won = False
-        for t in range(500):
-            r = g2.perform_action(ActionInput(id=GameAction.ACTION6, data={'x': 0, 'y': 0}))
-            if g2.level_index != lvl_idx or r.state == GameState.WIN:
-                won = True
-                break
-            if r.state == GameState.GAME_OVER:
-                break
+        # perform_action runs the entire multi-frame simulation internally
+        r = g2.perform_action(ActionInput(id=GameAction.ACTION6, data={'x': cx, 'y': cy}))
 
-        if won:
+        # Win detection: level advanced (levels 1-6) or state is WIN (level 7)
+        if g2.level_index != lvl_idx or r.state == GameState.WIN:
             winners += 1
 
     return clickable, winners

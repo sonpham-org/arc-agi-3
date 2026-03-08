@@ -9,17 +9,18 @@ from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay
 
 CELL = 4
 
-# Colors
-C_BLACK = 0
-C_GRAY = 3
-C_YELLOW = 4
-C_MID = 5
-C_ORANGE = 7
-C_AZURE = 8
-C_GOLD = 11
-C_RED = 12
-C_LIME = 14
-C_WHITE = 15
+# Colors (ARC-3 palette — dark theme)
+C_BLACK  = 5   # Black — background / abyss
+C_FLOOR  = 4   # VeryDarkGray — floor tiles
+C_WALL   = 3   # DarkGray — border & interior walls
+C_GRAY   = 3   # DarkGray — fixed mirror bg, placeable dots
+C_YELLOW = 11  # Yellow — backslash player mirror
+C_ORANGE = 12  # Orange — slash player mirror
+C_AZURE  = 10  # LightBlue — beam
+C_GOLD   = 11  # Yellow — target
+C_RED    = 8   # Red — source
+C_LIME   = 14  # Green — cursor
+C_WHITE  = 0   # White — mirror line pattern
 
 # Mirror types
 M_EMPTY = 0
@@ -216,11 +217,11 @@ class Lb01Display(RenderableUserDisplay):
             for gx in range(g.grid_w):
                 px, py = ox + gx * CELL, oy + gy * CELL
                 if (gx, gy) in g.border_walls:
-                    frame[py:py + CELL, px:px + CELL] = C_WHITE
+                    frame[py:py + CELL, px:px + CELL] = C_WALL
                 elif (gx, gy) in g.interior_walls:
-                    frame[py:py + CELL, px:px + CELL] = C_WHITE
+                    frame[py:py + CELL, px:px + CELL] = C_WALL
                 else:
-                    frame[py:py + CELL, px:px + CELL] = C_MID
+                    frame[py:py + CELL, px:px + CELL] = C_FLOOR
 
         # Draw source
         sx, sy = g.source[0], g.source[1]

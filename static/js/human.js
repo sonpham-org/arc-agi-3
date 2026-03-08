@@ -5,7 +5,8 @@
 let _humanInited = false;
 let _humanGameId = null;       // currently selected game ID
 let _humanSessionId = null;    // active game session ID
-let _humanStarted = false;     // true once first move made
+let _humanStarted = false;     // true once first move made (free play or recorded)
+let _humanRecording = false;   // true when recording a session (Start Session clicked)
 let _humanGrid = null;         // current grid state
 let _humanState = {};          // current game state from engine
 let _humanStepCount = 0;
@@ -57,7 +58,7 @@ async function _loadHumanGames() {
 // ── Game Selection ──────────────────────────────────────────────────────
 
 async function _humanSelectGame(gameId) {
-  if (_humanStarted) return; // locked once play begins
+  if (_humanRecording) return; // locked during recorded session
 
   // Highlight selected game
   document.querySelectorAll('#humanGameList .game-card').forEach(c => c.classList.remove('active'));
@@ -99,6 +100,7 @@ async function _humanSelectGame(gameId) {
   _humanUndoStack = [];
   _humanStepsBuffer = [];
   _humanStarted = false;
+  _humanRecording = false;
   _humanStartTime = null;
   _humanDuration = 0;
   _humanAvailableActions = data.available_actions || [];
@@ -183,7 +185,7 @@ function _renderThumbnail(thumbCanvas, grid) {
 }
 
 async function _humanJumpToLevel(levelIndex) {
-  if (_humanStarted) return; // can't change level once started
+  if (_humanRecording) return; // can't change level during recorded session
 
   _humanCurrentLevel = levelIndex;
 
@@ -231,8 +233,7 @@ async function humanDoAction(actionId, isClick) {
     return;
   }
 
-  // First move locks game/level selection
-  if (!_humanStarted) _humanLockPlay();
+  _humanStarted = true;
 
   // Save undo snapshot
   _humanUndoStack.push({
@@ -248,17 +249,19 @@ async function humanDoAction(actionId, isClick) {
   if (data.error) { _humanUndoStack.pop(); _humanStepCount--; alert(data.error); return; }
 
   _humanMoveHistory.push({ step: _humanStepCount, action: actionId, state: data.state, levels: data.levels_completed, grid: data.grid });
-  _humanStepsBuffer.push({
-    step_num: _humanStepCount,
-    action: actionId,
-    data: {},
-    grid: data.grid,
-    change_map: data.change_map || null,
-    llm_response: null,
-    timestamp: Date.now() / 1000,
-    levels_completed: data.levels_completed ?? 0,
-    result_state: data.state || 'NOT_FINISHED',
-  });
+  if (_humanRecording) {
+    _humanStepsBuffer.push({
+      step_num: _humanStepCount,
+      action: actionId,
+      data: {},
+      grid: data.grid,
+      change_map: data.change_map || null,
+      llm_response: null,
+      timestamp: Date.now() / 1000,
+      levels_completed: data.levels_completed ?? 0,
+      result_state: data.state || 'NOT_FINISHED',
+    });
+  }
 
   // Animate intermediate frames (e.g. level transitions) on human canvas
   if (data.frames && data.frames.length > 1) {
@@ -275,7 +278,7 @@ async function humanDoAction(actionId, isClick) {
   _humanGrid = data.grid;
   _humanRenderGrid(data.grid);
   _humanUpdateTopBar();
-  _humanUpdateRecorder(actionId, {});
+  if (_humanRecording) _humanUpdateRecorder(actionId, {});
   _humanUpdateUndoBtn();
   _humanCheckEnd();
 }
@@ -289,7 +292,7 @@ async function _humanCanvasClick(e) {
   const x = Math.floor((e.clientX - rect.left) * 64 / c.clientWidth);
   const y = Math.floor((e.clientY - rect.top) * 64 / c.clientHeight);
 
-  if (!_humanStarted) _humanLockPlay();
+  _humanStarted = true;
 
   _humanUndoStack.push({
     grid: _humanGrid ? _humanGrid.map(r => [...r]) : [],
@@ -303,17 +306,19 @@ async function _humanCanvasClick(e) {
   if (data.error) { _humanUndoStack.pop(); _humanStepCount--; alert(data.error); return; }
 
   _humanMoveHistory.push({ step: _humanStepCount, action: 6, x, y, state: data.state, levels: data.levels_completed, grid: data.grid });
-  _humanStepsBuffer.push({
-    step_num: _humanStepCount,
-    action: 6,
-    data: { x, y },
-    grid: data.grid,
-    change_map: data.change_map || null,
-    llm_response: null,
-    timestamp: Date.now() / 1000,
-    levels_completed: data.levels_completed ?? 0,
-    result_state: data.state || 'NOT_FINISHED',
-  });
+  if (_humanRecording) {
+    _humanStepsBuffer.push({
+      step_num: _humanStepCount,
+      action: 6,
+      data: { x, y },
+      grid: data.grid,
+      change_map: data.change_map || null,
+      llm_response: null,
+      timestamp: Date.now() / 1000,
+      levels_completed: data.levels_completed ?? 0,
+      result_state: data.state || 'NOT_FINISHED',
+    });
+  }
 
   // Animate intermediate frames on human canvas
   if (data.frames && data.frames.length > 1) {
@@ -333,7 +338,7 @@ async function _humanCanvasClick(e) {
   if (!_humanAction6Mode) c.style.cursor = 'default';
   _humanRenderGrid(data.grid);
   _humanUpdateTopBar();
-  _humanUpdateRecorder(6, { x, y });
+  if (_humanRecording) _humanUpdateRecorder(6, { x, y });
   _humanUpdateUndoBtn();
   _humanCheckEnd();
 }
@@ -378,8 +383,13 @@ async function _humanGameStep(actionId, actionData) {
 // ── Lock / Unlock ───────────────────────────────────────────────────────
 
 function _humanLockPlay() {
+  _humanRecording = true;
   _humanStarted = true;
   _humanStartTime = Date.now();
+  _humanStepCount = 0;
+  _humanMoveHistory = [];
+  _humanUndoStack = [];
+  _humanStepsBuffer = [];
 
   // Grey out game sidebar
   const sidebar = document.getElementById('humanSidebar');
@@ -392,12 +402,19 @@ function _humanLockPlay() {
     c.style.opacity = '0.5';
   });
 
+  // Swap transport buttons: hide Start Session, show Finish Session
+  const startBtn = document.getElementById('humanStartSessionBtn');
+  const finishBtn = document.getElementById('humanFinishSessionBtn');
+  if (startBtn) startBtn.style.display = 'none';
+  if (finishBtn) finishBtn.style.display = '';
+
   // Start timer
   _humanTimerInterval = setInterval(_humanUpdateTimer, 100);
   _humanUpdateRecorder(null, null); // initial render
 }
 
 function _humanUnlockPlay() {
+  _humanRecording = false;
   _humanStarted = false;
   _humanStartTime = null;
   if (_humanTimerInterval) { clearInterval(_humanTimerInterval); _humanTimerInterval = null; }
@@ -412,6 +429,12 @@ function _humanUnlockPlay() {
     c.style.pointerEvents = '';
     c.style.opacity = '';
   });
+
+  // Swap transport buttons: show Start Session, hide Finish Session
+  const startBtn = document.getElementById('humanStartSessionBtn');
+  const finishBtn = document.getElementById('humanFinishSessionBtn');
+  if (startBtn) startBtn.style.display = '';
+  if (finishBtn) finishBtn.style.display = 'none';
 }
 
 // ── Timer ───────────────────────────────────────────────────────────────
@@ -471,15 +494,9 @@ function _humanUpdateUndoBtn() {
 
 // ── Restart / New Game ──────────────────────────────────────────────────
 
-async function humanRestart() {
-  if (!_humanGameId) return;
-  _humanUnlockPlay();
-  await _humanJumpToLevel(_humanCurrentLevel);
-}
-
 async function humanRestartLevel() {
-  if (!_humanGameId || !_humanStarted) return;
-  if (_humanState.state === 'WIN') return; // already won, no point restarting
+  if (!_humanGameId) return;
+  if (_humanState.state === 'WIN') return;
   try {
     let state;
     if (FEATURES.pyodide_game && _pyodideGameActive) {
@@ -502,14 +519,38 @@ async function humanRestartLevel() {
   }
 }
 
+async function humanStartSession() {
+  if (!_humanGameId || _humanRecording) return;
+  // Reset level to clean state before recording
+  try {
+    let state;
+    if (FEATURES.pyodide_game && _pyodideGameActive) {
+      state = await _sendGameWorkerMsg({ type: 'jump_level', level: _humanCurrentLevel });
+    } else {
+      state = await fetchJSON('/api/start', { game_id: _humanGameId });
+      _humanSessionId = state.session_id;
+    }
+    if (state && !state.error) {
+      _humanState = state;
+      _humanGrid = state.grid;
+      _humanAvailableActions = state.available_actions || [];
+      _humanAction6Mode = _humanAvailableActions.includes(6);
+      _humanRenderGrid(state.grid);
+      _humanUpdateTopBar();
+    }
+  } catch (e) {
+    console.error('[HumanPlay] Start session reset failed:', e);
+  }
+  _humanLockPlay();
+}
+
 function humanFinishSession() {
-  if (_humanStarted) _humanSaveSession();
+  if (_humanRecording) _humanSaveSession();
   humanNewGame();
 }
 
 function humanNewGame() {
-  if (_humanStarted) {
-    // Save the session first
+  if (_humanRecording) {
     _humanSaveSession();
   }
   _humanUnlockPlay();
@@ -595,7 +636,7 @@ function _humanUpdateRecorder(actionId, actionData) {
 function _humanCheckEnd() {
   const st = _humanState.state;
   if (st === 'WIN' || st === 'GAME_OVER') {
-    // Stop timer
+    // Stop timer (only relevant when recording)
     if (_humanTimerInterval) { clearInterval(_humanTimerInterval); _humanTimerInterval = null; }
     _humanUpdateTimer(); // final update
 
@@ -604,8 +645,8 @@ function _humanCheckEnd() {
     statusEl.textContent = st === 'WIN' ? 'WIN' : 'GAME OVER';
     statusEl.className = 'status status-' + st;
 
-    // Save session
-    _humanSaveSession();
+    // Save session only if recording
+    if (_humanRecording) _humanSaveSession();
 
     // Refresh game results
     setTimeout(() => _loadHumanGameResults(), 500);

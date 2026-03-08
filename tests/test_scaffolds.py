@@ -23,8 +23,9 @@ import time
 import traceback
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 import arc_agi
 from arcengine import GameAction, GameState

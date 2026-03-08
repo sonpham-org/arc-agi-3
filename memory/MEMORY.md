@@ -38,6 +38,13 @@
 ## vc33
 
 ## ls20-cb3b57cc
+- ACTION4 appears to be a 'move down' action, moving the player and the target downwards by a fixed amount (e.g., 3 units) if the path is clear.
+- ACTION1 appears to be a 'move up' action, which can be blocked or result in no movement if already at the target or blocked.
+- Targets are White (0) blocks, and collecting one seems to make the next target appear at a relative position.
+- The player (LightGray 1) navigates a maze made of DarkGray (3) paths.
+- Player (1) is at (32, 20). White (0) blocks are at (32, 21) and (32, 22). History coordinates may be inconsistent with RLE.
+- Player is LightGray (1). Collect White (0) blocks. Movement is 1 cell per action.
+- Player is LightGray (1). Goal is likely to collect White (0) and Blue (9) items in sequence or reach a final target. Paths are DarkGray (3).
 - White (0) pixels are mentioned near the player's position, possibly as targets or obstacles.
 - Actions (ACTION1, ACTION2, ACTION3, ACTION4) do not always result in player movement, suggesting movement might be conditional or blocked.
 - ACTION1 can move the player 3 steps down (e.g., from (32,17) to (32,20)).
