@@ -665,37 +665,31 @@ def _turso_sync_session(session_id: str) -> dict:
             (session_id, sync["last_step_num"]),
         ).fetchall()
 
-        new_turns = conn.execute(
-            "SELECT * FROM session_turns WHERE session_id = ? AND turn_num > ? ORDER BY turn_num",
-            (session_id, sync["last_turn_num"]),
-        ).fetchall()
-
-        new_calls = conn.execute(
-            "SELECT * FROM llm_calls WHERE session_id = ? AND id > ? ORDER BY id",
-            (session_id, sync["last_llm_call_id"]),
-        ).fetchall()
-
         conn.close()
     except Exception as e:
         log.warning(f"_turso_sync_session local read failed: {e}")
         return result
 
-    # Build lean payload: strip response_json from calls, skip turns & obs_events
-    lean_calls = []
-    for c in new_calls:
-        cd = dict(c)
-        cd["response_json"] = None  # exclude full response body
-        if cd.get("prompt_preview"):
-            cd["prompt_preview"] = cd["prompt_preview"][:200]
-        if cd.get("response_preview"):
-            cd["response_preview"] = cd["response_preview"][:200]
-        lean_calls.append(cd)
+    if not new_steps:
+        # Session header-only update (result/levels changed but no new steps)
+        payload = {"session": sess, "steps": [], "llm_calls": [], "session_turns": []}
+        _turso_import_session(payload)
+        result["ok"] = True
+        return result
+
+    # Build lean payload: only grid snapshots + action per step, no LLM/change data
+    lean_steps = []
+    for s in new_steps:
+        sd = dict(s)
+        sd["llm_response_json"] = None
+        sd["change_map_json"] = None
+        lean_steps.append(sd)
 
     payload = {
         "session": sess,
-        "steps": [dict(s) for s in new_steps],
-        "llm_calls": lean_calls,
-        "session_turns": [],  # skip turns — share page doesn't use them
+        "steps": lean_steps,
+        "llm_calls": [],
+        "session_turns": [],
     }
 
     if not _turso_import_session(payload):
@@ -703,9 +697,7 @@ def _turso_sync_session(session_id: str) -> dict:
 
     # Update watermarks
     new_last_step = new_steps[-1]["step_num"] if new_steps else sync["last_step_num"]
-    new_last_turn = new_turns[-1]["turn_num"] if new_turns else sync["last_turn_num"]
-    new_last_call = new_calls[-1]["id"] if new_calls else sync["last_llm_call_id"]
-    _update_sync_state(session_id, new_last_step, new_last_turn, new_last_call)
+    _update_sync_state(session_id, new_last_step, sync["last_turn_num"], sync["last_llm_call_id"])
 
     result["ok"] = True
     result["steps"] = len(new_steps)
@@ -720,20 +712,26 @@ def sync_all_to_turso(min_steps=5):
         return
     try:
         conn = _get_db()
+        # Only pick sessions that have new steps beyond their last sync watermark
         rows = conn.execute(
-            "SELECT id FROM sessions WHERE steps >= ?", (min_steps,)
+            """SELECT s.id, s.steps FROM sessions s
+               LEFT JOIN session_sync ss ON s.id = ss.session_id
+               WHERE s.steps >= ?
+                 AND (ss.session_id IS NULL OR s.steps > ss.last_step_num)""",
+            (min_steps,)
         ).fetchall()
         conn.close()
     except Exception as e:
         log.warning(f"sync_all_to_turso: failed to read local sessions: {e}")
         return
     if not rows:
+        log.info("sync_all_to_turso: nothing to sync")
         return
     synced = 0
     for row in rows:
         sid = row["id"] if isinstance(row, sqlite3.Row) else row[0]
         res = _turso_sync_session(sid)
-        if res["ok"] and (res["steps"] or res["turns"] or res["calls"]):
+        if res["ok"]:
             synced += 1
     log.info(f"sync_all_to_turso: synced {synced}/{len(rows)} sessions to Turso")
 
