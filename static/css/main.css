@@ -808,6 +808,47 @@
     color: var(--text);
   }
 
+  /* End-game overlay (below canvas) */
+  .human-end-overlay {
+    text-align: center;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    padding: 10px 0;
+    margin-top: 6px;
+    border-radius: 6px;
+  }
+  .human-end-gameover {
+    color: #f85149;
+    background: #f8514918;
+    border: 2px solid #f85149;
+  }
+  .human-end-win {
+    color: #3fb950;
+    background: #3fb95018;
+    border: 2px solid #3fb950;
+  }
+
+  /* Confetti */
+  #humanConfettiHost {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .confetti-piece {
+    position: absolute;
+    top: -10px;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    animation: confetti-fall linear forwards;
+  }
+  @keyframes confetti-fall {
+    0% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(500px) translateX(var(--drift, 0px)) rotate(720deg); opacity: 0; }
+  }
+
   /* Session recorder sidebar */
   .human-recorder {
     padding: 12px;

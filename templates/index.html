@@ -234,7 +234,11 @@
                 Select a game from the sidebar to start playing.<br>
                 Pick a level on the right, then use the controls below.
               </div>
-              <canvas id="humanCanvas" width="512" height="512" style="display:none;"></canvas>
+              <div style="position:relative;display:inline-block;">
+                <canvas id="humanCanvas" width="512" height="512" style="display:none;"></canvas>
+                <div id="humanConfettiHost"></div>
+              </div>
+              <div id="humanEndOverlay" class="human-end-overlay" style="display:none;"></div>
               <div id="humanControls" style="display:none;">
                 <div class="controls-inner">
                   <button class="btn btn-danger" onclick="humanDoAction(0)">Reset <span class="kbd">R</span></button>

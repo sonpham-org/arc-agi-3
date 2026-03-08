@@ -23,6 +23,7 @@ let _humanAvailableActions = [];
 let _humanLevelCount = 0;      // total levels in game
 let _humanCurrentLevel = 0;    // currently selected level
 let _humanGames = [];          // cached game list
+let _humanLevelStats = [];     // per-level stats: [{ level, startStep, endStep, startTime, endTime }]
 
 const _humanCanvas = () => document.getElementById('humanCanvas');
 const _humanCtx = () => _humanCanvas()?.getContext('2d');
@@ -281,8 +282,10 @@ async function humanDoAction(actionId, isClick, direct = false) {
   }
   delete data.frames;
 
+  const prevLevels = _humanState.levels_completed || 0;
   _humanState = data;
   _humanGrid = data.grid;
+  _humanTrackLevelTransition(prevLevels, data.levels_completed || 0);
   _humanRenderGrid(data.grid);
   _humanUpdateTopBar();
   if (_humanRecording) _humanUpdateRecorder(actionId, {});
@@ -341,11 +344,13 @@ async function _humanCanvasClick(e) {
   }
   delete data.frames;
 
+  const prevLevels = _humanState.levels_completed || 0;
   _humanState = data;
   _humanGrid = data.grid;
   _humanAvailableActions = data.available_actions || [];
   _humanAction6Mode = _humanAvailableActions.includes(6);
   if (!_humanAction6Mode) c.style.cursor = 'default';
+  _humanTrackLevelTransition(prevLevels, data.levels_completed || 0);
   _humanRenderGrid(data.grid);
   _humanUpdateTopBar();
   if (_humanRecording) _humanUpdateRecorder(6, { x, y });
@@ -424,6 +429,13 @@ function _humanLockPlay() {
   if (startBtn) startBtn.style.display = 'none';
   if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.textContent = 'Pause'; pauseBtn.classList.remove('btn-primary'); }
   if (finishBtn) finishBtn.style.display = '';
+
+  // Initialize per-level stats
+  _humanLevelStats = [{ level: 0, startStep: 0, endStep: null, startTime: Date.now(), endTime: null }];
+
+  // Clear any previous end-game overlay
+  const endOverlay = document.getElementById('humanEndOverlay');
+  if (endOverlay) endOverlay.style.display = 'none';
 
   // Start timer
   _humanTimerInterval = setInterval(_humanUpdateTimer, 100);
@@ -621,8 +633,13 @@ function humanNewGame() {
   _humanStepsBuffer = [];
   _humanDuration = 0;
   _humanAction6Mode = false;
+  _humanLevelStats = [];
 
   // Reset UI
+  const endOverlay = document.getElementById('humanEndOverlay');
+  if (endOverlay) endOverlay.style.display = 'none';
+  const confetti = document.getElementById('humanConfettiHost');
+  if (confetti) confetti.innerHTML = '';
   const c = _humanCanvas();
   if (c) { c.style.display = 'none'; c.style.cursor = 'default'; }
   document.getElementById('humanEmptyState').style.display = '';
@@ -703,6 +720,48 @@ function _humanUpdateRecorder(actionId, actionData) {
   }
 }
 
+// ── Level Stats Tracking ─────────────────────────────────────────────────
+
+function _humanTrackLevelTransition(prevLevels, newLevels) {
+  if (newLevels > prevLevels && _humanLevelStats.length > 0) {
+    // Close out the current level
+    const cur = _humanLevelStats[_humanLevelStats.length - 1];
+    cur.endStep = _humanStepCount;
+    cur.endTime = Date.now();
+    // Start the next level
+    _humanLevelStats.push({ level: newLevels, startStep: _humanStepCount, endStep: null, startTime: Date.now(), endTime: null });
+  }
+  // Update the live results view
+  _humanRenderLevelResults();
+}
+
+function _humanRenderLevelResults() {
+  const body = document.getElementById('humanResultsBody');
+  if (!body || !_humanRecording) return;
+
+  if (_humanLevelStats.length === 0) {
+    body.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Start playing to see per-level stats.</div>';
+    return;
+  }
+
+  let html = '<table class="human-results-table"><thead><tr><th>Level</th><th>Steps</th><th>Time</th><th>Status</th></tr></thead><tbody>';
+  for (const ls of _humanLevelStats) {
+    const steps = (ls.endStep !== null ? ls.endStep : _humanStepCount) - ls.startStep;
+    const elapsed = ((ls.endTime !== null ? ls.endTime : Date.now()) - ls.startTime) / 1000;
+    const done = ls.endStep !== null;
+    const statusClass = done ? 'result-win' : '';
+    const statusText = done ? 'Cleared' : 'In Progress';
+    html += `<tr>
+      <td>Level ${ls.level + 1}</td>
+      <td>${steps}</td>
+      <td>${_formatDuration(elapsed)}</td>
+      <td class="${statusClass}">${statusText}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  body.innerHTML = html;
+}
+
 // ── Session End ─────────────────────────────────────────────────────────
 
 function _humanCheckEnd() {
@@ -712,10 +771,36 @@ function _humanCheckEnd() {
     if (_humanTimerInterval) { clearInterval(_humanTimerInterval); _humanTimerInterval = null; }
     _humanUpdateTimer(); // final update
 
+    // Close out the final level stats
+    if (_humanLevelStats.length > 0) {
+      const cur = _humanLevelStats[_humanLevelStats.length - 1];
+      if (cur.endStep === null) {
+        cur.endStep = _humanStepCount;
+        cur.endTime = Date.now();
+      }
+    }
+    _humanRenderLevelResults();
+
     // Show result
     const statusEl = document.getElementById('humanGameStatus');
     statusEl.textContent = st === 'WIN' ? 'WIN' : 'GAME OVER';
     statusEl.className = 'status status-' + st;
+
+    // Show end-game overlay below canvas
+    const overlay = document.getElementById('humanEndOverlay');
+    if (overlay) {
+      if (st === 'WIN') {
+        overlay.textContent = 'YOU WIN!';
+        overlay.className = 'human-end-overlay human-end-win';
+      } else {
+        overlay.textContent = 'GAME OVER';
+        overlay.className = 'human-end-overlay human-end-gameover';
+      }
+      overlay.style.display = 'block';
+    }
+
+    // Confetti on win
+    if (st === 'WIN') _humanFireConfetti();
 
     // Save session only if recording
     if (_humanRecording) _humanSaveSession();
@@ -723,6 +808,29 @@ function _humanCheckEnd() {
     // Refresh game results
     setTimeout(() => _loadHumanGameResults(), 500);
   }
+}
+
+// ── Confetti ─────────────────────────────────────────────────────────────
+
+function _humanFireConfetti() {
+  const container = document.getElementById('humanConfettiHost');
+  if (!container) return;
+  container.innerHTML = '';
+  const colors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff6fff', '#ff9f43', '#54a0ff', '#f368e0'];
+  const count = 80;
+  for (let i = 0; i < count; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.style.left = Math.random() * 100 + '%';
+    piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+    piece.style.animationDelay = (Math.random() * 0.8) + 's';
+    piece.style.animationDuration = (1.5 + Math.random() * 1.5) + 's';
+    // Randomize horizontal drift
+    piece.style.setProperty('--drift', (Math.random() * 200 - 100) + 'px');
+    container.appendChild(piece);
+  }
+  // Clean up after animation
+  setTimeout(() => { container.innerHTML = ''; }, 4000);
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────
@@ -789,6 +897,12 @@ window.addEventListener('beforeunload', () => {
 async function _loadHumanGameResults() {
   const body = document.getElementById('humanResultsBody');
   if (!body) return;
+
+  // During an active recording, show live per-level stats instead
+  if (_humanRecording && _humanLevelStats.length > 0) {
+    _humanRenderLevelResults();
+    return;
+  }
 
   // Collect from localStorage
   let localResults = [];
