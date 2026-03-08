@@ -85,8 +85,8 @@ There are two model registries — `agent.py:MODELS` (CLI agent) and `server.py:
 ### Testing all providers
 
 ```bash
-python test_providers.py          # test all configured providers
-python test_providers.py groq     # test single provider
+python tests/test_providers.py          # test all configured providers
+python tests/test_providers.py groq     # test single provider
 ```
 
 Each test sends one short prompt and validates the response parses as JSON. Total cost: <$0.01 for all paid providers combined.
@@ -236,7 +236,7 @@ After completing any fix or feature, **always**:
 Before every push to staging, run:
 
 ```bash
-python test_providers.py          # all provider API paths work
+python tests/test_providers.py          # all provider API paths work
 python -c "import db; import server; import agent; import batch_runner; print('OK')"  # import check
 python batch_runner.py --games ls20 --concurrency 1 --max-steps 5  # smoke test
 ```

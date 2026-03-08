@@ -11,18 +11,18 @@ from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay
 # --- Grid cell size ---
 CELL = 4  # 4x4 pixels per cell, fits up to 16x16 grids in 64x64
 
-# --- Colors (ARC palette indices) ---
-C_BLACK   = 0   # abyss / fallen tile
-C_DBLUE   = 1   # mortar lines / HUD background
-C_YELLOW  = 4   # teleporter
-C_MID     = 5   # normal floor base
-C_ORANGE  = 7   # key
-C_AZURE   = 8   # player
-C_MAROON  = 9   # cracked tile base
-C_GOLD    = 11  # exit door
-C_RED     = 12  # exit locked indicator
-C_LIME    = 14  # exit open indicator
-C_WHITE   = 15  # sturdy floor
+# --- Colors (ARC-3 palette indices) ---
+C_BLACK   = 5   # abyss / fallen tile
+C_DBLUE   = 4   # mortar lines / HUD background (VeryDarkGray)
+C_YELLOW  = 11  # teleporter
+C_MID     = 2   # normal floor base (Gray)
+C_ORANGE  = 12  # key
+C_AZURE   = 10  # player (LightBlue)
+C_MAROON  = 13  # cracked tile base
+C_GOLD    = 11  # exit door (Yellow)
+C_RED     = 8   # exit locked indicator
+C_LIME    = 14  # exit open indicator (Green)
+C_WHITE   = 0   # sturdy floor
 
 # --- Tile types ---
 T_ABYSS   = 0
@@ -242,10 +242,8 @@ class Cr01Display(RenderableUserDisplay):
     def _draw_tile(self, frame, px, py, ttype):
         """Draw a single tile with texture at pixel position (px, py)."""
         if ttype == T_FLOOR:
-            # Stone brick: gray base with dark blue mortar on right and bottom
+            # Stone brick: solid gray
             frame[py:py + CELL, px:px + CELL] = C_MID
-            frame[py:py + CELL, px + CELL - 1] = C_DBLUE   # right mortar
-            frame[py + CELL - 1, px:px + CELL] = C_DBLUE   # bottom mortar
         elif ttype == T_CRACKED:
             # Damaged stone: maroon base with black zigzag crack
             frame[py:py + CELL, px:px + CELL] = C_MAROON

@@ -30,6 +30,18 @@ from arcengine import GameAction, GameState
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# Model registry and LLM providers extracted to separate modules
+from models import (
+    MODEL_REGISTRY, SYSTEM_MSG, THINKING_BUDGETS,
+    OLLAMA_VRAM, OLLAMA_VISION_MODELS, _discovered_local_models,
+)
+from llm_providers import (
+    _route_model_call, _get_or_create_gemini_cache,
+    _execute_python, _cleanup_tool_session,
+    copilot_auth_lock, _save_copilot_token, PROVIDER_MIN_DELAY,
+)
+import llm_providers
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.logger.setLevel(logging.INFO)
@@ -241,62 +253,13 @@ session_lock = threading.Lock()
 session_step_counts: dict[str, int] = {}  # session_id → server-side step counter
 session_last_llm: dict[str, dict] = {}  # session_id → last LLM response (for DB storage)
 
-# ── Tool execution sessions (Python sandbox per game session) ─────────
-_tool_sessions: dict[str, dict] = {}  # session_id → {namespace: dict, created_at: float}
-_tool_session_lock = threading.Lock()
 
-# ── Gemini context caching ────────────────────────────────────────────
-# Maps (model, content_hash) → {cache_name: str, expires_at: float}
-_gemini_cache_registry: dict[tuple, dict] = {}
-_gemini_cache_lock = threading.Lock()
 
-# ── Copilot auth state ────────────────────────────────────────────────────
-_COPILOT_TOKEN_FILE = Path(__file__).parent / "data" / ".copilot_token"
-
-def _load_copilot_token() -> Optional[str]:
-    """Load persisted Copilot OAuth token from disk."""
-    try:
-        if _COPILOT_TOKEN_FILE.exists():
-            return _COPILOT_TOKEN_FILE.read_text().strip() or None
-    except Exception:
-        pass
-    return None
-
-def _save_copilot_token(token: Optional[str]):
-    """Persist Copilot OAuth token to disk."""
-    try:
-        _COPILOT_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if token:
-            _COPILOT_TOKEN_FILE.write_text(token)
-        elif _COPILOT_TOKEN_FILE.exists():
-            _COPILOT_TOKEN_FILE.unlink()
-    except Exception:
-        pass
-
-copilot_oauth_token: Optional[str] = _load_copilot_token()
-copilot_api_token: Optional[str] = None  # Copilot short-lived API token
-copilot_token_expiry: float = 0.0  # Unix timestamp when copilot_api_token expires
-copilot_device_code: Optional[str] = None  # Pending device code during auth flow
-copilot_auth_lock = threading.Lock()
 
 # ── Custom memory overrides ──────────────────────────────────────────────
 _custom_system_prompt: Optional[str] = None  # overrides ARC_AGI3_DESCRIPTION when set
 _custom_hard_memory: Optional[str] = None    # extra agent memory injected into prompt
 
-# ── Per-provider throttle ────────────────────────────────────────────────
-# Min seconds between calls per provider (tuned for free tiers)
-PROVIDER_MIN_DELAY: dict[str, float] = {
-    "gemini":      4.0,   # 15 req/min free
-    "anthropic":   1.0,   # paid, generous limits
-    "groq":        2.5,   # 30 req/min free (varies by model)
-    "mistral":     2.0,   # ~1-2 req/sec free
-    "huggingface": 6.0,   # ~10 req/min free
-    "cloudflare":  0.5,   # neuron-based, no per-minute limit
-    "copilot":     4.0,   # unknown exact limit, pace it out
-    "ollama":      0.0,   # local, no limit
-}
-_provider_last_call: dict[str, float] = {}  # provider → last call unix time
-_throttle_lock = threading.Lock()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SQLite SESSION PERSISTENCE (extracted to db.py)
@@ -426,271 +389,6 @@ def _load_prompts():
 
 # Prompts are loaded fresh per-request via _load_prompts() in the index route
 
-SYSTEM_MSG = (
-    "You are an expert puzzle-solving AI agent. Analyse game grids and output "
-    "ONLY valid JSON — no markdown, no explanation outside JSON."
-)
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MODEL REGISTRY — capabilities include image/reasoning/tools support
-# ═══════════════════════════════════════════════════════════════════════════
-
-MODEL_REGISTRY: dict[str, dict] = {
-    # ── Gemini ────────────────────────────────────────────────────────────
-    "gemini-3.1-pro": {
-        "provider": "gemini", "api_model": "gemini-3.1-pro-preview",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$2/$12 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "gemini-3-pro": {
-        "provider": "gemini", "api_model": "gemini-3-pro-preview",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$2/$12 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "gemini-3.1-flash-lite": {
-        "provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$0.25/$1.50 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "gemini-3-flash": {
-        "provider": "gemini", "api_model": "gemini-3-flash-preview",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$0.50/$3 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "gemini-2.5-pro": {
-        "provider": "gemini", "api_model": "gemini-2.5-pro",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$1.25/$10 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "gemini-2.5-flash": {
-        "provider": "gemini", "api_model": "gemini-2.5-flash",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$0.30/$2.50 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "gemini-2.5-flash-lite": {
-        "provider": "gemini", "api_model": "gemini-2.5-flash-lite",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$0.10/$0.40 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": False, "tools": False},
-    },
-    "gemini-2.0-flash": {
-        "provider": "gemini", "api_model": "gemini-2.0-flash",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$0.10/$0.40 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": False, "tools": True},
-    },
-    "gemini-2.0-flash-lite": {
-        "provider": "gemini", "api_model": "gemini-2.0-flash-lite",
-        "env_key": "GEMINI_API_KEY",
-        "price": "$0.075/$0.30 per 1M tok",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": False, "tools": False},
-    },
-    # ── Anthropic ─────────────────────────────────────────────────────────
-    "claude-sonnet-4-6": {
-        "provider": "anthropic", "api_model": "claude-sonnet-4-6",
-        "env_key": "ANTHROPIC_API_KEY",
-        "price": "$3/$15 per 1M tok",
-        "context_window": 200000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "claude-sonnet-4-5": {
-        "provider": "anthropic", "api_model": "claude-sonnet-4-5-20241022",
-        "env_key": "ANTHROPIC_API_KEY",
-        "price": "$3/$15 per 1M tok",
-        "context_window": 200000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "claude-haiku-4-5": {
-        "provider": "anthropic", "api_model": "claude-haiku-4-5-20251001",
-        "env_key": "ANTHROPIC_API_KEY",
-        "price": "$0.80/$4 per 1M tok",
-        "context_window": 200000,
-        "capabilities": {"image": True, "reasoning": False, "tools": True},
-    },
-    # ── Groq ──────────────────────────────────────────────────
-    "groq/llama-3.3-70b-versatile": {
-        "provider": "groq", "api_model": "llama-3.3-70b-versatile",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "groq/gemma2-9b-it": {
-        "provider": "groq", "api_model": "gemma2-9b-it",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 8192,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "groq/mixtral-8x7b-32768": {
-        "provider": "groq", "api_model": "mixtral-8x7b-32768",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 32768,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    # ── Mistral ───────────────────────────────────────────────
-    "mistral/mistral-small-latest": {
-        "provider": "mistral", "api_model": "mistral-small-latest",
-        "env_key": "MISTRAL_API_KEY",
-        "url": "https://api.mistral.ai/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "mistral/open-mistral-nemo": {
-        "provider": "mistral", "api_model": "open-mistral-nemo",
-        "env_key": "MISTRAL_API_KEY",
-        "url": "https://api.mistral.ai/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    # ── HuggingFace ───────────────────────────────────────────────────────
-    "hf/qwen2.5-72b-instruct": {
-        "provider": "huggingface", "api_model": "Qwen/Qwen2.5-72B-Instruct",
-        "env_key": "HUGGINGFACE_API_KEY",
-        "url": "https://router.huggingface.co/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "hf/llama-3.1-70b-instruct": {
-        "provider": "huggingface", "api_model": "meta-llama/Llama-3.1-70B-Instruct",
-        "env_key": "HUGGINGFACE_API_KEY",
-        "url": "https://router.huggingface.co/v1/chat/completions",
-        "price": "Free tier",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    # ── Cloudflare Workers AI ────────────────────────────────────────────
-    "cf/llama-3.3-70b-instruct": {
-        "provider": "cloudflare", "api_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "cf/llama-3.1-8b-instruct": {
-        "provider": "cloudflare", "api_model": "@cf/meta/llama-3.1-8b-instruct-fast",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "cf/llama-4-scout-17b": {
-        "provider": "cloudflare", "api_model": "@cf/meta/llama-4-scout-17b-16e-instruct",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "cf/qwen3-30b": {
-        "provider": "cloudflare", "api_model": "@cf/qwen/qwen3-30b-a3b-fp8",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 32768,
-        "capabilities": {"image": False, "reasoning": True, "tools": False},
-    },
-    "cf/qwq-32b": {
-        "provider": "cloudflare", "api_model": "@cf/qwen/qwq-32b",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 32768,
-        "capabilities": {"image": False, "reasoning": True, "tools": False},
-    },
-    "cf/deepseek-r1-distill-32b": {
-        "provider": "cloudflare", "api_model": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 32768,
-        "capabilities": {"image": False, "reasoning": True, "tools": False},
-    },
-    "cf/mistral-small-3.1-24b": {
-        "provider": "cloudflare", "api_model": "@cf/mistralai/mistral-small-3.1-24b-instruct",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 128000,
-        "capabilities": {"image": False, "reasoning": False, "tools": False},
-    },
-    "cf/llama-3.2-11b-vision": {
-        "provider": "cloudflare", "api_model": "@cf/meta/llama-3.2-11b-vision-instruct",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "price": "Free (10k neurons/day)",
-        "context_window": 128000,
-        "capabilities": {"image": True, "reasoning": False, "tools": False},
-    },
-    # ── GitHub Copilot (local only, requires OAuth) ──────────────────────
-    "copilot/gpt-4.1": {
-        "provider": "copilot", "api_model": "gpt-4.1",
-        "env_key": "",  # no env key — auth via OAuth
-        "price": "Free (unlimited)",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": False, "tools": True},
-    },
-    "copilot/gpt-4o": {
-        "provider": "copilot", "api_model": "gpt-4o",
-        "env_key": "",
-        "price": "Free (unlimited)",
-        "context_window": 128000,
-        "capabilities": {"image": True, "reasoning": False, "tools": True},
-    },
-    "copilot/gpt-5-mini": {
-        "provider": "copilot", "api_model": "gpt-5-mini",
-        "env_key": "",
-        "price": "Free (unlimited)",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "copilot/claude-sonnet-4": {
-        "provider": "copilot", "api_model": "claude-sonnet-4",
-        "env_key": "",
-        "price": "Premium (300/mo)",
-        "context_window": 200000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-    "copilot/gemini-2.5-pro": {
-        "provider": "copilot", "api_model": "gemini-2.5-pro",
-        "env_key": "",
-        "price": "Premium (300/mo)",
-        "context_window": 1000000,
-        "capabilities": {"image": True, "reasoning": True, "tools": True},
-    },
-}
-
-# Ollama models discovered at runtime; all support text only by default.
-OLLAMA_VRAM = {
-    "qwen3.5:35b-a3b": "~24GB",
-    "qwen2.5:32b": "~19GB", "qwen2.5:14b": "~9GB", "qwen3-8b:latest": "~5GB",
-    "deepseek-r1:latest": "~5GB", "mistral:7b": "~4.4GB",
-    "llama3.1:latest": "~4.9GB", "llama3:latest": "~4.7GB",
-    "llava:latest": "~5GB",
-}
-
-# Models that support vision via Ollama (llava family)
-OLLAMA_VISION_MODELS = {"llava", "llava:latest", "llava:13b", "bakllava"}
-
-# Runtime dict of discovered local OpenAI-compatible models (populated by /api/llm/models)
-_discovered_local_models: dict = {}
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # GRID HELPERS
@@ -813,151 +511,6 @@ def compute_region_map(grid: list) -> str:
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# TOOL EXECUTION — Python sandbox for Gemini function calling
-# ═══════════════════════════════════════════════════════════════════════════
-
-def _get_tool_declarations():
-    """Return Gemini Tool with a run_python FunctionDeclaration."""
-    from google import genai
-    return genai.types.Tool(function_declarations=[
-        genai.types.FunctionDeclaration(
-            name="run_python",
-            description=(
-                "Execute Python code to analyse the game grid. "
-                "Pre-imported: numpy (as np), collections, itertools. "
-                "Available variables: `grid` (numpy 2D int array of current grid), "
-                "`prev_grid` (numpy 2D int array of previous grid, or None). "
-                "Variables you define persist across calls within the same turn. "
-                "Use print() to return results. "
-                "IMPORTANT: Keep code short and simple — use numpy vectorized ops, "
-                "avoid nested loops over large arrays. Combine analyses into one call "
-                "when possible. You have max 3 tool calls per turn, so be efficient."
-            ),
-            parameters={
-                "type": "OBJECT",
-                "properties": {
-                    "code": {
-                        "type": "STRING",
-                        "description": "Python code to execute. Use print() for output.",
-                    }
-                },
-                "required": ["code"],
-            },
-        ),
-    ])
-
-
-_BLOCKED_MODULES = frozenset({
-    'os', 'sys', 'subprocess', 'shutil', 'pathlib', 'socket', 'http',
-    'urllib', 'requests', 'httpx', 'aiohttp', 'ftplib', 'smtplib',
-    'ctypes', 'multiprocessing', 'signal', 'importlib', 'code', 'codeop',
-    'compileall', 'py_compile', 'zipimport', 'pkgutil', 'pkg_resources',
-})
-
-
-def _safe_import(name, *args, **kwargs):
-    """Restricted __import__ that blocks dangerous modules."""
-    top_level = name.split('.')[0]
-    if top_level in _BLOCKED_MODULES:
-        raise ImportError(f"Module '{name}' is not allowed in the sandbox")
-    return __builtins__['__import__'](name, *args, **kwargs) \
-        if isinstance(__builtins__, dict) \
-        else __import__(name, *args, **kwargs)
-
-
-def _get_or_create_tool_session(session_id: str, grid, prev_grid) -> dict:
-    """Get or create a sandboxed namespace for Python execution."""
-    import numpy as np
-    import collections
-    import itertools
-
-    with _tool_session_lock:
-        sess = _tool_sessions.get(session_id)
-        if sess is None:
-            # Start from real builtins, override dangerous ones
-            if isinstance(__builtins__, dict):
-                safe_builtins = dict(__builtins__)
-            else:
-                safe_builtins = {k: getattr(__builtins__, k) for k in dir(__builtins__)
-                                 if not k.startswith('_')}
-                safe_builtins['__import__'] = __builtins__.__import__
-
-            # Replace/remove dangerous builtins
-            safe_builtins['open'] = None
-            safe_builtins['eval'] = None
-            safe_builtins['exec'] = None
-            safe_builtins['compile'] = None
-            safe_builtins['breakpoint'] = None
-            safe_builtins['exit'] = None
-            safe_builtins['quit'] = None
-            safe_builtins['__import__'] = _safe_import
-
-            ns = {
-                '__builtins__': safe_builtins,
-                'np': np,
-                'numpy': np,
-                'collections': collections,
-                'itertools': itertools,
-                'Counter': collections.Counter,
-                'defaultdict': collections.defaultdict,
-            }
-            sess = {'namespace': ns, 'created_at': time.time()}
-            _tool_sessions[session_id] = sess
-
-    # Always update grid/prev_grid to current values
-    ns = sess['namespace']
-    ns['grid'] = np.array(grid) if grid else np.array([[]])
-    ns['prev_grid'] = np.array(prev_grid) if prev_grid else None
-    return sess
-
-
-def _execute_python(session_id: str, code: str, grid, prev_grid, timeout: float = 5.0) -> str:
-    """Execute Python code in a sandboxed namespace, capturing print output."""
-    sess = _get_or_create_tool_session(session_id, grid, prev_grid)
-    ns = sess['namespace']
-
-    output_buf = io.StringIO()
-    result = [None]  # mutable container for thread result
-    error = [None]
-
-    def _run():
-        import builtins
-        old_print = ns['__builtins__'].get('print', builtins.print) if isinstance(ns['__builtins__'], dict) else builtins.print
-        # Override print to capture to buffer
-        def captured_print(*args, **kwargs):
-            kwargs['file'] = output_buf
-            builtins.print(*args, **kwargs)
-        if isinstance(ns['__builtins__'], dict):
-            ns['__builtins__']['print'] = captured_print
-        try:
-            exec(code, ns)
-        except Exception as e:
-            error[0] = f"{type(e).__name__}: {e}"
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-
-    if t.is_alive():
-        return "[TIMEOUT] Code execution exceeded 5 seconds."
-
-    output = output_buf.getvalue()
-    if error[0]:
-        output = (output + "\n" + error[0]).strip()
-
-    # Truncate long output
-    if len(output) > 4000:
-        output = output[:4000] + "\n... [truncated]"
-
-    return output or "(no output)"
-
-
-def _cleanup_tool_session(session_id: str):
-    """Remove a tool session when the game session is reset/ended."""
-    with _tool_session_lock:
-        _tool_sessions.pop(session_id, None)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SCAFFOLDING — imported from scaffoldings/ package
@@ -971,60 +524,6 @@ from scaffoldings.three_system.handler import (  # noqa: used by agent.py
 
 
 _SCAFFOLDING_PLACEHOLDER = True  # inline code moved to scaffoldings/ package
-# ═══════════════════════════════════════════════════════════════════════════
-# GEMINI CONTEXT CACHING
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Minimum tokens for Gemini caching (API requirement: 32,768 tokens ≈ ~130K chars)
-_GEMINI_CACHE_MIN_CHARS = 130_000
-_GEMINI_CACHE_TTL_MINUTES = 30
-
-
-def _get_or_create_gemini_cache(model: str, static_content: str) -> str | None:
-    """Create/reuse a Gemini cached content object for the static prompt parts.
-
-    Returns the cache name string, or None if content is too small for caching.
-    """
-    if len(static_content) < _GEMINI_CACHE_MIN_CHARS:
-        return None
-
-    content_hash = hashlib.sha256(static_content.encode()).hexdigest()[:16]
-    cache_key = (model, content_hash)
-
-    with _gemini_cache_lock:
-        cached = _gemini_cache_registry.get(cache_key)
-        if cached and time.time() < cached["expires_at"]:
-            return cached["cache_name"]
-
-    # Create a new cache
-    try:
-        from google import genai
-        api_key = os.environ.get("GEMINI_API_KEY", "")
-        client = genai.Client(api_key=api_key)
-
-        cache = client.caches.create(
-            model=model,
-            config=genai.types.CreateCachedContentConfig(
-                contents=[genai.types.Content(
-                    role="user",
-                    parts=[genai.types.Part.from_text(text=static_content)],
-                )],
-                ttl=f"{_GEMINI_CACHE_TTL_MINUTES * 60}s",
-                display_name=f"arc-agi-{content_hash[:8]}",
-            ),
-        )
-
-        with _gemini_cache_lock:
-            _gemini_cache_registry[cache_key] = {
-                "cache_name": cache.name,
-                "expires_at": time.time() + (_GEMINI_CACHE_TTL_MINUTES * 60) - 60,
-            }
-        app.logger.info(f"Created Gemini cache: {cache.name} for model {model}")
-        return cache.name
-    except Exception as e:
-        app.logger.warning(f"Gemini cache creation failed: {e}")
-        return None
-
 
 def _build_prompt_parts(payload: dict, input_settings: dict, tools_mode: str,
                         planning_mode: str = "off") -> tuple[str, str]:
@@ -1284,443 +783,6 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-THINKING_BUDGETS = {
-    "off": 0,
-    "low": 1024,
-    "med": 4096,
-    "high": 8192,
-    "max": 24576,
-}
-
-
-def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
-                  tools_enabled: bool = False, session_id: str | None = None,
-                  grid=None, prev_grid=None,
-                  cached_content_name: str | None = None,
-                  thinking_level: str = "low",
-                  max_tokens: int = 16384) -> dict | str:
-    """Call Gemini API. When tools_enabled, runs a multi-turn function-calling loop.
-
-    Returns dict {"text": str, "tool_calls": list, "usage": dict, "cache_active": bool}
-    when tools_enabled, or plain str when tools are off (backward compat).
-    """
-    from google import genai
-
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    client = genai.Client(api_key=api_key)
-
-    # Build initial contents
-    parts = []
-    if image_b64:
-        image_bytes = base64.b64decode(image_b64)
-        parts.append(genai.types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
-    parts.append(genai.types.Part.from_text(text=f"{SYSTEM_MSG}\n\n{prompt}"))
-    contents = [genai.types.Content(role="user", parts=parts)]
-
-    is_thinking_model = any(x in model_name for x in ("2.5", "3-pro", "3-flash", "3.1"))
-    budget = THINKING_BUDGETS.get(thinking_level, 1024)
-    use_thinking = is_thinking_model and budget > 0
-    config = genai.types.GenerateContentConfig(
-        temperature=0.3,
-        max_output_tokens=max_tokens,
-    )
-    if is_thinking_model:
-        config.thinking_config = genai.types.ThinkingConfig(
-            thinking_budget=budget,
-        )
-    if tools_enabled:
-        config.tools = [_get_tool_declarations()]
-    if cached_content_name:
-        config.cached_content = cached_content_name
-
-    tool_calls_log = []
-    max_rounds = 3
-
-    for round_i in range(max_rounds):
-        # On the last round, remove tools to force a text answer
-        if round_i == max_rounds - 1 and config.tools:
-            config.tools = None
-
-        response = client.models.generate_content(
-            model=model_name, contents=contents, config=config,
-        )
-
-        # Check for MALFORMED_FUNCTION_CALL — model tried to call a tool
-        # but formatted it as a code block instead of a proper function call.
-        # Extract the code and execute it as if it were a run_python call.
-        if response.candidates:
-            fr = getattr(response.candidates[0], 'finish_reason', None)
-            fr_str = str(fr).upper() if fr else ""
-            if "MALFORMED" in fr_str and tools_enabled and session_id:
-                # Try to extract code from the malformed response
-                raw_text = ""
-                try:
-                    raw_text = response.text or ""
-                except Exception:
-                    # content may be empty; try finish_message
-                    fm = getattr(response.candidates[0], 'finish_message', None)
-                    if fm:
-                        raw_text = fm
-                # Extract code from ```python ... ``` blocks
-                import re as _re
-                code_match = _re.search(r'```python\s*\n(.*?)```', raw_text, _re.DOTALL)
-                if code_match:
-                    code = code_match.group(1).strip()
-                    app.logger.info(
-                        f"Recovered code from MALFORMED_FUNCTION_CALL (len={len(code)}), executing as run_python"
-                    )
-                    output = _execute_python(session_id, code, grid, prev_grid)
-                    tool_calls_log.append({
-                        "name": "run_python",
-                        "arguments": {"code": code},
-                        "output": output,
-                    })
-                    # Feed the result back to the model (without tools, to get a text answer)
-                    contents.append(genai.types.Content(
-                        role="model",
-                        parts=[genai.types.Part.from_function_call(
-                            name="run_python", args={"code": code}
-                        )],
-                    ))
-                    contents.append(genai.types.Content(
-                        role="user",
-                        parts=[genai.types.Part.from_function_response(
-                            name="run_python",
-                            response={"result": output},
-                        )],
-                    ))
-                    config.tools = None  # force text answer on next round
-                    continue  # next round
-                else:
-                    app.logger.warning(
-                        "MALFORMED_FUNCTION_CALL but couldn't extract code, retrying without tools"
-                    )
-                    config.tools = None
-                    continue  # retry this round without tools
-
-        # Check for function calls in the response
-        has_function_call = False
-        if response.candidates and response.candidates[0].content:
-            model_parts = response.candidates[0].content.parts or []
-            fn_call_parts = [p for p in model_parts if p.function_call]
-
-            if fn_call_parts and tools_enabled and session_id:
-                has_function_call = True
-                # Append the model's response to contents
-                contents.append(response.candidates[0].content)
-
-                # Execute each function call
-                fn_response_parts = []
-                for part in fn_call_parts:
-                    fc = part.function_call
-                    code = fc.args.get("code", "") if fc.args else ""
-                    app.logger.info(f"Tool call: {fc.name}, code length: {len(code)}")
-
-                    output = _execute_python(session_id, code, grid, prev_grid)
-
-                    tool_calls_log.append({
-                        "name": fc.name,
-                        "arguments": {"code": code},
-                        "output": output,
-                    })
-
-                    fn_response_parts.append(
-                        genai.types.Part.from_function_response(
-                            name=fc.name,
-                            response={"result": output},
-                        )
-                    )
-
-                # Append function responses and continue the loop
-                contents.append(genai.types.Content(
-                    role="user",
-                    parts=fn_response_parts,
-                ))
-                continue  # next round
-
-        # No function call — extract final text and return
-        final_text = response.text if response.text else ""
-
-        # Detect truncation (hit max_output_tokens)
-        truncated = False
-        if response.candidates:
-            fr = getattr(response.candidates[0], 'finish_reason', None)
-            if fr and str(fr).upper() in ("MAX_TOKENS", "2"):
-                truncated = True
-
-        # Extract usage if available
-        usage = {}
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            um = response.usage_metadata
-            usage = {
-                "prompt_tokens": getattr(um, 'prompt_token_count', 0) or 0,
-                "completion_tokens": getattr(um, 'candidates_token_count', 0) or 0,
-                "total_tokens": getattr(um, 'total_token_count', 0) or 0,
-            }
-
-        cache_active = cached_content_name is not None
-        if tools_enabled:
-            return {"text": final_text, "tool_calls": tool_calls_log, "usage": usage,
-                    "cache_active": cache_active, "truncated": truncated}
-        return {"text": final_text, "truncated": truncated} if truncated else final_text
-
-    # Hit max rounds — return what we have
-    final_text = ""
-    try:
-        final_text = response.text or ""
-    except Exception:
-        pass
-    if tools_enabled:
-        return {"text": final_text, "tool_calls": tool_calls_log, "usage": {},
-                "cache_active": cached_content_name is not None}
-    return final_text
-
-
-def _call_anthropic(model_name: str, prompt: str, image_b64: str | None = None, max_tokens: int = 16384) -> str:
-    import httpx
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    content_blocks: list[dict] = []
-    if image_b64:
-        content_blocks.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
-        })
-    content_blocks.append({"type": "text", "text": prompt})
-
-    resp = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": model_name, "system": SYSTEM_MSG,
-            "messages": [{"role": "user", "content": content_blocks}],
-            "temperature": 0.3, "max_tokens": max_tokens,
-        },
-        timeout=90.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    text = data["content"][0]["text"]
-    if data.get("stop_reason") == "max_tokens":
-        return {"text": text, "truncated": True}
-    return text
-
-
-def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
-                             image_b64: str | None = None,
-                             extra_headers: dict | None = None,
-                             max_tokens: int = 16384) -> str:
-    import httpx
-    if image_b64:
-        user_content: list | str = [
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-            {"type": "text", "text": prompt},
-        ]
-    else:
-        user_content = prompt
-
-    messages = [
-        {"role": "system", "content": SYSTEM_MSG},
-        {"role": "user", "content": user_content},
-    ]
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    if extra_headers:
-        headers.update(extra_headers)
-    body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": max_tokens}
-
-    # Retry with exponential backoff on 429 (rate limit) — up to 10 attempts
-    last_exc = None
-    for attempt in range(10):
-        resp = httpx.post(url, headers=headers, json=body, timeout=90.0)
-        if resp.status_code == 429:
-            retry_after = float(resp.headers.get("retry-after", min(10 * (2 ** attempt), 120)))
-            retry_after = min(retry_after, 120)
-            app.logger.info(f"Rate limited by {url}, retrying in {retry_after}s (attempt {attempt+1}/10)")
-            time.sleep(retry_after)
-            last_exc = httpx.HTTPStatusError(
-                f"429 Too Many Requests", request=resp.request, response=resp)
-            continue
-        resp.raise_for_status()
-        data = resp.json()
-        text = data["choices"][0]["message"]["content"]
-        if data["choices"][0].get("finish_reason") == "length":
-            return {"text": text, "truncated": True}
-        return text
-    raise last_exc
-
-
-def _call_cloudflare(model_name: str, prompt: str, image_b64: str | None = None, max_tokens: int = 16384) -> str:
-    import httpx
-    api_key = os.environ.get("CLOUDFLARE_API_KEY", "")
-    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-    if not api_key or not account_id:
-        raise ValueError("CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID must be set")
-
-    messages = [
-        {"role": "system", "content": SYSTEM_MSG},
-        {"role": "user", "content": prompt},
-    ]
-
-    # Llama 3.2 vision supports image via base64 URL in content array
-    if image_b64 and "vision" in model_name:
-        messages[-1] = {
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-                {"type": "text", "text": prompt},
-            ],
-        }
-
-    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model_name}"
-    resp = httpx.post(
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"messages": messages, "temperature": 0.3, "max_tokens": max_tokens},
-        timeout=90.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    result = data.get("result", {})
-    if isinstance(result, str):
-        return result
-    response = result.get("response", "")
-    if isinstance(response, dict):
-        return json.dumps(response)
-    return response or json.dumps(result)
-
-
-def _call_ollama(model_name: str, prompt: str, image_b64: str | None = None) -> str:
-    import ollama
-    messages = [
-        {"role": "system", "content": SYSTEM_MSG},
-        {"role": "user", "content": prompt},
-    ]
-    if image_b64 and model_name.split(":")[0] in OLLAMA_VISION_MODELS:
-        messages[-1]["images"] = [image_b64]
-
-    response = ollama.chat(
-        model=model_name, messages=messages,
-        options={"temperature": 0.3, "num_predict": 2048},
-    )
-    return response["message"]["content"]
-
-
-def _get_copilot_token() -> str:
-    """Get a valid Copilot API token, refreshing if needed."""
-    global copilot_api_token, copilot_token_expiry
-    with copilot_auth_lock:
-        if not copilot_oauth_token:
-            raise ValueError("Copilot not authenticated. Complete the OAuth flow first.")
-        # Refresh if expired or within 5-min safety margin
-        if time.time() > copilot_token_expiry - 300:
-            import httpx
-            resp = httpx.get(
-                "https://api.github.com/copilot_internal/v2/token",
-                headers={"Authorization": f"token {copilot_oauth_token}",
-                         "Accept": "application/json"},
-                timeout=30.0,
-            )
-            if resp.status_code != 200:
-                app.logger.error("Copilot token exchange failed: %s %s", resp.status_code, resp.text)
-                resp.raise_for_status()
-            data = resp.json()
-            app.logger.info("Copilot token exchange OK, keys: %s", list(data.keys()))
-            copilot_api_token = data["token"]
-            copilot_token_expiry = data.get("expires_at", time.time() + 1500)
-        return copilot_api_token
-
-
-def _call_copilot(model_name: str, prompt: str, image_b64: str | None = None) -> str:
-    """Call GitHub Copilot Chat completions endpoint."""
-    token = _get_copilot_token()
-    return _call_openai_compatible(
-        url="https://api.githubcopilot.com/chat/completions",
-        api_key=token,
-        model=model_name,
-        prompt=prompt,
-        image_b64=image_b64,
-        extra_headers={
-            "Copilot-Integration-Id": "vscode-chat",
-            "editor-version": "vscode/1.100.0",
-            "user-agent": "GitHubCopilotChat/0.24.0",
-        },
-    )
-
-
-def _throttle_provider(provider: str):
-    """Sleep if needed to respect per-provider minimum delay."""
-    min_delay = PROVIDER_MIN_DELAY.get(provider, 1.0)
-    if min_delay <= 0:
-        return
-    with _throttle_lock:
-        now = time.time()
-        last = _provider_last_call.get(provider, 0.0)
-        wait = min_delay - (now - last)
-        if wait > 0:
-            app.logger.info(f"Throttling {provider}: waiting {wait:.1f}s")
-            time.sleep(wait)
-        _provider_last_call[provider] = time.time()
-
-
-def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
-                      tools_enabled: bool = False, session_id: str | None = None,
-                      grid=None, prev_grid=None,
-                      cached_content_name: str | None = None,
-                      thinking_level: str = "low",
-                      max_tokens: int = 16384) -> str | dict:
-    """Route to the correct provider, passing image if available.
-
-    Returns dict when Gemini tools are active, str otherwise.
-    """
-    info = MODEL_REGISTRY.get(model_key)
-
-    # If not in registry, check runtime-discovered local models, then try ollama
-    if info is None:
-        if model_key in _discovered_local_models:
-            local_info = _discovered_local_models[model_key]
-            port = local_info["local_port"]
-            api_model = local_info.get("api_model", model_key)
-            url = f"http://localhost:{port}/v1/chat/completions"
-            return _call_openai_compatible(url, "no-key-needed", api_model, prompt, image_b64, max_tokens=max_tokens)
-        return _call_ollama(model_key, prompt, image_b64)
-
-    provider = info["provider"]
-    api_model = info["api_model"]
-
-    # Respect per-provider rate limits
-    _throttle_provider(provider)
-
-    # Only pass image if model supports it
-    img = image_b64 if info.get("capabilities", {}).get("image") else None
-
-    if provider == "gemini":
-        return _call_gemini(api_model, prompt, img,
-                            tools_enabled=tools_enabled,
-                            session_id=session_id,
-                            grid=grid, prev_grid=prev_grid,
-                            cached_content_name=cached_content_name,
-                            thinking_level=thinking_level,
-                            max_tokens=max_tokens)
-    if provider == "anthropic":
-        return _call_anthropic(api_model, prompt, img, max_tokens=max_tokens)
-    if provider == "cloudflare":
-        return _call_cloudflare(api_model, prompt, img, max_tokens=max_tokens)
-    if provider == "copilot":
-        return _call_copilot(api_model, prompt, img)
-    if provider == "ollama":
-        return _call_ollama(api_model, prompt, img)
-
-    # OpenAI-compatible (Groq, Mistral, HuggingFace) — no image for these
-    api_key = os.environ.get(info.get("env_key", ""), "")
-    url = info.get("url", "")
-    return _call_openai_compatible(url, api_key, api_model, prompt, None, max_tokens=max_tokens)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# ROUTES
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.after_request
@@ -2170,7 +1232,7 @@ def llm_models():
         if provider == "copilot":
             if not feature_enabled("copilot"):
                 continue
-            available = copilot_oauth_token is not None
+            available = llm_providers.copilot_oauth_token is not None
         elif mode == "prod":
             # In prod mode, all server providers shown but marked unavailable
             # (user provides their own key via BYOK)
@@ -2373,7 +1435,6 @@ COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 def copilot_auth_start():
     if not feature_enabled("copilot"):
         return jsonify({"error": "Copilot not available in this mode"}), 403
-    global copilot_device_code
     import httpx
     try:
         resp = httpx.post(
@@ -2385,7 +1446,7 @@ def copilot_auth_start():
         resp.raise_for_status()
         data = resp.json()
         with copilot_auth_lock:
-            copilot_device_code = data.get("device_code")
+            llm_providers.copilot_device_code = data.get("device_code")
         return jsonify({
             "user_code": data.get("user_code"),
             "verification_uri": data.get("verification_uri"),
@@ -2402,10 +1463,9 @@ def copilot_auth_start():
 def copilot_auth_poll():
     if not feature_enabled("copilot"):
         return jsonify({"error": "Copilot not available in this mode"}), 403
-    global copilot_oauth_token, copilot_device_code
     import httpx
     with copilot_auth_lock:
-        dc = copilot_device_code
+        dc = llm_providers.copilot_device_code
     if not dc:
         return jsonify({"error": "No pending auth. Call /api/copilot/auth/start first."}), 400
     try:
@@ -2423,9 +1483,9 @@ def copilot_auth_poll():
         data = resp.json()
         if "access_token" in data:
             with copilot_auth_lock:
-                copilot_oauth_token = data["access_token"]
-                copilot_device_code = None
-            _save_copilot_token(copilot_oauth_token)
+                llm_providers.copilot_oauth_token = data["access_token"]
+                llm_providers.copilot_device_code = None
+            _save_copilot_token(llm_providers.copilot_oauth_token)
             return jsonify({"status": "authenticated"})
         elif data.get("error") == "authorization_pending":
             return jsonify({"status": "pending"})
@@ -2444,8 +1504,8 @@ def copilot_auth_status():
     if not feature_enabled("copilot"):
         return jsonify({"available": False, "reason": "online_mode"})
     with copilot_auth_lock:
-        authenticated = copilot_oauth_token is not None
-        pending = copilot_device_code is not None
+        authenticated = llm_providers.copilot_oauth_token is not None
+        pending = llm_providers.copilot_device_code is not None
     return jsonify({
         "available": True,
         "authenticated": authenticated,

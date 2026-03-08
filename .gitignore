@@ -17,11 +17,16 @@ build/
 .DS_Store
 Thumbs.db
 
+# Node
+node_modules/
+
 # Data (sessions DB)
 data/
 db/
 *.db
 *.db-*
+turso_*.db*
+arc_agi*.db
 
 # Claude
 .claude/

@@ -271,9 +271,10 @@
               </div>
               <!-- Transport: Undo + New Game -->
               <div class="transport-strip human-transport" id="humanTransport" style="display:none;">
-                <div class="transport-bar" style="justify-content:center;">
+                <div class="transport-bar" style="justify-content:center;gap:8px;">
                   <button class="btn" onclick="humanRestartLevel()" style="flex:none;padding:6px 20px;">Restart Level</button>
-                  <button class="btn btn-danger" onclick="humanFinishSession()" style="flex:none;padding:6px 32px;">Finish Session</button>
+                  <button class="btn btn-primary" id="humanStartSessionBtn" onclick="humanStartSession()" style="flex:none;padding:6px 24px;">Start Session</button>
+                  <button class="btn btn-danger" id="humanFinishSessionBtn" onclick="humanFinishSession()" style="flex:none;padding:6px 24px;display:none;">Finish Session</button>
                 </div>
               </div>
             </div>
