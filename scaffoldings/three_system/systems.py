@@ -189,14 +189,12 @@ class PlannerSystem:
                     ctx.session_id, "planner", model_key,
                     step_num=ctx.step_num,
                     turn_num=ctx.current_turn_num,
-                    prompt_preview=prompt[:500],
-                    prompt_length=len(prompt),
-                    response_preview=(raw or "")[:1000],
+                    input_json=prompt[:500],
+                    output_json=(raw or "")[:1000],
                     input_tokens=llm_result.input_tokens,
                     output_tokens=llm_result.output_tokens,
                     duration_ms=llm_result.duration_ms,
                     error=llm_result.error,
-                    attempt=llm_result.attempt,
                 )
 
             print(f"    [planner] turn {turn}/{max_turns} ({elapsed:.1f}s)")
@@ -410,14 +408,12 @@ class MonitorSystem:
                 ctx.session_id, "monitor", model_key,
                 step_num=ctx.step_num,
                 turn_num=ctx.current_turn_num,
-                prompt_preview=prompt[:500],
-                prompt_length=len(prompt),
-                response_preview=(raw or "")[:1000],
+                input_json=prompt[:500],
+                output_json=(raw or "")[:1000],
                 input_tokens=llm_result.input_tokens,
                 output_tokens=llm_result.output_tokens,
                 duration_ms=llm_result.duration_ms,
                 error=llm_result.error,
-                attempt=llm_result.attempt,
             )
 
         if not raw:
@@ -486,14 +482,12 @@ class WorldModelSystem:
                     ctx.session_id, "world_model", model_key,
                     step_num=ctx.step_num,
                     turn_num=ctx.current_turn_num,
-                    prompt_preview=prompt[:500],
-                    prompt_length=len(prompt),
-                    response_preview=(raw or "")[:1000],
+                    input_json=prompt[:500],
+                    output_json=(raw or "")[:1000],
                     input_tokens=llm_result.input_tokens,
                     output_tokens=llm_result.output_tokens,
                     duration_ms=llm_result.duration_ms,
                     error=llm_result.error,
-                    attempt=llm_result.attempt,
                 )
 
             print(f"    [world_model] turn {turn}/{max_turns} ({elapsed:.1f}s)")
@@ -584,14 +578,12 @@ If uncertain, say "uncertain — <best guess>". Keep each prediction under 100 c
                 ctx.session_id, "simulate", model_key,
                 step_num=ctx.step_num,
                 turn_num=ctx.current_turn_num,
-                prompt_preview=prompt[:500],
-                prompt_length=len(prompt),
-                response_preview=(raw or "")[:1000],
+                input_json=prompt[:500],
+                output_json=(raw or "")[:1000],
                 input_tokens=llm_result.input_tokens,
                 output_tokens=llm_result.output_tokens,
                 duration_ms=llm_result.duration_ms,
                 error=llm_result.error,
-                attempt=llm_result.attempt,
             )
 
         if not raw:

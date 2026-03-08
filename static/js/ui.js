@@ -1019,7 +1019,7 @@ async function checkInterrupt(expected, grid, changeMap) {
     const _intDur = Math.round(performance.now() - _intStart);
     const _intSs = getActiveSession();
     if (_intSs && _intSs.timelineEvents) {
-      _intSs.timelineEvents.push({ type: 'interrupt', call_type: 'interrupt', duration: _intDur, turn: _intSs.llmCallCount, response_preview: rawResult });
+      _intSs.timelineEvents.push({ type: 'interrupt', agent_type: 'interrupt', duration: _intDur, turn: _intSs.llmCallCount, response_preview: rawResult });
       emitObsEvent(_intSs, { event: 'interrupt', agent: 'interrupt', duration_ms: _intDur, summary: (rawResult || '').slice(0, 200) });
     }
     if (_intResult !== undefined) return _intResult;
@@ -1091,7 +1091,7 @@ Progress: Level ${_ss.currentState.levels_completed || 0}/${_ss.currentState.win
       const _compactDur = Math.round(performance.now() - _compactStart);
       const _tlTarget = ss || getActiveSession();
       if (_tlTarget && _tlTarget.timelineEvents) {
-        _tlTarget.timelineEvents.push({ type: 'compact', call_type: 'compact', duration: _compactDur, turn: _ss.llmCallCount, response_preview: (summary || '').slice(0, 500) });
+        _tlTarget.timelineEvents.push({ type: 'compact', agent_type: 'compact', duration: _compactDur, turn: _ss.llmCallCount, response_preview: (summary || '').slice(0, 500) });
         emitObsEvent(_tlTarget, { event: 'compact', agent: 'compact', duration_ms: _compactDur, summary: (summary || '').slice(0, 200) });
       }
       _ss._cachedCompactSummary = `## COMPACT CONTEXT (LLM-summarized game knowledge)\n${summary}`;

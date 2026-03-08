@@ -1148,14 +1148,12 @@ def play_game(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 session_id, "executor", model_key,
                 step_num=step_num + 1,
                 turn_num=turn_num,
-                prompt_preview=prompt[:500],
-                prompt_length=len(prompt),
-                response_preview=(raw or "")[:1000],
+                input_json=prompt[:500],
+                output_json=(raw or "")[:1000],
                 input_tokens=llm_result.input_tokens,
                 output_tokens=llm_result.output_tokens,
                 duration_ms=llm_result.duration_ms,
                 error=llm_result.error,
-                attempt=llm_result.attempt,
             )
 
         parsed = _parse_json(raw) if raw else None

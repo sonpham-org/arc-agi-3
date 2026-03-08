@@ -135,11 +135,9 @@ def ts_run_wm_update(ss: dict, context: dict, settings: dict, session_id: str,
 
         log_llm_call(
             session_id, "ts_world_model", wm_model,
-            prompt_preview=prompt[:500], prompt_length=len(prompt),
-            response_preview=raw[:1000],
-            response_json={"raw": raw},
+            input_json=prompt[:500],
+            output_json=raw[:1000],
             duration_ms=dur_ms,
-            thinking_level=wm_thinking,
         )
 
         parsed = extract_json(raw)
@@ -276,11 +274,9 @@ If uncertain, say "uncertain — <best guess>". Keep each prediction under 100 c
 
     log_llm_call(
         session_id, "ts_simulate", wm_model,
-        prompt_preview=prompt[:500], prompt_length=len(prompt),
-        response_preview=raw[:500],
-        response_json={"raw": raw},
+        input_json=prompt[:500],
+        output_json=raw[:500],
         duration_ms=dur_ms,
-        thinking_level=wm_thinking,
     )
 
     parsed = extract_json(raw)
@@ -452,11 +448,9 @@ def handle_three_system_scaffolding(payload: dict, settings: dict, *,
 
         log_llm_call(
             session_id, "ts_planner", planner_model,
-            prompt_preview=prompt[:500], prompt_length=len(prompt),
-            response_preview=raw[:1000],
-            response_json={"raw": raw},
+            input_json=prompt[:500],
+            output_json=raw[:1000],
             duration_ms=dur_ms,
-            thinking_level=planner_thinking,
         )
 
         parsed = extract_json(raw)

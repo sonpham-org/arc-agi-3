@@ -67,8 +67,8 @@ def orchestrator_decide(
     if session_id:
         _log_llm_call(
             session_id, "orchestrator", model,
-            prompt_preview=prompt[:2000],
-            response_preview=(result.text or "")[:2000],
+            input_json=prompt[:2000],
+            output_json=(result.text or "")[:2000],
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             duration_ms=result.duration_ms,

@@ -80,8 +80,8 @@ def create_rlm_repl(session_id: str, context: dict, model_key: str,
             log_llm_call(
                 repl_state['session_id'], "rlm_sub", _model,
                 parent_call_id=repl_state.get('parent_call_id'),
-                prompt_preview=prompt[:500], prompt_length=len(prompt),
-                response_preview=text[:1000] if text else None,
+                input_json=prompt[:500],
+                output_json=text[:1000] if text else None,
                 duration_ms=dur,
             )
             return text

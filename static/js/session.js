@@ -1097,26 +1097,14 @@ async function resumeSession(sid) {
         break;
       }
     }
-    // Fallback: detect scaffolding from timeline event types
-    if (_resumeScaffolding === 'linear' && data.timeline) {
-      const tlTypes = new Set(data.timeline.map(e => e.type));
-      if (tlTypes.has('as_orch_start')) _resumeScaffolding = 'agent_spawn';
-      else if (tlTypes.has('planner_call') || tlTypes.has('monitor_call')) _resumeScaffolding = 'three_system';
-      else if (tlTypes.has('rlm_iter')) _resumeScaffolding = 'rlm';
-    }
-    // Switch scaffolding UI to match session's scaffolding
+    // Switch scaffolding UI to match session's scaffolding (if it's a known type)
     if (SCAFFOLDING_SCHEMAS[_resumeScaffolding] && _resumeScaffolding !== activeScaffoldingType) {
       switchScaffolding(_resumeScaffolding);
     }
-    // Set model select to match session's model (after scaffolding switch ensures correct selects exist)
+    // Set model select to match session's model
     if (_resumeModel) {
       await loadModels();
-      const _modelSelId = _resumeScaffolding === 'rlm' ? 'sf_rlm_modelSelect'
-        : _resumeScaffolding === 'three_system' ? 'sf_ts_plannerModelSelect'
-        : _resumeScaffolding === 'two_system' ? 'sf_2s_plannerModelSelect'
-        : _resumeScaffolding === 'agent_spawn' ? 'sf_as_orchestratorModelSelect'
-        : 'modelSelect';
-      const _msel = document.getElementById(_modelSelId);
+      const _msel = document.getElementById('modelSelect');
       if (_msel && [..._msel.options].some(o => o.value === _resumeModel)) {
         _msel.value = _resumeModel;
       }

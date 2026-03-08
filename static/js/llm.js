@@ -199,26 +199,14 @@ function _tlEsc(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 function _tlFormatCost(c) { return c > 0 ? '$' + c.toFixed(4) : ''; }
 
 function _tlCallTypeLabel(ev) {
-  if (ev.call_type === 'executor' || ev.type === 'reasoning') return ev.model || 'Reasoning';
-  if (ev.call_type === 'compact' || ev.type === 'compact') return 'Compact';
-  if (ev.call_type === 'interrupt' || ev.type === 'interrupt') return 'Interrupt';
-  if (ev.call_type === 'rlm_main') return 'RLM ' + (ev.model || '');
-  if (ev.call_type === 'rlm_sub') return 'RLM Sub';
-  if (ev.call_type === 'ts_planner') return 'Planner ' + (ev.model || '');
-  if (ev.call_type === 'ts_monitor') return 'Monitor';
-  if (ev.call_type === 'ts_world_model') return 'World Model';
-  if (ev.call_type === 'ts_simulate') return 'WM Simulate';
-  const t = ev.call_type || ev.type || 'reasoning';
-  return t.charAt(0).toUpperCase() + t.slice(1);
+  const aType = ev.agent_type || ev.call_type || ev.type || 'executor';
+  return agentLabel(aType, ev.model);
 }
 
 function _tlCssClass(ev) {
-  const t = ev.call_type || ev.type || 'reasoning';
-  if (t === 'executor') return 'reasoning';
-  if (t === 'rlm_main' || t === 'rlm_sub') return t;
-  if (t === 'ts_planner' || t === 'ts_monitor' || t === 'ts_world_model') return t;
-  if (t === 'ts_simulate') return 'ts_world_model';
-  return t;
+  const t = ev.agent_type || ev.call_type || ev.type || 'reasoning';
+  // Normalize to a safe CSS class
+  return t.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 function _tlBuildDetail(ev, idx) {
@@ -231,10 +219,6 @@ function _tlBuildDetail(ev, idx) {
   html += `<div class="tl-meta">`;
   if (totalTok > 0) html += `<span class="tl-tokens">${inTok.toLocaleString()} in + ${outTok.toLocaleString()} out = ${totalTok.toLocaleString()} tok</span>`;
   if (cost > 0) html += `<span class="tl-cost">${_tlFormatCost(cost)}</span>`;
-  if (promptLen > 0) html += `<span>Prompt: ${(promptLen/1000).toFixed(1)}K chars</span>`;
-  if (ev.thinking_level) html += `<span>Think: ${ev.thinking_level}</span>`;
-  if (ev.cache_active) html += `<span>Cached</span>`;
-  if (ev.attempt > 0) html += `<span>Retry #${ev.attempt}</span>`;
   if (ev.error) html += `<span style="color:var(--red)">Error: ${_tlEsc(ev.error)}</span>`;
   html += `</div>`;
   // Response preview
@@ -261,16 +245,7 @@ function _tlToggleDetail(idx) {
 }
 
 // ── Agent Spawn Tree Timeline (SVG) ──────────────────────────────────────
-const _AS_COLORS = {
-  orchestrator: '#bc8cff', explorer: '#3fb950', theorist: '#39c5cf',
-  tester: '#d29922', solver: '#58a6ff',
-};
-const _AS_LABELS = {
-  as_orch_start: 'Orchestrator Start', as_orch_think: 'Think',
-  as_orch_delegate: 'Delegate', as_orch_end: 'Orchestrator End',
-  as_sub_start: 'Subagent Start', as_sub_tool: 'Tool Call',
-  as_sub_act: 'Action', as_sub_report: 'Report',
-};
+// Colors and labels now auto-assigned via reasoning.js agentColor()/agentLabel()
 
 let _asZoom = 1.0, _asPanX = 0, _asPanY = 0;
 let _asDragging = false, _asDragStart = { x: 0, y: 0, panX: 0, panY: 0 };
@@ -292,26 +267,26 @@ function renderTimelineTree(container, asEvents, allEvents) {
     const h = Math.max(MIN_H, Math.min(MAX_H, (ev.duration_ms || 500) / 100));
 
     if (ev.type === 'as_orch_start') {
-      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h: MIN_H, shape: 'rect', color: _AS_COLORS.orchestrator, trunk: true });
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h: MIN_H, shape: 'rect', color: agentColor('orchestrator'), trunk: true });
       y += MIN_H + 4;
     } else if (ev.type === 'as_orch_think') {
-      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h, shape: 'diamond', color: _AS_COLORS.orchestrator, trunk: true });
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h, shape: 'diamond', color: agentColor('orchestrator'), trunk: true });
       y += h + 4;
     } else if (ev.type === 'as_orch_delegate') {
       const col = branchCol++;
       const branchX = TRUNK_X + TRUNK_W + BRANCH_GAP + col * BRANCH_COL_W;
-      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h, shape: 'branch_dot', color: _AS_COLORS[ev.agent_type] || _AS_COLORS.orchestrator, trunk: true, branchX, branchCol: col });
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h, shape: 'branch_dot', color: agentColor(ev.agent_type) || agentColor('orchestrator'), trunk: true, branchX, branchCol: col });
       activeBranches.push({ agent_type: ev.agent_type, turn: ev.turn, col, startY: y, x: branchX, nodes: [] });
       y += h + 4;
     } else if (ev.type === 'as_sub_start') {
       const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
       if (branch) {
-        branch.nodes.push({ ...ev, idx: i, shape: 'rect', color: _AS_COLORS[ev.agent_type] || '#888', h: MIN_H });
+        branch.nodes.push({ ...ev, idx: i, shape: 'rect', color: agentColor(ev.agent_type) || '#888', h: MIN_H });
       }
     } else if (ev.type === 'as_sub_tool') {
       const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
       if (branch) {
-        branch.nodes.push({ ...ev, idx: i, shape: 'square', color: _AS_COLORS[ev.agent_type] || '#888', h: 20 });
+        branch.nodes.push({ ...ev, idx: i, shape: 'square', color: agentColor(ev.agent_type) || '#888', h: 20 });
       }
     } else if (ev.type === 'as_sub_act') {
       const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
@@ -321,10 +296,10 @@ function renderTimelineTree(container, asEvents, allEvents) {
     } else if (ev.type === 'as_sub_report') {
       const branch = activeBranches.find(b => b.agent_type === ev.agent_type && b.turn === ev.turn);
       if (branch) {
-        branch.nodes.push({ ...ev, idx: i, shape: 'rect', color: _AS_COLORS[ev.agent_type] || '#888', h: MIN_H });
+        branch.nodes.push({ ...ev, idx: i, shape: 'rect', color: agentColor(ev.agent_type) || '#888', h: MIN_H });
       }
     } else if (ev.type === 'as_orch_end') {
-      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h: MIN_H, shape: 'rect', color: _AS_COLORS.orchestrator, trunk: true });
+      nodes.push({ ...ev, idx: i, x: TRUNK_X, y, h: MIN_H, shape: 'rect', color: agentColor('orchestrator'), trunk: true });
       y += MIN_H + 4;
     }
   }
@@ -349,8 +324,8 @@ function renderTimelineTree(container, asEvents, allEvents) {
   // Orchestrator trunk line
   const trunkTop = PAD_TOP;
   const trunkBot = y;
-  svg += `<rect x="${TRUNK_X}" y="${trunkTop}" width="${TRUNK_W}" height="${trunkBot - trunkTop}" fill="${_AS_COLORS.orchestrator}" opacity="0.15" rx="4"/>`;
-  svg += `<line x1="${TRUNK_X + TRUNK_W / 2}" y1="${trunkTop}" x2="${TRUNK_X + TRUNK_W / 2}" y2="${trunkBot}" stroke="${_AS_COLORS.orchestrator}" stroke-width="2" opacity="0.4"/>`;
+  svg += `<rect x="${TRUNK_X}" y="${trunkTop}" width="${TRUNK_W}" height="${trunkBot - trunkTop}" fill="${agentColor('orchestrator')}" opacity="0.15" rx="4"/>`;
+  svg += `<line x1="${TRUNK_X + TRUNK_W / 2}" y1="${trunkTop}" x2="${TRUNK_X + TRUNK_W / 2}" y2="${trunkBot}" stroke="${agentColor('orchestrator')}" stroke-width="2" opacity="0.4"/>`;
 
   // Trunk nodes
   for (const n of nodes) {
@@ -379,7 +354,7 @@ function renderTimelineTree(container, asEvents, allEvents) {
     const bTop = branch.startY;
     const bBot = branch.endY || bTop + 30;
     // Branch background bar
-    const bColor = _AS_COLORS[branch.agent_type] || '#888';
+    const bColor = agentColor(branch.agent_type);
     svg += `<rect x="${bx}" y="${bTop}" width="${BRANCH_W}" height="${bBot - bTop}" fill="${bColor}" opacity="0.1" rx="3"/>`;
     svg += `<line x1="${bx + BRANCH_W / 2}" y1="${bTop}" x2="${bx + BRANCH_W / 2}" y2="${bBot}" stroke="${bColor}" stroke-width="1.5" opacity="0.3"/>`;
 
@@ -415,11 +390,9 @@ function renderTimelineTree(container, asEvents, allEvents) {
       ${svg}
       <div class="as-tooltip" id="asTooltip"></div>
       <div class="as-legend">
-        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.orchestrator}"></div>Orch</div>
-        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.explorer}"></div>Explorer</div>
-        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.theorist}"></div>Theorist</div>
-        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.tester}"></div>Tester</div>
-        <div class="as-legend-item"><div class="as-legend-swatch" style="background:${_AS_COLORS.solver}"></div>Solver</div>
+        ${[...new Set(asEvents.map(e => e.agent_type).filter(Boolean))].map(at =>
+          `<div class="as-legend-item"><div class="as-legend-swatch" style="background:${agentColor(at)}"></div>${agentLabel(at)}</div>`
+        ).join('')}
       </div>
     </div>`;
 
@@ -489,7 +462,7 @@ function renderTimelineTree(container, asEvents, allEvents) {
     const idx = parseInt(el.getAttribute('data-event-idx'));
     const ev = asEvents[idx];
     if (!ev) return;
-    let html = `<div class="as-tt-title">${_tlEsc(_AS_LABELS[ev.type] || ev.type)}</div>`;
+    let html = `<div class="as-tt-title">${_tlEsc(agentLabel(ev.agent_type || ev.type))}</div>`;
     html += `<div class="as-tt-meta">`;
     if (ev.agent_type) html += `<span>Agent: ${_tlEsc(ev.agent_type)}</span> `;
     if (ev.duration_ms) html += `<span>${(ev.duration_ms / 1000).toFixed(1)}s</span>`;
@@ -816,8 +789,17 @@ function getLastReasoningEntry() {
   return entries.length ? entries[entries.length - 1] : null;
 }
 
-// ── Shared reasoning group renderer (identical copy in share.html) ────
-function buildReasoningGroupHTML(g, gi, options) {
+// buildReasoningGroupHTML is now defined in reasoning.js (loaded before this file)
+
+// Legacy scaffolding-specific renderer removed — unified version in reasoning.js handles all cases.
+// Keeping this block as a marker. The function below is a no-op fallback.
+if (typeof buildReasoningGroupHTML === 'undefined') {
+  // Should never happen — reasoning.js must load first
+  console.error('reasoning.js not loaded before llm.js!');
+}
+
+/* --- REMOVED: old scaffolding-specific buildReasoningGroupHTML ---
+function _OLD_buildReasoningGroupHTML(g, gi, options) {
   const showBranchBtn = options.showBranchBtn || false;
   const isRestored = options.isRestored || false;
   const isParent = options.isParent || false;
@@ -1089,6 +1071,7 @@ function buildReasoningGroupHTML(g, gi, options) {
       + '</div>';
   }
 }
+--- END REMOVED */
 
 async function askLLM(ss) {
   // ss = SessionState to operate on (optional, falls back to globals for backward compat)
@@ -1372,15 +1355,15 @@ async function askLLM(ss) {
       const _tlPlan = resp.parsed?.plan && Array.isArray(resp.parsed.plan) ? resp.parsed.plan : (resp.parsed ? [{ action: resp.parsed.action }] : []);
       const _tlActions = _tlPlan.map(p => p.action);
       _callSession.timelineEvents.push({
-        type: 'reasoning', call_type: 'executor', duration: resp.call_duration_ms,
+        type: 'reasoning', agent_type: resp.agent_type || 'executor',
+        duration: resp.call_duration_ms,
         turn: _cur.llmCallCount, model: resp.model || model,
         stepStart: _cur.stepCount + 1, actions: _tlActions,
         call_id: resp.call_id, input_tokens: resp.usage?.prompt_tokens || 0,
         output_tokens: resp.usage?.candidates_tokens || 0,
-        cost: resp.cost || 0, prompt_length: resp.prompt_length || 0,
-        thinking_level: resp.thinking_level, cache_active: resp.cache_active,
+        cost: resp.cost || 0,
         response_preview: (resp.raw || '').slice(0, 1000),
-        error: resp.error, attempt: resp.retries || 0,
+        error: resp.error,
       });
       if (isActive()) renderTimeline(_callSession);
       // Emit obs event

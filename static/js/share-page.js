@@ -37,21 +37,15 @@ function switchTab(tab) {
 }
 
 // ── Timeline rendering for share page ─────────────────────────────────
+// Labels and colors now provided by reasoning.js (loaded before this file)
 function _stlCssClass(ev) {
-  const t = ev.call_type || ev.type || 'reasoning';
-  if (t === 'executor') return 'reasoning';
-  if (t === 'rlm_main' || t === 'rlm_sub') return t;
-  return t;
+  const t = ev.agent_type || ev.call_type || ev.type || 'reasoning';
+  return t.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 function _stlLabel(ev) {
-  if (ev.call_type === 'executor' || ev.type === 'reasoning') return ev.model || 'Reasoning';
-  if (ev.call_type === 'compact' || ev.type === 'compact') return 'Compact';
-  if (ev.call_type === 'interrupt' || ev.type === 'interrupt') return 'Interrupt';
-  if (ev.call_type === 'rlm_main') return 'RLM ' + (ev.model || '');
-  if (ev.call_type === 'rlm_sub') return 'RLM Sub';
-  const t = ev.call_type || ev.type || 'reasoning';
-  return t.charAt(0).toUpperCase() + t.slice(1);
+  const aType = ev.agent_type || ev.call_type || ev.type || 'executor';
+  return agentLabel(aType, ev.model);
 }
 
 function _stlFormatCost(c) { return c > 0 ? '$' + c.toFixed(4) : ''; }
@@ -102,10 +96,11 @@ function renderShareTimeline() {
     // Group call log entries by a pseudo-turn (executor calls increment turn)
     let turnNum = 0;
     for (const c of CALL_LOG) {
-      if (c.call_type === 'executor' || c.call_type === 'rlm_main') turnNum++;
+      const cType = c.agent_type || c.call_type || '';
+      if (cType === 'executor' || cType.includes('main') || cType.includes('planner')) turnNum++;
       callLogEvents.push({
         ...c,
-        type: c.call_type === 'executor' ? 'reasoning' : c.call_type,
+        type: c.agent_type || c.call_type || 'reasoning',
         duration: c.duration_ms || 0,
         turn: turnNum || 1,
       });
@@ -403,8 +398,9 @@ const groupLevels = [];
   }
 }
 
-// ── Shared reasoning group renderer (identical copy in index.html) ────
-function buildReasoningGroupHTML(g, gi, options) {
+// buildReasoningGroupHTML is now in reasoning.js (loaded before this file)
+/* --- REMOVED: duplicated buildReasoningGroupHTML, now in reasoning.js ---
+function _OLD_buildReasoningGroupHTML(g, gi, options) {
   const showBranchBtn = options.showBranchBtn || false;
   const isRestored = options.isRestored || false;
   const isParent = options.isParent || false;
@@ -506,6 +502,7 @@ function buildReasoningGroupHTML(g, gi, options) {
       + '</div>';
   }
 }
+--- END REMOVED */
 
 function buildAllReasoningEntries() {
   let html = '';

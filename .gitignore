@@ -27,8 +27,8 @@ db/
 *.db-*
 arc_agi*.db
 
-# Claude
-.claude/
+# Claude (public, except local settings)
+.claude/settings.local.json
 data/.copilot_token
 
 # Screenshots
@@ -41,3 +41,6 @@ test/benchmark_*.json
 # Agent observability (runtime)
 .agent_obs/
 agentops.log
+
+# Agent runner output
+output/

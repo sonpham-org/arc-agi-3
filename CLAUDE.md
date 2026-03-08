@@ -3,9 +3,13 @@
 ## Terminology
 
 - **"Replay"** = the share page (`share.html` / `/share/<id>` endpoint), NOT the in-app replay in `index.html`
-- **"Step"** = a single game step (one action executed in the environment via `env.step()`). Stored in `session_steps`.
-- **"Turn"** = one complete planning cycle. In scaffold mode: planner REPL → execute plan steps → monitor checks → world model update. In single-agent mode: one LLM call → one step. Each turn gets a unique `turnId`. Undo reverts an entire turn, not individual steps. Stored in `session_turns`.
+- **"Step"** = a single game step (one action executed in the environment via `env.step()`). Stored in `session_actions`.
+- **"Turn"** = one complete planning cycle. In scaffold mode: planner REPL → execute plan steps → monitor checks → world model update. In single-agent mode: one LLM call → one step. Each turn gets a unique `turnId`. Undo reverts an entire turn, not individual steps.
 - **"Call"** = one individual LLM invocation. A single turn may contain many calls (planner REPL iterations, monitor checks, world model queries). In single-agent mode, one turn = one call. Stored in `llm_calls`. Compact context triggers after N Calls, not Steps.
+
+## Database
+
+See [`.claude/database_structure.md`](.claude/database_structure.md) for the full schema. Single SQLite DB on Railway Volume, no external DB services.
 
 ## UI Views (index.html)
 

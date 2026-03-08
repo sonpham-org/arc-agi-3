@@ -1,15 +1,5 @@
-// ── Agent colors ──
-const AGENT_COLORS = {
-  orchestrator: '#3b82f6',
-  explorer:     '#22c55e',
-  theorist:     '#a855f7',
-  tester:       '#f97316',
-  solver:       '#ef4444',
-  reasoner:     '#3b82f6',
-  executor:     '#22c55e',
-  compactor:    '#f59e0b',
-  planner:      '#8b5cf6',
-};
+// Agent colors now provided by reasoning.js agentColor()
+// (obs-page.html must load reasoning.js before this file)
 const DEFAULT_COLOR = '#6b7280';
 
 // ── Readable action names ──
@@ -24,16 +14,7 @@ function humanAction(raw) {
   return raw.replace(/ACTION[0-7]|RESET/g, m => ACTION_DISPLAY[m] || m);
 }
 
-function agentColor(agent) {
-  if (!agent) return DEFAULT_COLOR;
-  return AGENT_COLORS[agent.toLowerCase()] || DEFAULT_COLOR;
-}
-
-function agentBadge(agent) {
-  if (!agent) return '<span style="color:#666">--</span>';
-  const c = agentColor(agent);
-  return `<span class="agent-badge" style="background:${c}">${agent}</span>`;
-}
+// agentColor() and agentBadge() now provided by reasoning.js
 
 // ── Cost estimation ($ per 1M tokens) ──
 const MODEL_PRICING = {
@@ -76,30 +57,13 @@ function estimateCost() {
   return total;
 }
 
-// Normalize event names to canonical form used by the renderer.
-// Client emits short names (orch_delegate, sub_start) but renderer expects
-// longer names (orchestrator_decide, subagent_start, etc.)
+// Normalize event — use agent_type directly, no scaffolding-specific mapping
 function normalizeEvent(ev) {
-  const map = {
-    orch_delegate: 'orchestrator_decide', orch_think: 'orchestrator_decide',
-    orch_start: 'orchestrator_decide', orch_end: 'orchestrator_decide',
-    sub_start: 'subagent_start',
-    sub_report: 'subagent_report',
-    sub_act: 'act', sub_tool: 'frame_tool',
-  };
-  if (map[ev.event]) ev.event = map[ev.event];
-  // Ensure agent_type is set for subagent events
+  // Ensure agent_type is set
   if (!ev.agent_type && ev.agent) ev.agent_type = ev.agent;
-  // Alias step_num → step so findNearestGrid/selectLogRow work for reconstructed events
+  if (!ev.agent && ev.agent_type) ev.agent = ev.agent_type;
+  // Alias step_num → step so findNearestGrid/selectLogRow work
   if (ev.step_num != null && ev.step == null) ev.step = ev.step_num;
-  // Map basic-agent call_types to meaningful role names
-  const agentMap = {
-    reasoning: 'reasoner', compact: 'compactor',
-    interrupt: 'executor', planner: 'planner',
-  };
-  if (ev.agent && agentMap[ev.agent]) ev.agent = agentMap[ev.agent];
-  // For basic agent: llm_call with agent "executor" → "reasoner" (it's the thinking step)
-  if (ev.event === 'llm_call' && ev.agent === 'executor') ev.agent = 'reasoner';
   return ev;
 }
 
@@ -686,7 +650,7 @@ function renderTimelineSwimlane() {
       orchIdx: si,
     });
   }
-  lanes.push({ label: 'orchestrator', color: AGENT_COLORS.orchestrator, blocks: orchBlocks });
+  lanes.push({ label: 'orchestrator', color: agentColor('orchestrator'), blocks: orchBlocks });
 
   // One lane per subagent spawn
   for (let si = 0; si < spawnGroups.length; si++) {

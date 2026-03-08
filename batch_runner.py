@@ -22,7 +22,7 @@ from agent import (
     load_config, effective_model, play_game,
 )
 from db import (
-    _get_db, _db_insert_session, _db_insert_step, _db_update_session,
+    _get_db, _db_insert_session, _db_insert_action, _db_update_session,
     _compress_grid,
     _get_session_calls, _get_session_turns, _export_session_to_file,
 )
@@ -138,14 +138,15 @@ def make_step_callback():
     """Create a step callback that writes each step to the sessions DB."""
 
     def step_callback(session_id, step_num, action, data, grid, llm_response, state, levels):
-        _db_insert_step(
-            session_id=session_id,
-            step_num=step_num,
-            action=action,
-            data=data or {},
-            grid=grid,
-            change_map=None,
-            llm_response=llm_response,
+        # Build states_json from grid
+        states = [{"grid": _compress_grid(grid)}] if grid else None
+        # Extract row/col from click data
+        act_row = data.get("y") if isinstance(data, dict) else None
+        act_col = data.get("x") if isinstance(data, dict) else None
+        _db_insert_action(
+            session_id, step_num, action, states,
+            row=act_row, col=act_col,
+            author_type="agent",
         )
         _db_update_session(session_id, steps=step_num, levels=levels, result=state)
 
