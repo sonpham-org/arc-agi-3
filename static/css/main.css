@@ -689,7 +689,7 @@
 
   /* ── Sidebar lock (game running) ─────────────────────────────────────── */
   .sidebar.locked { pointer-events: none; opacity: 0.4; transition: all 0.3s; }
-  .sidebar.human-sidebar { width: 346px; }
+  .sidebar.human-sidebar { width: 260px; }
 
   /* ── Comments ──────────────────────────────────────────────────────── */
   .comments-list { display: flex; flex-direction: column; gap: 8px; }
