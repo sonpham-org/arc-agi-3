@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// LEADERBOARD — AI vs Human best performances
+// LEADERBOARD — AI and Human best performances (separate tables)
 // ═══════════════════════════════════════════════════════════════════════════
 
 let _lbLoaded = false;
@@ -13,83 +13,85 @@ function initLeaderboard() {
 }
 
 async function _loadLeaderboard() {
-  const body = document.getElementById('lbBody');
-  body.innerHTML = '<tr><td colspan="8" class="lb-loading">Loading...</td></tr>';
+  const aiBody = document.getElementById('lbAiBody');
+  const humanBody = document.getElementById('lbHumanBody');
+  aiBody.innerHTML = '<tr><td colspan="4" class="lb-loading">Loading...</td></tr>';
+  humanBody.innerHTML = '<tr><td colspan="5" class="lb-loading">Loading...</td></tr>';
 
   try {
     const data = await fetchJSON('/api/leaderboard');
     _lbData = data.leaderboard || [];
   } catch {
-    body.innerHTML = '<tr><td colspan="8" class="lb-loading">Failed to load leaderboard.</td></tr>';
+    aiBody.innerHTML = '<tr><td colspan="4" class="lb-loading">Failed to load.</td></tr>';
+    humanBody.innerHTML = '<tr><td colspan="5" class="lb-loading">Failed to load.</td></tr>';
     return;
   }
 
   if (!_lbData.length) {
-    body.innerHTML = '<tr><td colspan="8" class="lb-loading">No sessions yet. Play some games!</td></tr>';
+    aiBody.innerHTML = '<tr><td colspan="4" class="lb-loading">No sessions yet.</td></tr>';
+    humanBody.innerHTML = '<tr><td colspan="5" class="lb-loading">No sessions yet.</td></tr>';
     return;
   }
 
-  _renderLeaderboardTable();
+  _renderLeaderboardTables();
 }
 
-function _renderLeaderboardTable() {
-  const body = document.getElementById('lbBody');
-  body.innerHTML = '';
+function _renderLeaderboardTables() {
+  const aiBody = document.getElementById('lbAiBody');
+  const humanBody = document.getElementById('lbHumanBody');
+  aiBody.innerHTML = '';
+  humanBody.innerHTML = '';
 
-  for (const row of _lbData) {
+  // Collect AI and human entries separately
+  const aiEntries = _lbData.filter(r => r.ai).sort((a, b) => {
+    const al = a.ai.levels || 0, bl = b.ai.levels || 0;
+    if (bl !== al) return bl - al;
+    return (a.ai.steps || 9999) - (b.ai.steps || 9999);
+  });
+  const humanEntries = _lbData.filter(r => r.human).sort((a, b) => {
+    const al = a.human.levels || 0, bl = b.human.levels || 0;
+    if (bl !== al) return bl - al;
+    return (a.human.steps || 9999) - (b.human.steps || 9999);
+  });
+
+  for (const row of aiEntries) {
     const tr = document.createElement('tr');
     tr.className = 'lb-row';
     tr.onclick = () => openLbDrilldown(row.game_id);
-
-    const gameName = row.game_id.toUpperCase();
     const ai = row.ai;
-    const human = row.human;
-
-    // Determine winner
-    let aiWins = false, humanWins = false;
-    if (ai && human) {
-      if ((ai.levels || 0) > (human.levels || 0)) aiWins = true;
-      else if ((human.levels || 0) > (ai.levels || 0)) humanWins = true;
-      else if ((ai.steps || 9999) < (human.steps || 9999)) aiWins = true;
-      else if ((human.steps || 9999) < (ai.steps || 9999)) humanWins = true;
-    } else if (ai) {
-      aiWins = true;
-    } else if (human) {
-      humanWins = true;
-    }
-
     tr.innerHTML = `
-      <td class="lb-game-name">${gameName}</td>
-      ${_renderAiCell(ai, aiWins)}
-      <td class="lb-vs">${ai && human ? 'vs' : ''}</td>
-      ${_renderHumanCell(human, humanWins)}
+      <td class="lb-game-name">${row.game_id.toUpperCase()}</td>
+      <td>${_resultBadge(ai.result)}</td>
+      <td>${ai.steps || '—'} steps</td>
+      <td class="lb-model" title="${ai.model || ''}">${_shortModel(ai.model || '')}</td>
     `;
-    body.appendChild(tr);
+    aiBody.appendChild(tr);
   }
-}
 
-function _renderAiCell(ai, isWinner) {
-  if (!ai) return '<td class="lb-empty" colspan="3">—</td>';
-  const cls = isWinner ? ' lb-winner' : '';
-  const result = _resultBadge(ai.result);
-  const model = _shortModel(ai.model || '');
-  return `
-    <td class="lb-ai-result${cls}">${result}</td>
-    <td class="lb-ai-steps${cls}">${ai.steps || '—'} steps</td>
-    <td class="lb-ai-model${cls}" title="${ai.model || ''}">${model}</td>
-  `;
-}
+  if (!aiEntries.length) {
+    aiBody.innerHTML = '<tr><td colspan="4" class="lb-loading">No AI attempts yet.</td></tr>';
+  }
 
-function _renderHumanCell(human, isWinner) {
-  if (!human) return '<td class="lb-empty" colspan="3">—</td>';
-  const cls = isWinner ? ' lb-winner' : '';
-  const result = _resultBadge(human.result);
-  const dur = human.duration_seconds ? _lbFormatDuration(human.duration_seconds) : '—';
-  return `
-    <td class="lb-human-result${cls}">${result}</td>
-    <td class="lb-human-steps${cls}">${human.steps || '—'} steps</td>
-    <td class="lb-human-time${cls}">${dur}</td>
-  `;
+  for (const row of humanEntries) {
+    const tr = document.createElement('tr');
+    tr.className = 'lb-row';
+    tr.onclick = () => openLbDrilldown(row.game_id);
+    const h = row.human;
+    const dur = h.duration_seconds ? _lbFormatDuration(h.duration_seconds) : '—';
+    const author = h.author || '—';
+    tr.innerHTML = `
+      <td class="lb-game-name">${row.game_id.toUpperCase()}</td>
+      <td>${_resultBadge(h.result)}</td>
+      <td>${h.steps || '—'} steps</td>
+      <td>${dur}</td>
+      <td class="lb-author" title="${_esc(author)}">${_esc(author)}</td>
+    `;
+    humanBody.appendChild(tr);
+  }
+
+  if (!humanEntries.length) {
+    humanBody.innerHTML = '<tr><td colspan="5" class="lb-loading">No human attempts yet.</td></tr>';
+  }
 }
 
 function _resultBadge(result) {
@@ -100,7 +102,6 @@ function _resultBadge(result) {
 
 function _shortModel(model) {
   if (!model) return '—';
-  // Trim provider prefix and long model names
   const parts = model.split('/');
   const name = parts[parts.length - 1];
   return name.length > 20 ? name.slice(0, 18) + '…' : name;
@@ -116,7 +117,7 @@ function _lbFormatDuration(secs) {
 // ── Drill-down ──────────────────────────────────────────────────────────
 
 async function openLbDrilldown(gameId) {
-  document.querySelector('.lb-table-wrap').style.display = 'none';
+  document.querySelector('.lb-tables-wrap').style.display = 'none';
   const drill = document.getElementById('lbDrilldown');
   drill.style.display = '';
   document.getElementById('lbDrillTitle').textContent = gameId.toUpperCase() + ' — Top Attempts';
@@ -157,12 +158,14 @@ function _renderDrillTable(tbody, rows, type) {
         <td>${date}</td>`;
     } else {
       const dur = r.duration_seconds ? _lbFormatDuration(r.duration_seconds) : '—';
+      const author = r.author || '—';
       tr.innerHTML = `
         <td>${i + 1}</td>
         <td>${result}</td>
         <td>${r.steps || 0}</td>
         <td>${r.levels || 0}</td>
         <td>${dur}</td>
+        <td title="${_esc(author)}">${_esc(author)}</td>
         <td>${date}</td>`;
     }
     tbody.appendChild(tr);
@@ -171,7 +174,7 @@ function _renderDrillTable(tbody, rows, type) {
 
 function closeLbDrilldown() {
   document.getElementById('lbDrilldown').style.display = 'none';
-  document.querySelector('.lb-table-wrap').style.display = '';
+  document.querySelector('.lb-tables-wrap').style.display = '';
 }
 
 // Allow re-fetching when tab is revisited

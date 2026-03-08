@@ -71,6 +71,9 @@ def orchestrator_decide(
             output_json=(result.text or "")[:2000],
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
+            thinking_tokens=result.thinking_tokens,
+            thinking_json=(result.thinking_text or "")[:5000] if result.thinking_text else None,
+            cost=result.cost,
             duration_ms=result.duration_ms,
             error=result.error,
         )

@@ -55,33 +55,40 @@ class LLMResult:
     text: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0
+    thinking_text: str | None = None
     duration_ms: int = 0
     model: str = ""
     error: str | None = None
     attempt: int = 0
+    cost: float = 0.0
 
 
 # ── Model registry ─────────────────────────────────────────────────────────
 
 MODELS = {
     # Groq (free tier, OpenAI-compatible)
+    # Pricing: per 1M tokens — [input, output, thinking] in USD
     "groq/llama-3.3-70b-versatile": {
         "provider": "groq",
         "api_model": "llama-3.3-70b-versatile",
         "env_key": "GROQ_API_KEY",
         "url": "https://api.groq.com/openai/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     "groq/gemma2-9b-it": {
         "provider": "groq",
         "api_model": "gemma2-9b-it",
         "env_key": "GROQ_API_KEY",
         "url": "https://api.groq.com/openai/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     "groq/mixtral-8x7b-32768": {
         "provider": "groq",
         "api_model": "mixtral-8x7b-32768",
         "env_key": "GROQ_API_KEY",
         "url": "https://api.groq.com/openai/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     # Mistral (free tier, OpenAI-compatible)
     "mistral/mistral-small-latest": {
@@ -89,32 +96,36 @@ MODELS = {
         "api_model": "mistral-small-latest",
         "env_key": "MISTRAL_API_KEY",
         "url": "https://api.mistral.ai/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     "mistral/open-mistral-nemo": {
         "provider": "mistral",
         "api_model": "open-mistral-nemo",
         "env_key": "MISTRAL_API_KEY",
         "url": "https://api.mistral.ai/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     # Gemini (google-genai SDK)
-    "gemini-2.0-flash":      {"provider": "gemini", "api_model": "gemini-2.0-flash",      "env_key": "GEMINI_API_KEY"},
-    "gemini-2.5-flash-lite": {"provider": "gemini", "api_model": "gemini-2.5-flash-lite",  "env_key": "GEMINI_API_KEY"},
-    "gemini-2.5-flash":      {"provider": "gemini", "api_model": "gemini-2.5-flash",       "env_key": "GEMINI_API_KEY"},
-    "gemini-2.5-pro":        {"provider": "gemini", "api_model": "gemini-2.5-pro",         "env_key": "GEMINI_API_KEY"},
-    "gemini-3-flash":        {"provider": "gemini", "api_model": "gemini-3-flash-preview",        "env_key": "GEMINI_API_KEY"},
-    "gemini-3.1-flash-lite": {"provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview", "env_key": "GEMINI_API_KEY"},
-    "gemini-3-pro":          {"provider": "gemini", "api_model": "gemini-3-pro-preview",    "env_key": "GEMINI_API_KEY"},
-    "gemini-3.1-pro":        {"provider": "gemini", "api_model": "gemini-3.1-pro-preview",  "env_key": "GEMINI_API_KEY"},
+    # Pricing: [input $/1M, output $/1M, thinking $/1M]
+    "gemini-2.0-flash":      {"provider": "gemini", "api_model": "gemini-2.0-flash",      "env_key": "GEMINI_API_KEY", "pricing": [0.10, 0.40, 0.0]},
+    "gemini-2.5-flash-lite": {"provider": "gemini", "api_model": "gemini-2.5-flash-lite",  "env_key": "GEMINI_API_KEY", "pricing": [0.075, 0.30, 0.30]},
+    "gemini-2.5-flash":      {"provider": "gemini", "api_model": "gemini-2.5-flash",       "env_key": "GEMINI_API_KEY", "pricing": [0.15, 0.60, 0.60]},
+    "gemini-2.5-pro":        {"provider": "gemini", "api_model": "gemini-2.5-pro",         "env_key": "GEMINI_API_KEY", "pricing": [1.25, 10.0, 10.0]},
+    "gemini-3-flash":        {"provider": "gemini", "api_model": "gemini-3-flash-preview",        "env_key": "GEMINI_API_KEY", "pricing": [0.15, 0.60, 0.60]},
+    "gemini-3.1-flash-lite": {"provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview", "env_key": "GEMINI_API_KEY", "pricing": [0.075, 0.30, 0.30]},
+    "gemini-3-pro":          {"provider": "gemini", "api_model": "gemini-3-pro-preview",    "env_key": "GEMINI_API_KEY", "pricing": [1.25, 10.0, 10.0]},
+    "gemini-3.1-pro":        {"provider": "gemini", "api_model": "gemini-3.1-pro-preview",  "env_key": "GEMINI_API_KEY", "pricing": [1.25, 10.0, 10.0]},
     # Anthropic (direct API via httpx)
-    "claude-haiku-4-5":      {"provider": "anthropic", "api_model": "claude-haiku-4-5-20251001", "env_key": "ANTHROPIC_API_KEY"},
-    "claude-sonnet-4-5":     {"provider": "anthropic", "api_model": "claude-sonnet-4-5",         "env_key": "ANTHROPIC_API_KEY"},
-    "claude-sonnet-4-6":     {"provider": "anthropic", "api_model": "claude-sonnet-4-6",         "env_key": "ANTHROPIC_API_KEY"},
+    "claude-haiku-4-5":      {"provider": "anthropic", "api_model": "claude-haiku-4-5-20251001", "env_key": "ANTHROPIC_API_KEY", "pricing": [0.80, 4.0, 4.0]},
+    "claude-sonnet-4-5":     {"provider": "anthropic", "api_model": "claude-sonnet-4-5",         "env_key": "ANTHROPIC_API_KEY", "pricing": [3.0, 15.0, 15.0]},
+    "claude-sonnet-4-6":     {"provider": "anthropic", "api_model": "claude-sonnet-4-6",         "env_key": "ANTHROPIC_API_KEY", "pricing": [3.0, 15.0, 15.0]},
     # Cloudflare Workers AI (OpenAI-compatible)
     "cloudflare/llama-3.3-70b": {
         "provider": "cloudflare",
         "api_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         "env_key": "CLOUDFLARE_API_KEY",
         "env_account": "CLOUDFLARE_ACCOUNT_ID",
+        "pricing": [0.0, 0.0, 0.0],
     },
     # HuggingFace (OpenAI-compatible)
     "hf/meta-llama-3.3-70b": {
@@ -122,24 +133,37 @@ MODELS = {
         "api_model": "meta-llama/Llama-3.3-70B-Instruct",
         "env_key": "HUGGINGFACE_API_KEY",
         "url": "https://router.huggingface.co/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     # Ollama (local)
     "ollama/qwen3.5": {
         "provider": "ollama",
         "api_model": "qwen3.5:35b-a3b",
         "url": "http://localhost:11434/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     "ollama/llama3.3": {
         "provider": "ollama",
         "api_model": "llama3.3",
         "url": "http://localhost:11434/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
     "ollama/llama3.1": {
         "provider": "ollama",
         "api_model": "llama3.1",
         "url": "http://localhost:11434/v1/chat/completions",
+        "pricing": [0.0, 0.0, 0.0],
     },
 }
+
+
+def compute_cost(model_key: str, input_tokens: int, output_tokens: int,
+                 thinking_tokens: int = 0) -> float:
+    """Compute USD cost for an LLM call based on model pricing."""
+    info = MODELS.get(model_key, {})
+    pricing = info.get("pricing", [0.0, 0.0, 0.0])
+    cost_in, cost_out, cost_think = pricing[0], pricing[1], pricing[2] if len(pricing) > 2 else pricing[1]
+    return (input_tokens * cost_in + output_tokens * cost_out + thinking_tokens * cost_think) / 1_000_000
 
 DEFAULT_MODEL = "groq/llama-3.3-70b-versatile"
 
@@ -482,7 +506,10 @@ def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: i
     thinking_cfg = None
     if is_thinking:
         budget = thinking_budget if thinking_budget > 0 else 1024
-        thinking_cfg = genai.types.ThinkingConfig(thinking_budget=budget)
+        thinking_cfg = genai.types.ThinkingConfig(
+            thinking_budget=budget,
+            include_thoughts=True,
+        )
 
     config = genai.types.GenerateContentConfig(
         temperature=temperature,
@@ -502,6 +529,8 @@ def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: i
 
     total_input = 0
     total_output = 0
+    total_thinking = 0
+    all_thinking_text = []
     max_rounds = 3 if (tools_enabled and session_id) else 1
 
     for round_i in range(max_rounds):
@@ -522,6 +551,13 @@ def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: i
         usage = getattr(response, "usage_metadata", None)
         total_input += (getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
         total_output += (getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+        total_thinking += (getattr(usage, "thoughts_token_count", 0) or 0) if usage else 0
+
+        # Extract thinking content from response parts
+        if response.candidates and response.candidates[0].content:
+            for part in (response.candidates[0].content.parts or []):
+                if getattr(part, "thought", False) and hasattr(part, "text") and part.text:
+                    all_thinking_text.append(part.text)
 
         # Handle MALFORMED_FUNCTION_CALL — model tried to call a tool but
         # formatted it as a code block instead of a proper function call
@@ -604,6 +640,8 @@ def _call_gemini(model_name: str, prompt: str, temperature: float, max_tokens: i
         "text": final_text,
         "input_tokens": total_input,
         "output_tokens": total_output,
+        "thinking_tokens": total_thinking,
+        "thinking_text": "\n".join(all_thinking_text) if all_thinking_text else None,
     }
 
 
@@ -681,13 +719,20 @@ def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str =
                                 grid=grid, prev_grid=prev_grid,
                                 thinking_budget=thinking_budget)
             duration_ms = int((time.time() - t0) * 1000)
+            in_tok = result.get("input_tokens", 0)
+            out_tok = result.get("output_tokens", 0)
+            think_tok = result.get("thinking_tokens", 0)
+            cost = compute_cost(model_key, in_tok, out_tok, think_tok)
             return LLMResult(
                 text=result["text"],
-                input_tokens=result.get("input_tokens", 0),
-                output_tokens=result.get("output_tokens", 0),
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                thinking_tokens=think_tok,
+                thinking_text=result.get("thinking_text"),
                 duration_ms=duration_ms,
                 model=model_key,
                 attempt=attempt,
+                cost=cost,
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
@@ -1152,6 +1197,9 @@ def play_game(arcade, game_id: str, cfg: dict, max_steps: int = 200,
                 output_json=(raw or "")[:1000],
                 input_tokens=llm_result.input_tokens,
                 output_tokens=llm_result.output_tokens,
+                thinking_tokens=llm_result.thinking_tokens,
+                thinking_json=(llm_result.thinking_text or "")[:5000] if llm_result.thinking_text else None,
+                cost=llm_result.cost,
                 duration_ms=llm_result.duration_ms,
                 error=llm_result.error,
             )

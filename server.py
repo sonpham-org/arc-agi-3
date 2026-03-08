@@ -2176,16 +2176,18 @@ def leaderboard():
                 WHERE COALESCE(s.player_type, 'agent') = 'agent' AND s.steps > 0
             ) WHERE rn = 1
         """).fetchall()
-        # Best human session per game
+        # Best human session per game (include author)
         human_rows = conn.execute("""
             SELECT * FROM (
                 SELECT s.id, s.game_id, s.result, s.steps, s.levels,
                        s.created_at, s.duration_seconds,
+                       COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1)) AS author,
                        ROW_NUMBER() OVER (
                            PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
                            ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
                        ) AS rn
                 FROM sessions s
+                LEFT JOIN users u ON s.user_id = u.id
                 WHERE s.player_type = 'human' AND s.steps > 0
             ) WHERE rn = 1
         """).fetchall()
@@ -2216,8 +2218,10 @@ def leaderboard_detail(game_id):
         """, (game_id,)).fetchall()
         human_rows = conn.execute("""
             SELECT s.id, s.game_id, s.result, s.steps, s.levels,
-                   s.created_at, s.duration_seconds
+                   s.created_at, s.duration_seconds,
+                   COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1)) AS author
             FROM sessions s
+            LEFT JOIN users u ON s.user_id = u.id
             WHERE s.player_type = 'human'
               AND s.steps > 0 AND s.game_id LIKE ? || '%'
             ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
@@ -2521,31 +2525,27 @@ def session_calls(session_id):
 @app.route("/share/<session_id>")
 @app.route("/share")
 def share_session(session_id=None):
-    """Public replay page — renders the observatory view with auto-loaded session.
+    """Public replay page. Human sessions get a simplified viewer; agent sessions get the full observatory.
     Supports both /share/<id> and /share?id=<id> for shareable links.
     Without an ID, shows the session browser."""
-    # Support query parameter: /share?id=abc123
     if session_id is None:
         session_id = request.args.get("id")
     if session_id is None:
-        # No session specified — show session browser
         return render_template("obs.html", share_session_id="", browse_mode=True)
 
-    # Quick existence check (don't load all data — obs.html fetches via API)
-    found = False
+    # Look up session metadata
+    sess_row = None
+    file_data = None
     try:
         conn = _get_db()
-        if conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone():
-            found = True
+        sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         conn.close()
-        if not found:
-            file_data = _read_session_from_file(session_id)
-            if file_data:
-                found = True
     except Exception:
         pass
+    if not sess_row:
+        file_data = _read_session_from_file(session_id)
 
-    if not found:
+    if not sess_row and not file_data:
         return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Session Not Found</title>
 <style>body{background:#0d1117;color:#c9d1d9;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
 .box{text-align:center;padding:40px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:400px;}
@@ -2554,6 +2554,37 @@ a{color:#58a6ff;text-decoration:none;}a:hover{text-decoration:underline;}</style
 <body><div class="box"><h1>Session Not Found</h1><p>This session doesn't exist or hasn't been shared yet.</p>
 <a href="/share">&#9654; Browse Sessions</a></div></body></html>""", 404
 
+    # Determine player type
+    player_type = None
+    if sess_row:
+        player_type = dict(sess_row).get("player_type")
+    elif file_data:
+        player_type = file_data.get("session", {}).get("player_type")
+
+    # Human sessions → simplified share page with server-rendered data
+    if player_type == "human":
+        sess_dict = dict(sess_row) if sess_row else file_data.get("session", {})
+        step_list = []
+        try:
+            if sess_row:
+                conn = _get_db()
+                rows = conn.execute(
+                    "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num",
+                    (session_id,),
+                ).fetchall()
+                conn.close()
+                step_list = [_format_action_row(dict(r)) for r in rows]
+            elif file_data:
+                for s in file_data.get("actions", file_data.get("steps", [])):
+                    step_list.append(_format_action_row(s))
+        except Exception:
+            pass
+        return render_template("share.html",
+                               session=sess_dict, steps=step_list,
+                               color_map=COLOR_MAP,
+                               umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID)
+
+    # Agent sessions → full observatory view
     return render_template("obs.html", share_session_id=session_id)
 
 

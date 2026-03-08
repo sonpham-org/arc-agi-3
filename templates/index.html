@@ -77,28 +77,27 @@
   <div id="leaderboardView" style="display:none;flex:1;overflow:hidden;flex-direction:column;">
     <div class="lb-header">
       <h2>&#127942; Leaderboards</h2>
-      <span class="lb-subtitle">Best performances across all games — AI vs Human</span>
+      <span class="lb-subtitle">Best performances across all games</span>
     </div>
-    <div class="lb-table-wrap">
-      <table class="lb-table" id="lbTable">
-        <thead>
-          <tr>
-            <th class="lb-game-col">Game</th>
-            <th class="lb-ai-header" colspan="3">&#129302; AI Best</th>
-            <th class="lb-vs-col"></th>
-            <th class="lb-human-header" colspan="3">&#129489; Human Best</th>
-          </tr>
-          <tr class="lb-sub-header">
-            <th></th>
-            <th>Result</th><th>Steps</th><th>Model</th>
-            <th class="lb-vs-col">VS</th>
-            <th>Result</th><th>Steps</th><th>Time</th>
-          </tr>
-        </thead>
-        <tbody id="lbBody">
-          <tr><td colspan="8" class="lb-loading">Loading...</td></tr>
-        </tbody>
-      </table>
+    <div class="lb-tables-wrap">
+      <div class="lb-panel">
+        <h3 class="lb-panel-title lb-ai-header">&#129302; AI Best</h3>
+        <div class="lb-panel-scroll">
+          <table class="lb-table">
+            <thead><tr><th>Game</th><th>Result</th><th>Steps</th><th>Model</th></tr></thead>
+            <tbody id="lbAiBody"><tr><td colspan="4" class="lb-loading">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="lb-panel">
+        <h3 class="lb-panel-title lb-human-header">&#129489; Human Best</h3>
+        <div class="lb-panel-scroll">
+          <table class="lb-table">
+            <thead><tr><th>Game</th><th>Result</th><th>Steps</th><th>Time</th><th>By</th></tr></thead>
+            <tbody id="lbHumanBody"><tr><td colspan="5" class="lb-loading">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
     </div>
     <!-- Drill-down panel for a selected game -->
     <div id="lbDrilldown" style="display:none;">
@@ -117,7 +116,7 @@
         <div class="lb-drill-col">
           <h4>&#129489; Top Human Attempts</h4>
           <table class="lb-drill-table">
-            <thead><tr><th>#</th><th>Result</th><th>Steps</th><th>Levels</th><th>Time</th><th>Date</th></tr></thead>
+            <thead><tr><th>#</th><th>Result</th><th>Steps</th><th>Levels</th><th>Time</th><th>By</th><th>Date</th></tr></thead>
             <tbody id="lbDrillHuman"></tbody>
           </table>
         </div>
@@ -184,32 +183,18 @@
   </div>
   <!-- ── Browse Sessions view ────────────────────────────────────────── -->
   <div id="browseView">
-    <div class="browse-tabs">
-      <button class="active" onclick="switchBrowseTab('byGame')">By Game</button>
-      <button onclick="switchBrowseTab('global')">Public Sessions</button>
-      <button onclick="switchBrowseTab('local')">My Sessions</button>
-    </div>
-    <!-- By Game -->
-    <div class="browse-pane active" id="browseByGame">
-      <div class="game-browser">
-        <div class="game-browser-list" id="browseGameList"></div>
-        <div class="game-browser-sessions" id="browseGameSessions">
-          <div class="browse-empty">Select a game to view its sessions.</div>
-        </div>
+    <div class="browse-columns">
+      <div class="browse-column">
+        <div class="browse-column-header">Human Sessions</div>
+        <div class="browse-column-content" id="browseHumanList"><div class="browse-empty">Loading...</div></div>
       </div>
-    </div>
-    <!-- Public Sessions -->
-    <div class="browse-pane" id="browseGlobal">
-      <div class="browse-header" id="browseGlobalHeader">All sessions from server</div>
-      <div class="browse-content" id="browseGlobalList">
-        <div class="browse-empty">Loading...</div>
+      <div class="browse-column">
+        <div class="browse-column-header">AI Sessions</div>
+        <div class="browse-column-content" id="browseAIList"><div class="browse-empty">Loading...</div></div>
       </div>
-    </div>
-    <!-- Local Sessions -->
-    <div class="browse-pane" id="browseLocal">
-      <div class="browse-header" id="browseLocalHeader">Sessions stored in this browser</div>
-      <div class="browse-content" id="browseLocalList">
-        <div class="browse-empty">Loading...</div>
+      <div class="browse-column">
+        <div class="browse-column-header">My Sessions</div>
+        <div class="browse-column-content" id="browseMyList"><div class="browse-empty">Loading...</div></div>
       </div>
     </div>
   </div>
@@ -235,7 +220,7 @@
     <!-- Main content -->
     <div id="humanMainLayout" style="flex:1;display:flex;flex-direction:column;min-width:0;">
       <div class="main">
-        <div class="topbar">
+        <div class="topbar" id="humanTopBar">
           <span id="humanGameTitle" style="font-weight:600;">No game selected</span>
           <span id="humanGameStatus" class="status status-NOT_PLAYED">—</span>
           <span id="humanLevelInfo" class="level-info"></span>
