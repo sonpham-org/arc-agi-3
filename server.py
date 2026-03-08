@@ -1115,14 +1115,24 @@ def auth_claim_sessions():
 def list_games():
     arc = get_arcade()
     envs = arc.get_environments()
-    # Deduplicate: prefer short IDs (ls20) over old hash IDs (ls20-cb3b57cc)
+    # Deduplicate: prefer short IDs (ls20) over old hash IDs (ls20-cb3b57cc),
+    # and for observatory games (2-letter dir), keep only the latest version (ac02 > ac01).
     seen = {}
     for e in envs:
         short = e.game_id.split("-")[0]
-        if short not in seen or len(e.game_id) < len(seen[short].game_id):
-            seen[short] = e
+        prefix = short[:2]
+        # Observatory games share a 2-letter directory; group by prefix, keep highest version
+        if len(short) == 4 and short[2:].isdigit() and Path(f"environment_files/{prefix}").is_dir():
+            key = prefix
+        else:
+            key = short
+        if key not in seen or len(e.game_id) < len(seen[key].game_id) or \
+                (len(e.game_id) == len(seen[key].game_id) and e.game_id > seen[key].game_id) or \
+                (e.game_id == seen[key].game_id and e.local_dir > seen[key].local_dir):
+            seen[key] = e
     games = [
-        {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps}
+        {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps,
+         "tags": getattr(e, 'tags', [])}
         for e in seen.values()
     ]
     # In prod mode, hide non-foundation games unless ?show_all=1
@@ -1743,21 +1753,23 @@ def import_session():
         conn.execute(
             """INSERT INTO sessions (id, game_id, model, mode, created_at, result, steps, levels,
                                      parent_session_id, branch_at_step, scaffolding_json,
-                                     user_id, player_type, duration_seconds)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     user_id, player_type, duration_seconds, live_mode)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  result = excluded.result, steps = excluded.steps, levels = excluded.levels,
                  model = COALESCE(excluded.model, sessions.model),
                  scaffolding_json = COALESCE(excluded.scaffolding_json, sessions.scaffolding_json),
                  user_id = COALESCE(excluded.user_id, sessions.user_id),
                  player_type = COALESCE(excluded.player_type, sessions.player_type),
-                 duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds)""",
+                 duration_seconds = COALESCE(excluded.duration_seconds, sessions.duration_seconds),
+                 live_mode = COALESCE(excluded.live_mode, sessions.live_mode)""",
             (sess["id"], sess["game_id"], sess.get("model", ""),
              sess.get("mode", "online"), sess.get("created_at", time.time()),
              sess.get("result", "NOT_FINISHED"), sess.get("steps", 0),
              sess.get("levels", 0), sess.get("parent_session_id"),
              sess.get("branch_at_step"), scaffolding_json, user_id,
-             sess.get("player_type", "agent"), sess.get("duration_seconds")),
+             sess.get("player_type", "agent"), sess.get("duration_seconds"),
+             1 if sess.get("live_mode") else 0),
         )
         app.logger.info(f"[import] session={sess['id'][:30]} steps={len(steps)}")
         for s in steps:

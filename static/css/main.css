@@ -48,6 +48,10 @@
     padding: 0 4px; border-radius: 3px; cursor: help; letter-spacing: 0.3px; position: relative;
     display: inline-block; margin-top: 2px; }
   .dev-tag:hover { opacity: 1; }
+  .live-tag { font-size: 9px; color: #f85149; border: 1px solid #f85149; padding: 0 4px;
+    border-radius: 3px; letter-spacing: 0.3px; display: inline-block; margin-top: 2px;
+    font-weight: 600; animation: live-pulse 2s ease-in-out infinite; }
+  @keyframes live-pulse { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
   .dev-tag:hover::after { content: attr(title); position: absolute; left: 0; top: 100%;
     margin-top: 4px; background: var(--surface2, #333); color: var(--text); font-size: 10px;
     padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 50;
@@ -110,6 +114,7 @@
   /* ── Right panel ─────────────────────────────────────────────────────── */
   .right-panel { width: 510px; background: var(--surface); border-left: 1px solid var(--border);
     display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; min-height: 0; }
+  .right-panel.panel-disabled { pointer-events: none; opacity: 0.4; transition: opacity 0.2s; }
 
   /* ── Option sections ─────────────────────────────────────────────────── */
   .opt-section { border-bottom: 1px solid var(--border); display: flex; flex-direction: row; }

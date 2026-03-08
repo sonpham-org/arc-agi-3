@@ -55,7 +55,8 @@ def _init_db():
             duration_seconds REAL,
             parent_session_id TEXT,
             branch_at_step INTEGER,
-            mode TEXT DEFAULT 'local'
+            mode TEXT DEFAULT 'local',
+            live_mode INTEGER DEFAULT 0
         );
 
         -- Game actions (replaces session_steps)
@@ -236,6 +237,13 @@ def _migrate_schema(conn):
         try:
             conn.execute("ALTER TABLE sessions ADD COLUMN scaffolding_json TEXT")
             log.info("Migrated sessions: added scaffolding_json")
+        except Exception:
+            pass
+
+    if "live_mode" not in sess_cols and sess_cols:
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN live_mode INTEGER DEFAULT 0")
+            log.info("Migrated sessions: added live_mode")
         except Exception:
             pass
 

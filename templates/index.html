@@ -273,6 +273,7 @@
               <div class="transport-strip human-transport" id="humanTransport" style="display:none;">
                 <div class="transport-bar" style="justify-content:center;gap:8px;">
                   <button class="btn btn-primary" id="humanStartSessionBtn" onclick="humanStartSession()" style="flex:none;padding:6px 24px;">Start Session</button>
+                  <button class="btn" id="humanStartLiveBtn" onclick="humanStartLiveSession()" style="flex:none;padding:6px 24px;display:none;background:#f85149;border-color:#f85149;color:#fff;">Start Live Mode</button>
                   <button class="btn" id="humanPauseBtn" onclick="humanTogglePause()" style="flex:none;padding:6px 20px;display:none;">Pause</button>
                   <button class="btn btn-danger" id="humanFinishSessionBtn" onclick="humanFinishSession()" style="flex:none;padding:6px 24px;display:none;">Finish Session</button>
                 </div>
@@ -280,7 +281,7 @@
             </div>
           </div>
           <!-- Right panel: Level selector + Game Results -->
-          <div class="right-panel" id="humanRightPanel">
+          <div class="right-panel panel-disabled" id="humanRightPanel" style="pointer-events:none;opacity:0.4;">
             <div class="subtab-bar">
               <button class="active" onclick="switchHumanSubTab('levels')">Select Level</button>
               <button onclick="switchHumanSubTab('results')">Game Results</button>
