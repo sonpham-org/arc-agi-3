@@ -681,8 +681,14 @@ def _turso_sync_session(session_id: str) -> dict:
     lean_steps = []
     for s in new_steps:
         sd = dict(s)
-        sd["llm_response_json"] = None
         sd["change_map_json"] = None
+        # Keep only model + parsed (reasoning/plan) from llm_response — drops raw text (85% savings)
+        if sd.get("llm_response_json"):
+            try:
+                lr = json.loads(sd["llm_response_json"])
+                sd["llm_response_json"] = json.dumps({"model": lr.get("model"), "parsed": lr.get("parsed")})
+            except (json.JSONDecodeError, TypeError):
+                sd["llm_response_json"] = None
         lean_steps.append(sd)
 
     payload = {
