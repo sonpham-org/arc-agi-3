@@ -991,7 +991,8 @@ def auth_google_redirect():
     """Redirect to Google OAuth consent screen."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         return "Google login not configured", 503
-    base_url = request.host_url.rstrip("/")
+    # Use HTTPS in production (Railway terminates SSL at proxy)
+    base_url = request.host_url.rstrip("/").replace("http://", "https://", 1)
     redirect_uri = f"{base_url}/api/auth/google/callback"
     # Generate state token to prevent CSRF
     state = secrets.token_urlsafe(32)
@@ -1027,7 +1028,7 @@ def auth_google_callback():
     expected_state = flask_session.pop("google_oauth_state", None)
     if not expected_state or state != expected_state:
         return "Invalid state token — please try again", 400
-    base_url = request.host_url.rstrip("/")
+    base_url = request.host_url.rstrip("/").replace("http://", "https://", 1)
     redirect_uri = f"{base_url}/api/auth/google/callback"
     # Exchange authorization code for tokens
     try:
