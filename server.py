@@ -45,7 +45,10 @@ import llm_providers
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
+# Stable secret key — needed for Flask session (Google OAuth CSRF state).
+# Derive from GOOGLE_CLIENT_SECRET or env var so all gunicorn workers share the same key.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY",
+                                 os.environ.get("GOOGLE_CLIENT_SECRET", "arc-dev-fallback-key"))
 _STATIC_VERSION = str(int(time.time()))  # cache-bust static files on each deploy
 app.logger.setLevel(logging.INFO)
 
@@ -1023,11 +1026,12 @@ def auth_google_callback():
     state = request.args.get("state", "")
     if not code:
         return "Missing authorization code", 400
-    # Verify state token
-
+    # Verify state token (log for debugging)
     expected_state = flask_session.pop("google_oauth_state", None)
+    app.logger.info(f"[GOOGLE_AUTH] callback: code={code[:10]}... state_match={state == expected_state if expected_state else 'no_expected'}")
     if not expected_state or state != expected_state:
-        return "Invalid state token — please try again", 400
+        app.logger.warning(f"[GOOGLE_AUTH] state mismatch: expected={expected_state}, got={state[:20]}...")
+        return "Invalid state token — please try again. <a href='/'>Go back</a> and try again.", 400
     base_url = request.host_url.rstrip("/").replace("http://", "https://", 1)
     redirect_uri = f"{base_url}/api/auth/google/callback"
     # Exchange authorization code for tokens
@@ -1079,10 +1083,12 @@ def auth_google_callback():
     token = create_auth_token(user["id"])
     if not token:
         return "Service unavailable", 503
+    app.logger.info(f"[GOOGLE_AUTH] login success: email={email} user_id={user['id'][:8]}...")
     resp = make_response("", 302, {"Location": "/?logged_in=1"})
+    # Note: secure=False behind proxy (Railway terminates SSL), but SameSite=Lax is sufficient
     resp.set_cookie("arc_auth", token,
                      max_age=AUTH_TOKEN_TTL, httponly=True,
-                     samesite="Lax", secure=request.is_secure)
+                     samesite="Lax", secure=False)
     return resp
 
 
