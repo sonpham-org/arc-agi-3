@@ -714,6 +714,30 @@ def _turso_sync_session(session_id: str) -> dict:
     return result
 
 
+def sync_all_to_turso(min_steps=5):
+    """Sync all local sessions with >= min_steps to Turso. Called on shutdown."""
+    if not TURSO_DATABASE_URL:
+        return
+    try:
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT id FROM sessions WHERE steps >= ?", (min_steps,)
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        log.warning(f"sync_all_to_turso: failed to read local sessions: {e}")
+        return
+    if not rows:
+        return
+    synced = 0
+    for row in rows:
+        sid = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+        res = _turso_sync_session(sid)
+        if res["ok"] and (res["steps"] or res["turns"] or res["calls"]):
+            synced += 1
+    log.info(f"sync_all_to_turso: synced {synced}/{len(rows)} sessions to Turso")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # AUTH HELPERS (Turso only)
 # ═══════════════════════════════════════════════════════════════════════════

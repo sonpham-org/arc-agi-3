@@ -1,6 +1,7 @@
 """ARC-AGI-3 Web Player + LLM Reasoning Server."""
 
 import argparse
+import atexit
 import base64
 import copy
 import hashlib
@@ -344,7 +345,7 @@ def _try_recover_session(session_id: str):
 from db import (
     TURSO_DATABASE_URL, TURSO_AUTH_TOKEN,
     _get_turso_db, _turso_dict_fetchone, _turso_dict_fetchall,
-    _init_turso_db, _turso_import_session,
+    _init_turso_db, _turso_import_session, sync_all_to_turso,
     _turso_find_or_create_user, _turso_create_auth_token,
     _turso_verify_auth_token, _turso_create_magic_link,
     _turso_verify_magic_link, _turso_delete_auth_token,
@@ -352,6 +353,8 @@ from db import (
     _turso_count_recent_magic_links, AUTH_TOKEN_TTL,
 )
 
+# Sync all local sessions to Turso on shutdown (Railway SIGTERM → gunicorn exit)
+atexit.register(sync_all_to_turso)
 
 COLOR_MAP = {
     0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999", 3: "#666666",
