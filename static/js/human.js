@@ -24,10 +24,11 @@ let _humanLevelCount = 0;      // total levels in game
 let _humanCurrentLevel = 0;    // currently selected level
 let _humanGames = [];          // cached game list
 let _humanLevelStats = [];     // per-level stats: [{ level, startStep, endStep, startTime, endTime }]
-let _humanLiveMode = false;    // true when playing in live mode (auto-tick ACT7)
+let _humanLiveMode = false;    // true when playing in live mode
 let _humanLiveInterval = null; // interval handle for live mode auto-tick
 let _humanLiveFps = 10;        // tick rate for live mode (user-adjustable, default 10)
 let _humanGameHasLive = false; // true if current game supports live mode
+let _humanLiveHeldAction = 6;  // currently held action in live mode (6 = no-op tick)
 
 const _humanCanvas = () => document.getElementById('humanCanvas');
 const _humanCtx = () => _humanCanvas()?.getContext('2d');
@@ -386,6 +387,8 @@ function _setupHumanCanvasClick() {
 }
 
 function _setupHumanKeyboard() {
+  const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 6, 'c': 7 };
+
   document.addEventListener('keydown', (e) => {
     // Only handle when human view is visible
     const hv = document.getElementById('humanView');
@@ -404,22 +407,28 @@ function _setupHumanKeyboard() {
       return;
     }
 
-    if (!_humanSessionId || !_humanRecording || _humanPaused || _humanProcessing) return;
+    if (!_humanSessionId || !_humanRecording || _humanPaused) return;
 
-    const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 6, 'c': 7 };
     const action = keyMap[e.key];
     if (action !== undefined) {
       e.preventDefault();
-      // In live mode, reset the tick timer so ACTION6 doesn't fire right after user input
-      if (_humanLiveMode && _humanLiveInterval && action !== 6) {
-        clearInterval(_humanLiveInterval);
-        const tickMs = Math.max(33, Math.round(1000 / _humanLiveFps));
-        _humanLiveInterval = setInterval(_humanLiveTick, tickMs);
+      if (_humanLiveMode) {
+        // Live mode: just track held key — the tick loop applies it at FPS rate
+        _humanLiveHeldAction = action;
+      } else {
+        humanDoAction(action, false, true);
       }
-      humanDoAction(action, false, true);
     }
     // Ctrl+Z for undo
     if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); humanUndo(); }
+  });
+
+  document.addEventListener('keyup', (e) => {
+    if (!_humanLiveMode) return;
+    const action = keyMap[e.key];
+    if (action !== undefined && _humanLiveHeldAction === action) {
+      _humanLiveHeldAction = 6; // release → back to no-op tick
+    }
   });
 }
 
@@ -729,7 +738,8 @@ function _humanLiveTick() {
     _humanStopLive();
     return;
   }
-  humanDoAction(6, false, true);
+  // Fire whatever action is currently held (or ACTION6 no-op if nothing held)
+  humanDoAction(_humanLiveHeldAction, false, true);
 }
 
 function _humanStopLive() {
@@ -737,6 +747,7 @@ function _humanStopLive() {
     clearInterval(_humanLiveInterval);
     _humanLiveInterval = null;
   }
+  _humanLiveHeldAction = 6;
 }
 
 function humanSetLiveFps(val) {
