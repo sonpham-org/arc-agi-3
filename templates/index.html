@@ -12,7 +12,7 @@
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 {% endif %}
 <!-- Puter.js loaded lazily when a Puter model is selected -->
-<link rel="stylesheet" href="/static/css/main.css">
+<link rel="stylesheet" href="/static/css/main.css?v={{ static_v }}">
 </head>
 <body>
 {% if turnstile_site_key %}
@@ -646,16 +646,16 @@ window.PROMPTS = {{ prompts | tojson }};
 </script>
 
 <!-- Application JS (load order matters) -->
-<script src="/static/js/state.js"></script>
-<script src="/static/js/engine.js"></script>
-<script src="/static/js/ui.js"></script>
-<script src="/static/js/llm.js"></script>
-<script src="/static/js/scaffolding.js"></script>
-<script src="/static/js/session.js"></script>
-<script src="/static/js/observatory.js"></script>
-<script src="/static/js/human.js"></script>
-<script src="/static/js/leaderboard.js"></script>
-<script src="/static/js/dev.js"></script>
+<script src="/static/js/state.js?v={{ static_v }}"></script>
+<script src="/static/js/engine.js?v={{ static_v }}"></script>
+<script src="/static/js/ui.js?v={{ static_v }}"></script>
+<script src="/static/js/llm.js?v={{ static_v }}"></script>
+<script src="/static/js/scaffolding.js?v={{ static_v }}"></script>
+<script src="/static/js/session.js?v={{ static_v }}"></script>
+<script src="/static/js/observatory.js?v={{ static_v }}"></script>
+<script src="/static/js/human.js?v={{ static_v }}"></script>
+<script src="/static/js/leaderboard.js?v={{ static_v }}"></script>
+<script src="/static/js/dev.js?v={{ static_v }}"></script>
 
 <!-- Dev panel (developer-only level selector) -->
 <div id="devPanel" style="display:none;position:fixed;bottom:16px;right:16px;z-index:9999;
