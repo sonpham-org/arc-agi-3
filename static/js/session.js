@@ -2275,9 +2275,9 @@ async function initApp() {
 
   restoreSessionsFromLocalStorage();
 
-  // Route from hash BEFORE showing default view — prevents flash of agent UI
-  // when loading #leaderboards, #human, or #sessions directly
-  if (location.hash && location.hash !== '#' && location.hash !== '#human') {
+  // Route from hash BEFORE showing default view
+  // Default to human view for empty hash, #human, or #agent (old default)
+  if (location.hash && location.hash !== '#' && location.hash !== '#human' && location.hash !== '#agent') {
     _routeFromHash();
   } else {
     showAppView('human');
