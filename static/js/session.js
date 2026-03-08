@@ -1826,15 +1826,42 @@ async function loadBrowseGlobal() {
   }
 }
 
-// ── Local Sessions tab ───────────────────────────────────────────────────
+// ── My Sessions tab ──────────────────────────────────────────────────────
 
-function loadBrowseLocal() {
+async function loadBrowseLocal() {
   const el = document.getElementById('browseLocalList');
-  const localSessions = getLocalSessions();
   const header = document.getElementById('browseLocalHeader');
+
+  // If logged in, fetch user's sessions from server
+  if (currentUser) {
+    el.innerHTML = '<div class="browse-empty">Loading...</div>';
+    try {
+      const data = await fetchJSON('/api/sessions?mine=1');
+      const serverSessions = data.sessions || [];
+      // Merge with local sessions (dedup by id)
+      const localSessions = getLocalSessions();
+      const byId = {};
+      for (const s of serverSessions) byId[s.id] = s;
+      for (const s of localSessions) { if (!byId[s.id]) byId[s.id] = s; }
+      const merged = Object.values(byId).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      header.textContent = `My sessions (${merged.length})`;
+      if (!merged.length) {
+        el.innerHTML = '<div class="browse-empty">No sessions yet. Play a game to see sessions here.</div>';
+        return;
+      }
+      el.innerHTML = '';
+      for (const s of merged) el.appendChild(buildSessionRow(s));
+    } catch (e) {
+      el.innerHTML = `<div class="browse-empty">Error: ${e.message}</div>`;
+    }
+    return;
+  }
+
+  // Not logged in — show local-only sessions
+  const localSessions = getLocalSessions();
   header.textContent = `My sessions (${localSessions.length})`;
   if (!localSessions.length) {
-    el.innerHTML = '<div class="browse-empty">No local sessions saved yet. Play a game to see sessions here.</div>';
+    el.innerHTML = '<div class="browse-empty">Log in to see your sessions across devices, or play a game to save sessions locally.</div>';
     return;
   }
   el.innerHTML = '';
@@ -2333,12 +2360,72 @@ function showLoginModal() {
   document.getElementById('loginStep1').style.display = '';
   document.getElementById('loginStep2').style.display = 'none';
   document.getElementById('loginError').style.display = 'none';
-  document.getElementById('loginEmail').value = '';
-  document.getElementById('loginEmail').focus();
+  const emailEl = document.getElementById('loginEmail');
+  if (emailEl) { emailEl.value = ''; emailEl.focus(); }
+  // Render Google button if GSI is loaded
+  if (typeof GOOGLE_CLIENT_ID !== 'undefined' && GOOGLE_CLIENT_ID && window.google?.accounts?.id) {
+    _initGoogleSignIn();
+  }
 }
 
 function hideLoginModal() {
   document.getElementById('loginModal').style.display = 'none';
+}
+
+// ── Google Sign-In (GSI) ────────────────────────────────────────────────
+
+let _gsiInitialized = false;
+
+function _initGoogleSignIn() {
+  if (_gsiInitialized) return;
+  const container = document.getElementById('googleSignInBtn');
+  if (!container || !window.google?.accounts?.id) return;
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: _handleGoogleCredential,
+  });
+  google.accounts.id.renderButton(container, {
+    theme: 'outline',
+    size: 'large',
+    width: 312,
+    text: 'signin_with',
+  });
+  _gsiInitialized = true;
+}
+
+async function _handleGoogleCredential(response) {
+  const errEl = document.getElementById('loginError');
+  try {
+    const resp = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: response.credential }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (errEl) { errEl.textContent = data.error || 'Google login failed'; errEl.style.display = ''; }
+      return;
+    }
+    currentUser = data.user;
+    updateAuthUI();
+    hideLoginModal();
+    claimLocalSessions();
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Network error. Please try again.'; errEl.style.display = ''; }
+  }
+}
+
+// Initialize GSI when the script loads (if available)
+if (typeof GOOGLE_CLIENT_ID !== 'undefined' && GOOGLE_CLIENT_ID) {
+  // GSI script may load after this file — wait for it
+  const _waitGSI = setInterval(() => {
+    if (window.google?.accounts?.id) {
+      clearInterval(_waitGSI);
+      _initGoogleSignIn();
+    }
+  }, 200);
+  // Stop waiting after 10 seconds
+  setTimeout(() => clearInterval(_waitGSI), 10000);
 }
 
 // Close modal on backdrop click
