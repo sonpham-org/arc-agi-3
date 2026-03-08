@@ -1686,6 +1686,8 @@ function showMenuView() {
   sessionHost.style.display = 'none';
   emptyApp.style.display = 'none';
   browseView.style.display = 'none';
+  const sidebar = document.getElementById('gameSidebar');
+  if (sidebar) sidebar.style.display = 'none';
   // Highlight Play nav link
   document.querySelectorAll('.top-nav .nav-link').forEach(l => l.classList.remove('active'));
   document.querySelectorAll('.top-nav .nav-link')[0]?.classList.add('active');
