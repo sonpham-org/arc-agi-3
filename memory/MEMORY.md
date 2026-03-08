@@ -38,6 +38,13 @@
 ## vc33
 
 ## ls20-cb3b57cc
+- Walls, identified by colors 4 (VeryDarkBlue) and 5 (Black), act as impassable obstacles, preventing player movement.
+- The player (color 0) can be blocked from moving right, causing them to remain in the same position (e.g., 21,31) despite attempting 'RIGHT' actions.
+- ACTION4 and ACTION2 are likely the 'RIGHT' movement action, as indicated by the phrase 'Despite multiple RIGHT actions'.
+- Player's visual representation (color 0) does not move with directional actions. Actions trigger environmental changes elsewhere on the grid.
+- Player movement (even if coordinates don't update) triggers changes in distant parts of the grid. Player is a 'trigger' for environmental changes.
+- Player movement (even if coordinate doesn't visibly change) triggers distant environmental changes, revealing or activating colored blocks.
+- Player movement triggers changes in distant colored blocks (9, 11, 12). Maze navigation is key to progress.
 - The player is represented by a 1x1 white (0) pixel.
 - The game environment is a maze-like structure with dark gray (4) walls and gray (3) pathways.
 - ACTION2 and ACTION3 are used for observing and describing the grid state, player position, and colors; they do not appear to modify the grid.

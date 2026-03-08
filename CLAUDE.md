@@ -43,23 +43,6 @@ All games must be **fully deterministic** — no random elements of any kind:
 - Given the same sequence of player actions, the game must always produce the exact same outcome
 - Maps, levels, and all initial state are defined as constants, not generated at runtime
 
-## Turso (Remote DB) Upload
-
-To upload local sessions to Turso, you must source `.env` first since `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are not set in the shell by default:
-
-```bash
-set -a && source .env && set +a
-```
-
-Then use `libsql_experimental` to connect and write directly. The server's `_turso_import_session()` won't work from a standalone script because env vars are read at module import time. Instead, connect directly:
-
-```python
-import libsql_experimental as libsql
-conn = libsql.connect("turso_replica.db", sync_url=url, auth_token=token)
-```
-
-Upload sessions with >5 steps to avoid cluttering Turso with empty/trivial sessions.
-
 ## LLM Providers
 
 There are two model registries — `agent.py:MODELS` (CLI agent) and `server.py:MODEL_REGISTRY` (web UI). The batch runner uses `agent.py:MODELS`.
@@ -110,8 +93,6 @@ python batch_runner.py --games fd01,ft09 --repeat 3 --concurrency 4
 # Resume interrupted batch
 python batch_runner.py --resume <batch_id>
 
-# Upload results to Turso
-python batch_runner.py --games all --upload-turso
 ```
 
 ## Environments (Staging vs Prod)
@@ -133,7 +114,7 @@ The `HIDDEN_GAMES` list is a hardcoded Python list in `server.py`. `SERVER_MODE`
 
 The server's role is LIMITED to:
 - Serving static files (`index.html`, game data)
-- Session persistence (save/resume via SQLite/Turso)
+- Session persistence (save/resume via SQLite)
 - Proxying game steps when Pyodide isn't available
 - Model registry / capabilities metadata
 

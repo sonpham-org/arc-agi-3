@@ -79,7 +79,7 @@ async function loadSessionHistory() {
   const list = document.getElementById('historyList');
   try {
     let sessions = [];
-    // Always fetch from server DB (includes Turso sessions)
+    // Always fetch from server DB
     try {
       const data = await fetchJSON('/api/sessions');
       const serverSessions = data.sessions || [];
@@ -2497,7 +2497,7 @@ async function checkAuthStatus() {
     if (data.authenticated && data.user) {
       currentUser = data.user;
       updateAuthUI();
-      // Claim local sessions in Turso
+      // Claim local sessions
       claimLocalSessions();
     } else {
       currentUser = null;

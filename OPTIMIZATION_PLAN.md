@@ -3,7 +3,7 @@
 ## Current State (March 2026)
 
 - **Hosting**: Railway (~$10/mo), serves everything (static + API)
-- **DB**: Turso free tier (11MB, well within limits)
+- **DB**: Local SQLite
 - **Traffic target**: ~100 visitors/day by late March
 - **Static assets**: ~2MB total (HTML/CSS/JS/game data)
 - **Architecture**: All game logic + LLM calls run client-side; server is mostly static file serving + session CRUD + game step proxy
@@ -37,7 +37,7 @@ Things to do regardless of hosting changes:
 - [ ] Enable gzip/brotli compression for responses
 - [ ] Default Pyodide to ON in prod (reduces `/api/step` calls to server)
 - [ ] Compress session payloads (already using zlib in places, extend to all)
-- [ ] Prune old sessions from Turso after N months
+- [ ] Prune old sessions from SQLite after N months
 
 ## Phase 3: Google Cloud Run (IF Railway costs become a problem)
 
@@ -53,7 +53,7 @@ Replace Railway with Cloud Run for the API backend.
 - Dockerfile for the Flask app
 - `gcloud run deploy` setup
 - GitHub Actions for CI/CD (replaces Railway's auto-deploy)
-- Env vars migration (Turso, Resend, Turnstile keys)
+- Env vars migration (Resend, Turnstile keys)
 
 **Cost projection:**
 | Traffic | Cloud Run | Railway (current) |
@@ -78,21 +78,15 @@ Replace Railway with Cloud Run for the API backend.
 
 ```
 Current:
-  Browser --> Railway (static + API + game proxy)
-                |
-              Turso
+  Browser --> Railway (static + API + game proxy + SQLite)
 
 Phase 1:
   Browser --> Cloudflare Pages (static, FREE)
       |
-      +-----> Railway (API only, reduced cost)
-                |
-              Turso
+      +-----> Railway (API only, reduced cost, SQLite)
 
 Phase 3 (if needed):
   Browser --> Cloudflare Pages (static, FREE)
       |
-      +-----> Cloud Run (API, FREE/$300 credit)
-                |
-              Turso
+      +-----> Cloud Run (API, FREE/$300 credit, SQLite)
 ```

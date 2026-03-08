@@ -25,7 +25,6 @@ data/
 db/
 *.db
 *.db-*
-turso_*.db*
 arc_agi*.db
 
 # Claude

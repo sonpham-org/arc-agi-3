@@ -23,7 +23,7 @@ from agent import (
 )
 from db import (
     _get_db, _db_insert_session, _db_insert_step, _db_update_session,
-    _compress_grid, _turso_import_session, _turso_sync_session,
+    _compress_grid,
     _get_session_calls, _get_session_turns, _export_session_to_file,
 )
 
@@ -313,7 +313,6 @@ def run_batch(
     max_steps: int = 200,
     repeat: int = 1,
     resume_batch_id: str | None = None,
-    upload_turso: bool = False,
 ) -> dict:
     """Run a batch of games concurrently. Returns results dict."""
     batch_id = resume_batch_id or f"batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}"
@@ -415,10 +414,6 @@ def run_batch(
     except Exception:
         pass
 
-    # Upload to Turso if requested
-    if upload_turso:
-        _upload_batch_to_turso(results)
-
     # Print summary
     s = batch_state.summary()
     print(f"\n{'=' * 65}")
@@ -443,25 +438,6 @@ def run_batch(
     print(f"  Report saved: {report_path}")
 
     return report
-
-
-def _upload_batch_to_turso(results: list[dict]):
-    """Upload sessions with >5 steps to Turso (incremental sync)."""
-    uploaded = 0
-    for r in results:
-        if r.get("steps", 0) < 5 or not r.get("session_id"):
-            continue
-        try:
-            sync_result = _turso_sync_session(r["session_id"])
-            if sync_result["ok"]:
-                uploaded += 1
-                detail = f"{sync_result['steps']}s/{sync_result['turns']}t/{sync_result['calls']}c"
-                print(f"  [turso] synced {r['session_id'][:16]}… ({detail})")
-        except Exception as e:
-            print(f"  [turso] upload failed for {r['session_id']}: {e}")
-
-    if uploaded:
-        print(f"  [turso] Synced {uploaded} sessions")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -512,10 +488,6 @@ def main():
                         help="Run each game N times (default: 1)")
     parser.add_argument("--resume", default=None,
                         help="Resume a previous batch by ID")
-    parser.add_argument("--upload-turso", action="store_true",
-                        help="Upload completed sessions to Turso")
-    parser.add_argument("--upload-session", default=None,
-                        help="Upload a single session to Turso by ID (no batch run)")
     parser.add_argument("--planner-model", default=None,
                         help="Override planner/orchestrator model (e.g. gemini-3.1-pro)")
     parser.add_argument("--scaffolding", default=None,
@@ -525,35 +497,6 @@ def main():
     parser.add_argument("--obs", action="store_true",
                         help="Enable observability dashboard (writes to .agent_obs/)")
     args = parser.parse_args()
-
-    # ── Standalone session upload ────────────────────────────────────────
-    if args.upload_session:
-        sid = args.upload_session
-        conn = _get_db()
-        sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (sid,)).fetchone()
-        if not sess_row:
-            # Try prefix match
-            rows = conn.execute(
-                "SELECT id, game_id, steps, result FROM sessions WHERE id LIKE ? ORDER BY created_at DESC LIMIT 5",
-                (f"%{sid}%",),
-            ).fetchall()
-            conn.close()
-            if rows:
-                print(f"Session '{sid}' not found. Did you mean:")
-                for r in rows:
-                    print(f"  {r['id']}  ({r['game_id']}, {r['steps']} steps, {r['result']})")
-            else:
-                print(f"Session '{sid}' not found in local DB.")
-            sys.exit(1)
-        conn.close()
-        print(f"Syncing session {sid} ({sess_row['steps']} steps, {sess_row['result']})...")
-        sync_result = _turso_sync_session(sid)
-        if sync_result["ok"]:
-            detail = f"{sync_result['steps']} steps, {sync_result['turns']} turns, {sync_result['calls']} calls"
-            print(f"Done! Synced {detail}. View at: https://arc3.sonpham.net/share/{sid}")
-        else:
-            print("Upload failed. Check TURSO_DATABASE_URL and TURSO_AUTH_TOKEN env vars.")
-        sys.exit(0)
 
     cfg = load_config(Path(args.config) if args.config else None)
     if args.model:
@@ -626,7 +569,6 @@ def main():
         max_steps=args.max_steps,
         repeat=args.repeat,
         resume_batch_id=args.resume,
-        upload_turso=args.upload_turso,
     )
 
     if args.obs:

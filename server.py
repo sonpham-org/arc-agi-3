@@ -1,7 +1,6 @@
 """ARC-AGI-3 Web Player + LLM Reasoning Server."""
 
 import argparse
-import atexit
 import base64
 import copy
 import hashlib
