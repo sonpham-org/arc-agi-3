@@ -1610,15 +1610,16 @@ function showAppView(view, skipHash) {
   emptyApp.style.display = 'none';
   menuView.classList.remove('visible');
 
-  // Nav link indices: 0=Play as Human, 1=Play as Agent, 2=Browse Sessions, 3=Leaderboards, 4=Contributors
+  // Highlight nav link by href (no brittle index assumptions)
+  const _navHighlight = hash => document.querySelector(`.top-nav a[href="#${hash}"]`)?.classList.add('active');
   if (view === 'browse') {
-    links[2]?.classList.add('active');
+    _navHighlight('sessions');
     _browseActive = true;
     _menuActive = false;
     browseView.style.display = 'flex';
     loadBrowseView();
   } else if (view === 'human') {
-    links[0]?.classList.add('active');
+    _navHighlight('human');
     _browseActive = false;
     _menuActive = false;
     if (humanView) {
@@ -1626,7 +1627,7 @@ function showAppView(view, skipHash) {
       if (typeof initHumanView === 'function') initHumanView();
     }
   } else if (view === 'leaderboard') {
-    links[3]?.classList.add('active');
+    _navHighlight('leaderboards');
     _browseActive = false;
     _menuActive = false;
     if (leaderboardView) {
@@ -1634,7 +1635,7 @@ function showAppView(view, skipHash) {
       if (typeof initLeaderboard === 'function') initLeaderboard();
     }
   } else if (view === 'contributors') {
-    links[4]?.classList.add('active');
+    _navHighlight('contributors');
     _browseActive = false;
     _menuActive = false;
     if (contributorsView) {
@@ -1642,8 +1643,7 @@ function showAppView(view, skipHash) {
       if (typeof loadContributors === 'function') loadContributors();
     }
   } else if (view === 'feedback') {
-    // Feedback link is after the flex spacer, find it by href
-    document.querySelector('.top-nav a[href="#feedback"]')?.classList.add('active');
+    _navHighlight('feedback');
     _browseActive = false;
     _menuActive = false;
     if (feedbackView) {
@@ -1652,7 +1652,7 @@ function showAppView(view, skipHash) {
     }
   } else {
     // Default: agent / play
-    links[1]?.classList.add('active');
+    _navHighlight('agent');
     _browseActive = false;
     outerLayout.style.display = '';
     tabBar.style.display = 'flex';
