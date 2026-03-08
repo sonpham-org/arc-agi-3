@@ -1579,7 +1579,7 @@ const _VIEW_TO_HASH = { play: 'agent', human: 'human', browse: 'sessions', leade
 function showAppView(view, skipHash) {
   // Update URL hash (unless called from hashchange handler)
   if (!skipHash) {
-    const hash = _VIEW_TO_HASH[view] || 'agent';
+    const hash = _VIEW_TO_HASH[view] || 'human';
     if (location.hash !== '#' + hash) history.replaceState(null, '', '#' + hash);
   }
 
@@ -2277,10 +2277,10 @@ async function initApp() {
 
   // Route from hash BEFORE showing default view — prevents flash of agent UI
   // when loading #leaderboards, #human, or #sessions directly
-  if (location.hash && location.hash !== '#' && location.hash !== '#agent') {
+  if (location.hash && location.hash !== '#' && location.hash !== '#human') {
     _routeFromHash();
   } else {
-    showAppView('play');
+    showAppView('human');
   }
 
   // Auth: check login status (async, doesn't block init)
