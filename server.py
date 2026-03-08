@@ -802,8 +802,8 @@ def add_cache_headers(response):
             # No caching in staging — always serve fresh files
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         else:
-            # Prod: cache 1 day at CDN, 1 hour in browser
-            response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+            # Prod: no cache — force fresh files after every deploy
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
 
