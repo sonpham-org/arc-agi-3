@@ -387,7 +387,7 @@ function _setupHumanCanvasClick() {
 }
 
 function _setupHumanKeyboard() {
-  const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 6, 'c': 7 };
+  const keyMap = { 'w': 1, 'ArrowUp': 1, 's': 2, 'ArrowDown': 2, 'a': 3, 'ArrowLeft': 3, 'd': 4, 'ArrowRight': 4, 'r': 0, 'z': 5, 'x': 7, 'c': 7 };
 
   document.addEventListener('keydown', (e) => {
     // Only handle when human view is visible
