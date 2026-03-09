@@ -1149,7 +1149,8 @@ def game_source(game_id):
     arc = get_arcade()
     envs = arc.get_environments()
     bare_id = game_id.split("-")[0]
-    env_info = next((e for e in envs if e.game_id == game_id or e.game_id == bare_id), None)
+    matching = [e for e in envs if e.game_id == game_id or e.game_id == bare_id]
+    env_info = max(matching, key=lambda e: e.local_dir) if matching else None
     if env_info is None:
         return jsonify({"error": f"Game {game_id} not found"}), 404
     local_dir = Path(env_info.local_dir)
