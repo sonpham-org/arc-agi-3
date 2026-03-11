@@ -1431,6 +1431,12 @@ def llm_models():
     # Discover local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)
     if mode == "staging":
         import httpx
+        # api_models already covered by static registry entries — skip dynamic duplicates
+        _static_lmstudio_api_models = {
+            info.get("api_model", key)
+            for key, info in MODEL_REGISTRY.items()
+            if info.get("provider") == "lmstudio"
+        }
         LOCAL_PORTS = [
             (1234, "LM Studio"),
             (8080, "Local Server"),
@@ -1446,9 +1452,15 @@ def llm_models():
                         mid = m.get("id", "")
                         if not mid:
                             continue
+                        # Skip embedding models — not chat models
+                        if "embedding" in mid.lower():
+                            continue
                         # Determine provider and capabilities based on port/model
                         is_lmstudio = (port == 1234)
                         provider_name = "lmstudio" if is_lmstudio else "local"
+                        # Skip if a static registry entry already covers this api_model
+                        if is_lmstudio and mid in _static_lmstudio_api_models:
+                            continue
                         
                         # Known LM Studio model capability overrides (from PlanExe benchmarks)
                         LMSTUDIO_REASONING_MODELS = {

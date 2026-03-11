@@ -24,7 +24,7 @@ const text = data.choices?.[0]?.message?.content
 ### 2. Provider must be in `byokProviderOrder`
 If `'lmstudio'` is not in the provider order array, all discovered LM Studio models are silently dropped on the floor — they exist in the registry but never appear in the UI dropdown.
 
-**Fix (scaffolding.js):** Add `'lmstudio'` to `byokProviderOrder` and add a display label in `PROVIDER_LABELS`.
+**Fix (scaffolding.js):** Add `'Lmstudio'` to `providerOrder` (the available/free group, not `byokProviderOrder`) and add a display label in `providerLabels`.
 
 ### 3. Context window defaults to 3900 — silent truncation
 LM Studio's default context window is 3900 tokens. llama_index (and similar wrappers) use this value to truncate prompts *before* sending them — no error is thrown, the model just receives a mangled half-prompt.
