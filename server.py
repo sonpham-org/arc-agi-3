@@ -1,4 +1,4 @@
-# Author: Cascade (Claude Sonnet 4)
+# Author: Cascade, using Claude Opus 4.6 Thinking
 # Date: 2026-03-10 21:08
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities LIMITED to:
 #   - Static file serving (index.html, game data, JS/CSS assets)

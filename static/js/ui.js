@@ -1,4 +1,4 @@
-// Author: Cascade (Claude Sonnet 4)
+// Author: Cascade, using Claude Opus 4.6 Thinking
 // Date: 2026-03-10 21:08
 // PURPOSE: UI helper functions for ARC-AGI-3 web player. Handles:
 //   - Collapsible settings sections and tab switching (Settings/Prompts/Graphics)

@@ -6,7 +6,7 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 ---
 
 ## [1.0.1] — feature/lmstudio-support
-*Author: Mark Barney + Claude Sonnet 4.6 | 2026-03-10*
+*Author: Mark Barney + Cascade (Claude Opus 4.6 Thinking) | 2026-03-10*
 
 ### Added
 - **LM Studio provider** (`scaffolding.js`, `ui.js`, `models.py`, `server.py`) — users can now run inference against locally loaded LM Studio models directly from the web UI. Browser calls `localhost:1234/v1/chat/completions` directly; Railway server is never involved in the call path.
@@ -27,7 +27,7 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 ### Removed
 - Static LM Studio model registry entries (`models.py`) — `lmstudio-qwen3.5-35b`, `lmstudio-glm-4.7-flash`, `lmstudio-glm-4.6v-flash` were hardcoded for one developer's machine. Removed in favour of pure dynamic discovery so any model a user has loaded appears automatically.
 
-### Completed (plan execution by Cascade, Claude Sonnet 4)
+### Completed (plan execution by Cascade, using Claude Opus 4.6 Thinking)
 - **Server-side LM Studio discovery removed** from `server.py` — port 1234 removed from `LOCAL_PORTS`; `is_lmstudio` branching and `LMSTUDIO_CAPABILITIES` server-side lookup cleaned up. Ports 8080/8000 retained for other local servers.
 - **Browser-side LM Studio discovery finalized** in `scaffolding.js` `loadModels()` — fetches `{baseUrl}/v1/models` directly from browser with 1.5s timeout, filters embedding models, annotates capabilities from `LMSTUDIO_CAPABILITIES`, merges into `modelsData`. Dead dedup code removed.
 - **File headers added** to all edited files (`scaffolding.js`, `ui.js`, `server.py`, `models.py`) per `coding-standards.md`.

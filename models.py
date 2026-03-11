@@ -1,4 +1,4 @@
-# Author: Cascade (Claude Sonnet 4)
+# Author: Cascade, using Claude Opus 4.6 Thinking
 # Date: 2026-03-10 21:08
 # PURPOSE: Model registry and capability constants for ARC-AGI-3. Contains:
 #   - MODEL_REGISTRY: all cloud/hosted provider models with capabilities, pricing, context windows

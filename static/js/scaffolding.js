@@ -1,4 +1,4 @@
-// Author: Cascade (Claude Sonnet 4)
+// Author: Cascade, using Claude Opus 4.6 Thinking
 // Date: 2026-03-10 21:08
 // PURPOSE: Client-side scaffolding logic for ARC-AGI-3 web UI. Handles:
 //   - Model discovery (cloud providers via server API + LM Studio via direct browser fetch)

@@ -1,6 +1,6 @@
 # Plan: LM Studio Client-Side Discovery
 **Date:** 2026-03-10
-**Author:** Claude Sonnet 4.6
+**Author:** Cascade, using Claude Opus 4.6 Thinking
 **Branch:** feature/lmstudio-support
 
 ---
@@ -64,7 +64,7 @@ The following violations of `coding-standards.md` were made during the initial i
 ## TODOs (ordered)
 
 - [x] **1. Get plan approved** — approved 2026-03-10 21:08
-- [x] **2. Add file headers** to all files touched in this branch: `scaffolding.js`, `ui.js`, `server.py`, `models.py` — done by Cascade (Claude Sonnet 4)
+- [x] **2. Add file headers** to all files touched in this branch: `scaffolding.js`, `ui.js`, `server.py`, `models.py` — done by Cascade (Claude Opus 4.6 Thinking)
 - [x] **3. Remove server-side LM Studio discovery** from `server.py` — port 1234 removed from `LOCAL_PORTS`; `is_lmstudio` branching cleaned up; ports 8080/8000 retained
 - [x] **4. Add browser-side discovery** to `loadModels()` in `scaffolding.js` — drafted by previous dev, reviewed + cleaned up (dead dedup code removed, comments improved, variable names fixed)
 - [x] **5. Add `LMSTUDIO_CAPABILITIES` const** to `scaffolding.js` — mirrors `models.py`, cross-reference comments in both files
