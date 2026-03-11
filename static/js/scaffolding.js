@@ -88,6 +88,13 @@ async function loadModels() {
   }
   const providerOrder = ['Local', 'Lmstudio', 'Ollama', 'Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface'];
   const providerLabels = { Local: 'Local Models (free)', Lmstudio: 'LM Studio (free, local)', Puter: 'Puter.js (free)' };
+  // Pin qwen3.5-35b to top of LM Studio group
+  if (groups['Lmstudio']) {
+    groups['Lmstudio'].sort((a, b) => {
+      const pin = m => (m.api_model || m.name || '').includes('qwen3.5-35b') ? 0 : 1;
+      return pin(a) - pin(b);
+    });
+  }
 
   const unavail = modelsData.filter(m => !m.available);
   const byokGroups = {};
