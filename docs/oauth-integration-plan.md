@@ -1,280 +1,264 @@
-# OAuth Integration Plan — Claude Code & OpenAI Codex
+# Auth Integration Plan — Claude Code & OpenAI Codex
 
 **Author:** Bubba (OpenClaw agent)  
 **Date:** 2026-03-11  
 **Branch:** refactor/phase-1-modularization  
-**Status:** Design document — not yet implemented
+**Status:** Design document — not yet implemented  
+**Sources:** Official Anthropic API docs (platform.claude.com), Official OpenAI API docs (platform.openai.com), Claude Code docs (code.claude.com)
 
 ---
 
-## Overview
+## Important Clarification Up Front
 
-This document describes how to add OAuth authentication for **Claude Code** (Anthropic) and **OpenAI Codex** to the ARC-AGI-3 project, following the same patterns already established in this codebase for GitHub Copilot (device-code OAuth) and Google (authorization-code OAuth).
+> **Claude Code (the CLI tool) and the Anthropic API are two different things.**  
+> Adding "Claude Code auth" to this project means allowing users to call Claude models via the Anthropic API — using an API key. Claude Code's own login flow (browser OAuth to claude.ai) is for the CLI tool itself and is not relevant to integrating Claude as an LLM backend in a web application.
 
----
-
-## Existing OAuth Patterns in This Codebase
-
-The project already implements two OAuth flows you can model from:
-
-### 1. GitHub Copilot — Device Code Flow (`server.py` lines 1116–1192)
-
-**How it works:**
-1. Client calls `POST /api/copilot/auth/start` → server requests a device code from GitHub
-2. Server returns `user_code` + `verification_uri` for the user to visit in their browser
-3. Client polls `POST /api/copilot/auth/poll` → server exchanges device code for access token
-4. Token stored in `data/.copilot_token` via `llm_providers._save_copilot_token()`
-5. `llm_providers.copilot_oauth_token` holds the live token
-
-**Key files:**
-- `server.py`: `/api/copilot/auth/start`, `/api/copilot/auth/poll`, `/api/copilot/auth/status`
-- `llm_providers.py`: `copilot_oauth_token`, `copilot_device_code`, `copilot_auth_lock`, `_save_copilot_token()`
-
-### 2. Google OAuth — Authorization Code + PKCE (`server.py` lines 486–590)
-
-**How it works:**
-1. Client calls `GET /api/auth/google/login` → server redirects to Google consent screen
-2. Google redirects back to `/api/auth/google/callback` with auth code
-3. Server exchanges code for tokens, verifies via tokeninfo, stores user in Flask session
-
-**Key files:**
-- `server.py`: `/api/auth/logout`, `/api/auth/google/login`, `/api/auth/google/callback`
-- `constants.py`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+This document uses only official documentation as its source. It does not borrow patterns from unrelated OAuth flows already in this codebase (Google, GitHub Copilot).
 
 ---
 
-## Plan: Adding Claude Code OAuth (Anthropic)
+## How Claude (Anthropic API) Authentication Actually Works
 
-### Authentication Method
-Anthropic uses **API key authentication**, not OAuth. However, Claude Code (the CLI tool) uses a **browser-based OAuth flow** to obtain API credentials when running in interactive mode.
+**Source:** https://platform.claude.com/docs/en/api/overview
 
-The recommended approach for this project is **per-session API key**, matching the existing pattern for other providers (OpenAI, Gemini, etc.) already in `session_api_keys`.
+The Anthropic API uses **API key authentication** exclusively. There is no OAuth flow for third-party apps to access the Anthropic API.
 
-### Implementation Steps
+Every request requires these HTTP headers:
 
-#### Step 1 — Add constants to `constants.py`
+```
+x-api-key: YOUR_ANTHROPIC_API_KEY
+anthropic-version: 2023-06-01
+content-type: application/json
+```
+
+API keys are obtained from the Anthropic Console at **https://platform.claude.com/settings/keys**.
+
+Keys are prefixed with `sk-ant-`.
+
+### Claude Code CLI Authentication (for reference only — not used here)
+
+When a user runs the `claude` CLI for the first time, it opens a browser window to log in via their Claude.ai account (Pro/Max/Teams/Enterprise) or Console credentials. The CLI handles this flow internally and stores credentials in the macOS Keychain. **This is the Claude Code CLI's own login system — it is not an OAuth API that third-party apps can implement.**
+
+---
+
+## How OpenAI (Codex) Authentication Actually Works
+
+**Source:** https://developers.openai.com/api/reference/overview#authentication
+
+The OpenAI API uses **API key authentication via HTTP Bearer token**. There is no user-facing OAuth flow for standard API access.
+
+Every request requires:
+
+```
+Authorization: Bearer YOUR_OPENAI_API_KEY
+```
+
+Optional headers for multi-organization setups:
+
+```
+OpenAI-Organization: YOUR_ORG_ID
+OpenAI-Project: YOUR_PROJECT_ID
+```
+
+API keys are obtained from **https://platform.openai.com/settings/organization/api-keys**.
+
+Keys are prefixed with `sk-`.
+
+Codex models (`codex-mini-latest`, `o3`, `o4-mini`) use the same auth as all other OpenAI models — no separate key or flow.
+
+---
+
+## Implementation Plan for sonpham-arc3
+
+Since both providers use API keys, the integration pattern is the same for both. The question is where the key comes from:
+
+### Option A — Environment Variables (Server-side, simplest)
+
+Set keys on the server before launch. No user interaction required.
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+```
+
+Add to `constants.py`:
 ```python
-# Anthropic / Claude Code
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 ```
 
-#### Step 2 — Add Claude Code provider to `llm_providers.py`
-```python
-# Claude Code auth state (API key — no OAuth required)
-claude_api_key: Optional[str] = os.environ.get("ANTHROPIC_API_KEY") or None
-```
+**Best for:** Single-user deployments, development, or when the server operator controls billing.
 
-Add a provider entry in `MODEL_REGISTRY` in `models.py`:
-```python
-"claude-3-5-sonnet": {
-    "provider": "anthropic",
-    "api_base": "https://api.anthropic.com/v1",
-    "model_id": "claude-3-5-sonnet-20241022",
-},
-"claude-3-7-sonnet": {
-    "provider": "anthropic",
-    "api_base": "https://api.anthropic.com/v1",
-    "model_id": "claude-3-7-sonnet-20250219",
-},
-```
+### Option B — Per-Session Key Injection (User supplies their own key)
 
-#### Step 3 — Add API routes to `server.py`
-```python
-@app.route("/api/claude/auth/status")
-def claude_auth_status():
-    """Check whether an Anthropic API key is configured."""
-    return jsonify({
-        "authenticated": bool(llm_providers.claude_api_key),
-        "source": "env" if os.environ.get("ANTHROPIC_API_KEY") else "session"
-    })
-```
+Match the existing pattern already in `session_api_keys` in this codebase.
 
-For session-level key injection (matching the existing `session_api_keys` pattern):
+#### Step 1 — API routes in `server.py`
+
 ```python
-@app.route("/api/claude/auth/set-key", methods=["POST"])
-def claude_set_key():
-    """Allow user to supply their own Anthropic API key for this session."""
+@app.route("/api/anthropic/auth/set-key", methods=["POST"])
+def anthropic_set_key():
+    """Store user-supplied Anthropic API key for this session."""
     data = request.get_json() or {}
     key = data.get("api_key", "").strip()
     if not key.startswith("sk-ant-"):
-        return jsonify({"error": "Invalid Anthropic API key format"}), 400
+        return jsonify({"error": "Invalid Anthropic API key. Must start with sk-ant-"}), 400
     sid = _get_or_create_session_id()
-    session_api_keys[sid] = {"anthropic": key}
+    session_api_keys.setdefault(sid, {})["anthropic"] = key
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/anthropic/auth/status")
+def anthropic_auth_status():
+    """Check if an Anthropic API key is available for this session."""
+    sid = _get_or_create_session_id()
+    has_session_key = bool(session_api_keys.get(sid, {}).get("anthropic"))
+    has_env_key = bool(ANTHROPIC_API_KEY)
+    return jsonify({
+        "authenticated": has_session_key or has_env_key,
+        "source": "session" if has_session_key else ("env" if has_env_key else "none")
+    })
+
+
+@app.route("/api/openai/auth/set-key", methods=["POST"])
+def openai_set_key():
+    """Store user-supplied OpenAI API key for this session."""
+    data = request.get_json() or {}
+    key = data.get("api_key", "").strip()
+    if not key.startswith("sk-"):
+        return jsonify({"error": "Invalid OpenAI API key. Must start with sk-"}), 400
+    sid = _get_or_create_session_id()
+    session_api_keys.setdefault(sid, {})["openai"] = key
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/openai/auth/status")
+def openai_auth_status():
+    """Check if an OpenAI API key is available for this session."""
+    sid = _get_or_create_session_id()
+    has_session_key = bool(session_api_keys.get(sid, {}).get("openai"))
+    has_env_key = bool(OPENAI_API_KEY)
+    return jsonify({
+        "authenticated": has_session_key or has_env_key,
+        "source": "session" if has_session_key else ("env" if has_env_key else "none")
+    })
 ```
 
-#### Step 4 — Update `llm_providers.py` call routing
-In the provider dispatch function, add:
+#### Step 2 — Model registry in `models.py`
+
 ```python
+# Anthropic / Claude models
+"claude-3-5-sonnet": {
+    "provider": "anthropic",
+    "model_id": "claude-3-5-sonnet-20241022",
+    "api_base": "https://api.anthropic.com/v1",
+},
+"claude-3-7-sonnet": {
+    "provider": "anthropic",
+    "model_id": "claude-3-7-sonnet-20250219",
+    "api_base": "https://api.anthropic.com/v1",
+},
+
+# OpenAI / Codex models
+"codex-mini": {
+    "provider": "openai",
+    "model_id": "codex-mini-latest",
+    "api_base": "https://api.openai.com/v1",
+},
+"o4-mini": {
+    "provider": "openai",
+    "model_id": "o4-mini",
+    "api_base": "https://api.openai.com/v1",
+},
+```
+
+#### Step 3 — Provider dispatch in `llm_providers.py`
+
+```python
+# Anthropic
 elif provider == "anthropic":
     import anthropic
-    client = anthropic.Anthropic(api_key=claude_api_key or session_key)
+    api_key = session_api_keys.get(sid, {}).get("anthropic") or ANTHROPIC_API_KEY
+    if not api_key:
+        raise ValueError("No Anthropic API key available")
+    client = anthropic.Anthropic(
+        api_key=api_key,
+        default_headers={"anthropic-version": "2023-06-01"}
+    )
     response = client.messages.create(
         model=model_id,
         max_tokens=max_tokens,
         messages=messages,
     )
     return response.content[0].text
-```
 
-#### Step 5 — Frontend (JS)
-Add a Claude key input to the model selector UI in `static/js/scaffolding-agent-spawn.js` or the settings panel, following the same UX pattern as the existing API key fields.
-
----
-
-## Plan: Adding OpenAI Codex OAuth
-
-### Authentication Method
-OpenAI uses **API key** authentication. The "Codex" models (`codex-mini-latest`, `o3`, `o4-mini`) are accessed through the standard OpenAI API — no separate OAuth flow required.
-
-> **Note:** OpenAI's real-time OAuth (used by ChatGPT plugins) requires an OAuth 2.0 authorization code flow with a registered redirect URI. This project does not currently need that level of integration.
-
-### Implementation Steps
-
-#### Step 1 — Add constants to `constants.py`
-```python
 # OpenAI / Codex
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-```
-
-#### Step 2 — Add model entries to `models.py`
-```python
-"codex-mini": {
-    "provider": "openai",
-    "api_base": "https://api.openai.com/v1",
-    "model_id": "codex-mini-latest",
-},
-"o3": {
-    "provider": "openai",
-    "api_base": "https://api.openai.com/v1",
-    "model_id": "o3",
-},
-"o4-mini": {
-    "provider": "openai",
-    "api_base": "https://api.openai.com/v1",
-    "model_id": "o4-mini",
-},
-```
-
-#### Step 3 — Add API routes to `server.py`
-```python
-@app.route("/api/openai/auth/status")
-def openai_auth_status():
-    """Check whether an OpenAI API key is configured."""
-    return jsonify({
-        "authenticated": bool(os.environ.get("OPENAI_API_KEY") or llm_providers.openai_api_key),
-        "source": "env" if os.environ.get("OPENAI_API_KEY") else "session"
-    })
-
-@app.route("/api/openai/auth/set-key", methods=["POST"])
-def openai_set_key():
-    """Allow user to supply their own OpenAI API key for this session."""
-    data = request.get_json() or {}
-    key = data.get("api_key", "").strip()
-    if not key.startswith("sk-"):
-        return jsonify({"error": "Invalid OpenAI API key format"}), 400
-    sid = _get_or_create_session_id()
-    session_api_keys[sid] = {"openai": key}
-    return jsonify({"status": "ok"})
-```
-
-#### Step 4 — Update `llm_providers.py` call routing
-OpenAI is likely already partially implemented. For Codex/o-series models, ensure reasoning tokens are handled:
-```python
 elif provider == "openai":
     from openai import OpenAI
-    client = OpenAI(api_key=openai_api_key or session_key)
+    api_key = session_api_keys.get(sid, {}).get("openai") or OPENAI_API_KEY
+    if not api_key:
+        raise ValueError("No OpenAI API key available")
+    client = OpenAI(api_key=api_key)
     # o-series models use max_completion_tokens, not max_tokens
-    kwargs = {"model": model_id, "messages": messages}
     if model_id.startswith("o"):
-        kwargs["max_completion_tokens"] = max_tokens
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=messages,
+            max_completion_tokens=max_tokens,
+        )
     else:
-        kwargs["max_tokens"] = max_tokens
-    response = client.chat.completions.create(**kwargs)
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
     return response.choices[0].message.content
 ```
 
----
-
-## If Full OAuth Is Required (Future)
-
-If the project needs a proper OAuth 2.0 flow (e.g., to let users log in with their Anthropic or OpenAI account rather than paste a key), the pattern is:
-
-### Using OpenClaw's Plugin OAuth Pattern
-
-OpenClaw's plugin system (`docs/openclaw/tools/plugin.md`) defines a standard auth method interface:
-```js
-{
-  id: "oauth",
-  label: "OAuth",
-  kind: "oauth",
-  async run(ctx) {
-    // Run OAuth flow and return auth profiles
-  }
-}
-```
-
-For ARC-AGI-3, the equivalent would be:
-1. Register a redirect URI with the provider (Anthropic/OpenAI developer console)
-2. Add `/api/[provider]/auth/login` → redirect to provider consent screen
-3. Add `/api/[provider]/auth/callback` → exchange code, store token (following the Google pattern in `server.py:525`)
-4. Use PKCE (`code_verifier`/`code_challenge`) for security
-5. Store tokens encrypted in SQLite via `db.py`, not plaintext files
-
-### CSRF Protection
-Copy the existing Google OAuth state pattern:
-```python
-state = secrets.token_urlsafe(32)
-flask_session["[provider]_oauth_state"] = state
-# Verify in callback:
-expected_state = flask_session.pop("[provider]_oauth_state", None)
-if state != expected_state:
-    abort(400)
-```
-
----
-
-## Environment Variables Required
-
-Add to `.env.example` and `constants.py`:
+#### Step 4 — Install dependencies
 
 ```bash
-# Anthropic / Claude Code
-ANTHROPIC_API_KEY=sk-ant-...
+pip install anthropic openai
+```
 
-# OpenAI / Codex
-OPENAI_API_KEY=sk-...
-
-# Optional: OAuth credentials (only needed for full browser OAuth flow)
-ANTHROPIC_CLIENT_ID=
-ANTHROPIC_CLIENT_SECRET=
-OPENAI_CLIENT_ID=
-OPENAI_CLIENT_SECRET=
+Add to `requirements.txt`:
+```
+anthropic>=0.40.0
+openai>=1.50.0
 ```
 
 ---
 
-## Security Considerations
+## Environment Variables
 
-1. **Never log API keys** — already enforced by the existing `_save_copilot_token()` pattern
-2. **Key format validation** — validate prefix (`sk-ant-` for Anthropic, `sk-` for OpenAI) before storing
-3. **Session isolation** — use `session_api_keys[sid]` not global state for user-supplied keys
-4. **Token expiry** — API keys don't expire; OAuth tokens do. If using full OAuth, implement refresh logic matching `copilot_token_expiry` pattern in `llm_providers.py`
-5. **HTTPS only** — OAuth callbacks must use HTTPS in production; `OAUTHLIB_INSECURE_TRANSPORT=1` only for local dev
+Add to `.env.example`:
 
----
+```bash
+# Anthropic / Claude
+ANTHROPIC_API_KEY=sk-ant-...
 
-## Files to Modify (Summary)
-
-| File | Change |
-|------|--------|
-| `constants.py` | Add `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` env vars |
-| `models.py` | Add Claude + Codex model entries to `MODEL_REGISTRY` |
-| `llm_providers.py` | Add `claude_api_key`, `openai_api_key` state; add provider dispatch cases |
-| `server.py` | Add `/api/claude/auth/*` and `/api/openai/auth/*` routes |
-| `static/js/` | Add key input UI to model selector (scaffolding or settings panel) |
-| `.env.example` | Document new env vars |
+# OpenAI / Codex  
+OPENAI_API_KEY=sk-...
+```
 
 ---
 
-*Document authored by Bubba — OpenClaw agent on Mac Mini M4 Pro. Questions → #openclaw-bots.*
+## Security Notes
+
+1. **Never log API keys** — mask them in all server logs
+2. **Validate key format before storing** — `sk-ant-` for Anthropic, `sk-` for OpenAI
+3. **Session-scoped keys expire** when the session ends — they are not persisted to disk
+4. **Server-side only** — keys must never be sent to the browser or included in client-side JS
+5. **o-series models** (o3, o4-mini) use `max_completion_tokens`, not `max_tokens` — the dispatch code handles this
+
+---
+
+## What This Is NOT
+
+- **Not OAuth.** Neither Anthropic nor OpenAI expose an OAuth 2.0 authorization flow for third-party web apps to access their APIs on behalf of users. Their APIs use API keys only.
+- **Not Claude Code CLI auth.** Claude Code's browser login (claude.ai) is for the CLI tool — it is not an API that other applications can call.
+- **Not like GitHub Copilot** (device-code flow) or **Google OAuth** (authorization code flow) — those patterns in this codebase are for different services and are not applicable here.
+
+---
+
+*Document authored by Bubba — OpenClaw agent on Mac Mini M4 Pro. Sources: Anthropic API docs (platform.claude.com), OpenAI API docs (platform.openai.com), Claude Code docs (code.claude.com).*
