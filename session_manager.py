@@ -1,3 +1,13 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: In-memory session state dictionaries and DB-backed session recovery
+#   for ARC-AGI-3. Manages game_sessions, session_grids, session_snapshots,
+#   session_api_mode, session_api_keys, session_step_counts, session_last_llm.
+#   Provides _reconstruct_session (replay actions on fresh env) and
+#   _try_recover_session (recover from DB). get_arcade and env_state_dict passed
+#   as callables to avoid circular imports with server.py.
+#   Extracted from server.py in Phase 2d. Depends on db.py and arcengine.
+# SRP/DRY check: Pass — all session state and recovery logic consolidated here
 """In-memory session state and DB-backed session recovery for ARC-AGI-3.
 
 Extracted from server.py (Phase 2d).

@@ -1,3 +1,11 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: UI interaction handlers for ARC-AGI-3 web UI. Provides collapsible section
+//   toggling, compact settings, grid rendering wrappers (renderGrid, renderGridWithChanges
+//   delegating to grid-renderer.js), keyboard/mouse input handling, canvas click-to-act,
+//   cell info tooltips, navigation buttons, and DOM manipulation helpers. Modified in
+//   Phase 3 to extract pure grid rendering to rendering/grid-renderer.js.
+// SRP/DRY check: Pass — pure rendering in grid-renderer.js; this file owns UI interaction
 // ═══════════════════════════════════════════════════════════════════════════
 // COLLAPSIBLE SECTIONS
 // ═══════════════════════════════════════════════════════════════════════════

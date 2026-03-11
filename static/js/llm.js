@@ -1,3 +1,13 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: LLM call orchestration for ARC-AGI-3 web UI. Handles screenshot capture,
+//   autoplay loop (single-agent, planning, RLM, three-system, agent-spawn scaffoldings),
+//   plan execution with monitor/interrupt checks, tool use (Python REPL via Pyodide),
+//   compact context generation, and reasoning panel rendering. Coordinates between
+//   scaffolding-*.js modules, ui.js, state.js, and session.js. Modified in Phases 1 & 3
+//   to extract formatting utils and token helpers to separate modules.
+// SRP/DRY check: Pass — formatting in utils/formatting.js, tokens in utils/tokens.js,
+//   scaffolding logic split into scaffolding-*.js in Phase 5
 // ═══════════════════════════════════════════════════════════════════════════
 // LLM
 // ═══════════════════════════════════════════════════════════════════════════

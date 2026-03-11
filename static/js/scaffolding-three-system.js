@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:54
+// PURPOSE: Three-System and Two-System scaffolding for ARC-AGI-3. Implements
+//   multi-agent cognitive architecture: Planner (strategic), Actor (tactical), and
+//   Monitor (evaluation) LLM agents with working memory management. Provides
+//   runThreeSystemStep(), runTwoSystemStep(), and prompt template loading from
+//   window.PROMPTS.three_system.*. Depends on callLLM, getPrompt (scaffolding.js).
+//   Extracted from scaffolding.js in Phase 5.
+// SRP/DRY check: Pass — three/two-system logic fully separated from other scaffolding types
 // ═══════════════════════════════════════════════════════════════════════════
 // SCAFFOLDING-THREE-SYSTEM — Three-System / Two-System scaffolding
 // Extracted from scaffolding.js — Phase 5 modularization

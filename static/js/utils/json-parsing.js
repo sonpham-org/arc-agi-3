@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: JSON extraction and parsing utilities for ARC-AGI-3 LLM responses.
+//   Provides findFinalMarker() (FINAL(...) detection for RLM), extractJsonFromText()
+//   (balanced-brace JSON extraction), parseRlmClientOutput() (RLM response normalization),
+//   and parseClientLLMResponse() (general LLM response parsing with <think> block support).
+//   Extracted from scaffolding.js in Phase 3. Must load BEFORE scaffolding.js and
+//   scaffolding-rlm.js. No external dependencies.
+// SRP/DRY check: Pass — all JSON extraction logic consolidated here; used by all scaffolding modules
 // ═══════════════════════════════════════════════════════════════════════════
 // JSON PARSING UTILITY
 // Extracted from scaffolding.js — Phase 3 modularization

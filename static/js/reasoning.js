@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Universal reasoning/timeline rendering for ARC-AGI-3 web UI. Provides
+//   agentColor() palette assignment, scrollReasoningToBottom(), renderTimeline() for
+//   agent spawn tree views, and shared rendering helpers used by llm.js, session.js,
+//   share-page.js, observatory.js, and obs-page.js. No scaffolding-specific code —
+//   uses agent_type from DB/events directly. Must load before all consumer scripts.
+//   Modified in Phase 1 to extract formatting to utils/formatting.js.
+// SRP/DRY check: Pass — agent color palette and timeline rendering consolidated here
 // ═══════════════════════════════════════════════════════════════════════════
 // reasoning.js — Universal reasoning/timeline rendering
 //

@@ -1,3 +1,11 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: Grid analysis utilities for ARC-AGI-3 — RLE row compression (compress_row),
+#   change map computation (compute_change_map), color histogram (compute_color_histogram),
+#   and flood-fill region map (compute_region_map). Used by server.py prompt building and
+#   prompt_builder.py. Pure Python + stdlib only — no Flask dependencies.
+#   Extracted from server.py in Phase 2a.
+# SRP/DRY check: Pass — all grid analysis logic consolidated here; imported by server.py and prompt_builder.py
 """Grid analysis helpers for ARC-AGI-3.
 
 Extracted from server.py (Phase 2a).

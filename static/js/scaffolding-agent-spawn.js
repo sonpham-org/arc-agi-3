@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Agent Spawn orchestrator scaffolding for ARC-AGI-3. Implements Agentica-style
+//   multi-agent orchestration: a coordinator LLM spawns reactive subagents, each running
+//   independent observation-action loops. Provides runAgentSpawn() entry point, subagent
+//   lifecycle management, inter-agent message passing, and result aggregation. Depends on
+//   callLLM and getPrompt from scaffolding.js, extractJsonFromText from json-parsing.js.
+//   Extracted from scaffolding.js in Phase 5.
+// SRP/DRY check: Pass — agent-spawn logic fully separated from other scaffolding types
 // ═══════════════════════════════════════════════════════════════════════════
 // SCAFFOLDING-AGENT-SPAWN — Agent Spawn orchestrator scaffolding
 // Extracted from scaffolding.js — Phase 5 modularization

@@ -1,3 +1,11 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Canonical HTML escaping and formatting utilities for ARC-AGI-3 web UI.
+//   Provides escapeHtml (XSS-safe text insertion), _esc (alias), formatDuration
+//   (ms → human-readable), and formatCost (USD formatting). Extracted from inline
+//   code in Phase 1 to eliminate duplication across llm.js, observatory.js, obs-page.js,
+//   share-page.js. Defines globals — no module system. Must load BEFORE all other scripts.
+// SRP/DRY check: Pass — single source of truth for HTML escaping and number formatting
 // ═══════════════════════════════════════════════════════════════════════════
 // formatting.js — Canonical HTML escaping and formatting utilities
 //

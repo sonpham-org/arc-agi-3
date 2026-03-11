@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: In-app observatory mode lifecycle management for ARC-AGI-3 (index.html only).
+//   Provides enterObservatoryMode(), exitObservatoryMode(), and updateObservatoryStatus()
+//   for toggling the observatory panel during live gameplay. Coordinates with session.js,
+//   reasoning.js, and state.js globals. NOT used in standalone obs.html/obs-page.js context.
+//   Extracted from observatory.js in Phase 4. Loaded after session.js.
+// SRP/DRY check: Pass — lifecycle logic separated from rendering (obs-log-renderer.js,
+//   obs-scrubber.js, obs-swimlane-renderer.js)
 /**
  * obs-lifecycle.js — In-app observatory mode lifecycle management.
  *

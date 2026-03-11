@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Share/replay page logic for ARC-AGI-3 (share.html). Renders saved session
+//   replays with grid animation, step-by-step playback, reasoning display, timeline
+//   visualization, and branch-from-step functionality. Consumes window.SESSION,
+//   window.STEPS, window.TIMELINE_DATA injected by the share.html template.
+//   Depends on reasoning.js (agentColor, renderTimeline), utils/formatting.js.
+//   Modified in Phase 1 to use shared formatting utilities.
+// SRP/DRY check: Pass — formatting extracted to utils/formatting.js in Phase 1
 const COLORS = window.COLORS;
 const ACTION_NAMES = window.ACTION_NAMES;
 const SESSION = window.SESSION;

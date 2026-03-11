@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Linear (single-turn) scaffolding prompt builder for ARC-AGI-3. Provides
+//   buildClientPrompt() — constructs the system+user message for a single LLM call
+//   with grid state, RLE compression, action history, change map, tool instructions,
+//   planning mode, and compact context support. Used by llm.js autoplayStep() for the
+//   default linear scaffolding type. Depends on getPrompt (scaffolding.js) and
+//   extractJsonFromText (json-parsing.js). Extracted from scaffolding.js in Phase 5.
+// SRP/DRY check: Pass — linear prompt logic fully separated from other scaffolding types
 // ═══════════════════════════════════════════════════════════════════════════
 // SCAFFOLDING-LINEAR — Linear (single-turn) prompt builder
 // Extracted from scaffolding.js — Phase 5 modularization

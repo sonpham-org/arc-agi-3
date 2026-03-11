@@ -1,3 +1,11 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Token estimation and pricing utilities for ARC-AGI-3 web UI. Provides
+//   estimateTokens() (rough char/4 estimate), TOKEN_PRICES lookup table for all
+//   supported models (input/output $/M tokens), and cost calculation helpers.
+//   Used by llm.js, scaffolding.js, and session.js for usage tracking and cost display.
+//   Extracted from llm.js and scaffolding.js in Phase 3. Must load BEFORE those files.
+// SRP/DRY check: Pass — single source of truth for token estimation and pricing
 // ═══════════════════════════════════════════════════════════════════════════
 // TOKENS UTILITY
 // Extracted from llm.js and scaffolding.js — Phase 3 modularization

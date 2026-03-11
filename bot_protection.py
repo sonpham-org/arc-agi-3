@@ -1,3 +1,11 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: Bot protection middleware for ARC-AGI-3 — Cloudflare Turnstile verification,
+#   IP-based rate limiting, and user-agent filtering. Provides bot_protection() and
+#   turnstile_required() decorators used by all API routes in server.py.
+#   Extracted from server.py in Phase 2c. Uses stdlib logging (not Flask app.logger)
+#   to avoid circular imports. get_mode() imported lazily inside decorator bodies.
+# SRP/DRY check: Pass — all bot/rate/Turnstile logic consolidated here
 """Bot protection, rate limiting, and Turnstile verification for ARC-AGI-3.
 
 Extracted from server.py (Phase 2c).

@@ -1,3 +1,13 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:54
+// PURPOSE: RLM (Reflective Language Model) scaffolding for ARC-AGI-3. Implements
+//   multi-turn reflective reasoning loop: system prompt construction with plan horizon,
+//   iterative LLM calls with observation feedback, FINAL(...) marker detection for
+//   convergence, and RLM response parsing into action/plan structures. Provides
+//   buildRlmSystemPrompt() and runRlmLoop(). Depends on callLLM, getPrompt (scaffolding.js),
+//   findFinalMarker, extractJsonFromText (json-parsing.js). Extracted from scaffolding.js
+//   in Phase 5.
+// SRP/DRY check: Pass — RLM logic fully separated from other scaffolding types
 // ═══════════════════════════════════════════════════════════════════════════
 // SCAFFOLDING-RLM — RLM (Reflective Language Model) scaffolding
 // Extracted from scaffolding.js — Phase 5 modularization

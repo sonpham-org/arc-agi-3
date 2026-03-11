@@ -1,3 +1,11 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: CLI autonomous agent for ARC-AGI-3. Config-driven, memory-aware game
+#   player that calls LLM providers (Gemini, Anthropic, OpenAI, local) to solve
+#   ARC puzzles via the arcengine API. Supports RLM scaffolding with Pyodide REPL,
+#   planning modes, tool use, and persistent agent memory. Standalone entry point —
+#   does not depend on Flask server. Imports from constants.py and models.py.
+# SRP/DRY check: Pass — constants moved to constants.py in Phase 1; agent logic self-contained
 """ARC-AGI-3 Autonomous Agent — config-driven, memory-aware."""
 
 import argparse

@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Shared scrubber (step slider) UI logic for ARC-AGI-3 observatory views.
+//   Provides initScrubber(), updateScrubber(), and scrubber event binding for both
+//   standalone obs.html and in-app observatory mode. Manages slider range, step label,
+//   live/paused dot indicator, and "viewing step N" banner. Extracted from obs-page.js
+//   and observatory.js in Phase 4. Requires DOM elements: #obsScrubSlider,
+//   #obsScrubLabel, #obsScrubDot, #obsScrubBanner, #obsScrubBannerText.
+// SRP/DRY check: Pass — scrubber logic consolidated; shared between standalone and in-app views
 /**
  * obs-scrubber.js — Shared scrubber UI logic for Observatory views.
  * Extracted from obs-page.js and observatory.js — Phase 4 modularization.

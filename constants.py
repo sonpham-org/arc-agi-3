@@ -1,3 +1,10 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: Shared constants for ARC-AGI-3 — color palette (COLOR_MAP, COLOR_NAMES),
+#   action labels (ACTION_NAMES), and game description text (ARC_AGI3_DESCRIPTION).
+#   Extracted from server.py in Phase 1 to eliminate duplication between server.py
+#   and agent.py. Imported by server.py, agent.py, grid_analysis.py, prompt_builder.py.
+# SRP/DRY check: Pass — single source of truth for palette/action constants
 """ARC-AGI-3 shared constants — palette, action labels, descriptions.
 
 Import from here instead of defining locally in server.py or agent.py.

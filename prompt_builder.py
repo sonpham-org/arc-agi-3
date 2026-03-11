@@ -1,3 +1,13 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: LLM prompt construction and response parsing for ARC-AGI-3. Builds
+#   config-driven prompts (_build_prompt, _build_prompt_parts) with grid RLE,
+#   history, change maps, color histograms, region maps, tool instructions, and
+#   planning mode support. Also provides _parse_llm_response and _extract_json
+#   for balanced-brace JSON extraction from LLM output. Accepts custom_system_prompt
+#   and custom_hard_memory as explicit params to avoid circular imports with server.py.
+#   Extracted from server.py in Phase 2b. Depends on constants.py and grid_analysis.py.
+# SRP/DRY check: Pass — all prompt building and LLM response parsing consolidated here
 """LLM prompt construction and response parsing for ARC-AGI-3.
 
 Extracted from server.py (Phase 2b).

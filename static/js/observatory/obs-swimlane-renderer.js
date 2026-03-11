@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Shared swimlane timeline rendering for ARC-AGI-3 observatory views.
+//   Provides renderSwimlane(config) — builds and injects HTML/CSS swimlane timeline
+//   with labeled agent lanes, colored step blocks, and scroll-synced tracks. Used by
+//   both standalone obs-page.js and in-app observatory.js. Extracted from obs-page.js
+//   and observatory.js in Phase 4. Depends on reasoning.js (agentColor) and
+//   utils/formatting.js (escapeHtml). Must load BEFORE obs-page.js and observatory.js.
+// SRP/DRY check: Pass — swimlane rendering consolidated; shared between both observatory contexts
 /**
  * obs-swimlane-renderer.js — Shared swimlane rendering helper.
  * Extracted from obs-page.js and observatory.js — Phase 4 modularization.

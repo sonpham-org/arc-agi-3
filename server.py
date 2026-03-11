@@ -1,3 +1,14 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
+#   session persistence (save/resume/branch via SQLite), game step proxying, model registry
+#   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
+#   share/replay, admin, and auth endpoints. All LLM orchestration runs CLIENT-SIDE.
+#   Phase 2 refactor extracted bot_protection.py, grid_analysis.py, prompt_builder.py,
+#   session_manager.py, and constants.py — server.py imports from those modules.
+# SRP/DRY check: Pass — model registry in models.py, grid analysis in grid_analysis.py,
+#   prompts in prompt_builder.py, sessions in session_manager.py, bot protection in
+#   bot_protection.py, DB ops in db.py; server.py is the Flask glue layer only
 """ARC-AGI-3 Web Player + LLM Reasoning Server."""
 
 import argparse

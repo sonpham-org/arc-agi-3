@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Scaffolding configuration schemas for ARC-AGI-3 web UI. Defines
+//   SCAFFOLDING_SCHEMAS — the declarative field definitions (toggles, selects,
+//   sliders, model selects) for each scaffolding type (linear, rlm, three_system,
+//   two_system, agent_spawn). Drives dynamic settings panel rendering in state.js
+//   renderScaffoldingSettings(). Also defines activeScaffoldingType global.
+//   Extracted from state.js in Phase 3. Must load BEFORE state.js.
+// SRP/DRY check: Pass — schema definitions separated from rendering logic in state.js
 // ═══════════════════════════════════════════════════════════════════════════
 // SCAFFOLDING SCHEMAS CONFIG
 // Extracted from state.js — Phase 3 modularization

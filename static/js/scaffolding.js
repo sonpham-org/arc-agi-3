@@ -1,3 +1,14 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Core scaffolding infrastructure for ARC-AGI-3 web UI. Handles API mode
+//   switching (local vs official), model discovery (loadModels), model select population,
+//   BYOK key management, LLM call routing (callLLM → _callLLMInner for Puter.js, Gemini,
+//   Anthropic, OpenAI, Cloudflare, Groq, Mistral, HuggingFace), prompt template loading
+//   (getPrompt), and RLE compression (compressRowJS). Phase 5 extracted scaffolding-specific
+//   logic into scaffolding-rlm.js, scaffolding-three-system.js, scaffolding-agent-spawn.js,
+//   and scaffolding-linear.js. Phase 3 extracted JSON parsing to utils/json-parsing.js.
+// SRP/DRY check: Pass — scaffolding types in separate files; JSON parsing in json-parsing.js;
+//   tokens in utils/tokens.js; this file is the shared LLM call infrastructure
 // ═══════════════════════════════════════════════════════════════════════════
 // API MODE (Local vs Official)
 // ═══════════════════════════════════════════════════════════════════════════

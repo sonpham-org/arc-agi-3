@@ -1,3 +1,11 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Canvas grid rendering for ARC-AGI-3 web UI. Provides renderGridOnCanvas()
+//   and renderGridWithChangesOnCanvas() — low-level canvas drawing of game grids with
+//   optional change map overlay (opacity, color, stroke). Does NOT manage currentGrid
+//   state — ui.js wrapper handles that. Extracted from ui.js in Phase 3.
+//   Must load BEFORE ui.js. No external dependencies beyond canvas API.
+// SRP/DRY check: Pass — pure rendering logic separated from UI state management in ui.js
 // ═══════════════════════════════════════════════════════════════════════════
 // GRID RENDERER
 // Extracted from ui.js — Phase 3 modularization

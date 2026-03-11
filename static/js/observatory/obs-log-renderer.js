@@ -1,3 +1,13 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Shared observatory log/tooltip rendering utilities for ARC-AGI-3. Provides
+//   obsSharedFmtK() (K/M number formatting), positionTooltip(), hideTooltip(), and
+//   step log entry rendering helpers shared by both obs-page.js (standalone) and
+//   observatory.js (in-app). No DOM dependencies except tooltip positioning.
+//   Extracted from obs-page.js and observatory.js in Phase 4. Uses utils/formatting.js
+//   for HTML escaping. Must load BEFORE obs-page.js and observatory.js.
+// SRP/DRY check: Pass — shared rendering helpers consolidated; eliminates duplication
+//   between standalone and in-app observatory views
 /**
  * obs-log-renderer.js — Shared utility functions for observatory log/tooltip rendering.
  * No DOM dependencies except positionTooltip and hideTooltip.

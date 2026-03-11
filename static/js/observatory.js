@@ -1,3 +1,13 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: In-app observatory mode for ARC-AGI-3 (index.html context). Provides
+//   staging banner, timeline rendering (renderTimeline), live scrubber, observatory
+//   event emission (emitObsEvent), and inline observatory UI for viewing session
+//   metrics during gameplay. Modified in Phases 1 & 4 to extract shared rendering
+//   into observatory/obs-lifecycle.js, obs-log-renderer.js, obs-scrubber.js, and
+//   obs-swimlane-renderer.js. Depends on reasoning.js, state.js, session.js.
+// SRP/DRY check: Pass — shared rendering in observatory/ modules; this file is the
+//   in-app orchestrator only
 if (window.location.hostname === 'staging.arc3.sonpham.net') {
   const b = document.createElement('div');
   b.textContent = 'STAGING';

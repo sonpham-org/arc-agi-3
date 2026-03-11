@@ -1,3 +1,11 @@
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+# Date: 2026-03-11 13:47
+# PURPOSE: SQLite database layer for ARC-AGI-3. Manages schema migrations, session
+#   persistence (sessions, session_actions, llm_calls), observatory data, share links,
+#   auth (magic links, Google OAuth), leaderboard, and tool execution logging.
+#   Single DB file on Railway Volume. Schema docs in .claude/database_structure.md.
+#   Modified in Phase 2 to support imports from session_manager.py.
+# SRP/DRY check: Pass — all DB operations consolidated here; session state in session_manager.py
 """ARC-AGI-3 Database Layer — SQLite persistence.
 
 Schema docs: .claude/database_structure.md

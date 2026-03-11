@@ -1,3 +1,14 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Global application state and settings management for ARC-AGI-3 web UI.
+//   Declares all global state variables (sessionId, currentGrid, moveHistory, etc.),
+//   feature flags (FEATURES), color palette (COLORS), settings persistence helpers
+//   (getScaffoldingSettings, attachSettingsListeners), scaffolding settings panel
+//   rendering (renderScaffoldingSettings from SCAFFOLDING_SCHEMAS), session state
+//   class (SessionState), multi-session tab management, and pipeline opacity updates.
+//   Modified in Phase 3 to extract SCAFFOLDING_SCHEMAS to config/scaffolding-schemas.js.
+// SRP/DRY check: Pass — schemas in config/scaffolding-schemas.js; rendering in ui.js;
+//   this file owns state declarations and settings wiring
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════════════

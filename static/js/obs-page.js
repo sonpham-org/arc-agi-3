@@ -1,3 +1,12 @@
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
+// Date: 2026-03-11 13:47
+// PURPOSE: Standalone Observatory page logic for ARC-AGI-3 (obs.html). Renders
+//   session detail views with swimlane timelines, step-by-step log, grid replay,
+//   and performance metrics. Uses obs-log-renderer.js, obs-scrubber.js, and
+//   obs-swimlane-renderer.js for shared rendering. Depends on reasoning.js for
+//   agent color palette. Modified in Phases 1 & 4 to extract formatting utils
+//   and shared observatory rendering into separate modules.
+// SRP/DRY check: Pass — shared rendering extracted to observatory/ modules in Phase 4
 // Agent colors now provided by reasoning.js agentColor()
 // (obs-page.html must load reasoning.js before this file)
 const DEFAULT_COLOR = '#6b7280';
