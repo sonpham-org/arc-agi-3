@@ -457,5 +457,32 @@
     "levels_completed": 0,
     "win_levels": 7,
     "executor_model": "gemini-2.5-flash"
+  },
+  {
+    "timestamp": "2026-03-11T17:16:59.100726",
+    "game_id": "ls20",
+    "result": "NOT_FINISHED",
+    "steps": 5,
+    "levels_completed": 0,
+    "win_levels": 7,
+    "executor_model": "gemini-2.5-flash"
+  },
+  {
+    "timestamp": "2026-03-11T17:17:15.233334",
+    "game_id": "ls20-cb3b57cc",
+    "result": "NOT_FINISHED",
+    "steps": 5,
+    "levels_completed": 0,
+    "win_levels": 7,
+    "executor_model": "gemini-2.5-flash"
+  },
+  {
+    "timestamp": "2026-03-11T17:18:00.905421",
+    "game_id": "ls20-cb3b57cc",
+    "result": "NOT_FINISHED",
+    "steps": 5,
+    "levels_completed": 0,
+    "win_levels": 7,
+    "executor_model": "gemini-2.5-flash"
   }
 ]
