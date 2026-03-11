@@ -6,6 +6,7 @@
 #   - Game step proxying (when Pyodide unavailable in browser)
 #   - Model registry API (/api/llm/models) — cloud + Ollama + local servers + LM Studio (staging only)
 #   - Cloudflare Workers AI proxy (/api/llm/cf-proxy — no browser CORS)
+#   - LM Studio CORS proxy (/api/llm/lmstudio-proxy — LM Studio has no CORS headers)
 #   - Observatory, share/replay, and admin endpoints
 #   NOTE: All LLM orchestration runs CLIENT-SIDE. See CLAUDE.md — Client-Side Architecture.
 #   NOTE: LM Studio discovery is HYBRID (Mar 2026): server probes localhost:1234 in
@@ -1394,6 +1395,47 @@ def cf_proxy():
         result = data.get("result", {})
         text = result.get("response", "") if isinstance(result, dict) else str(result)
         return jsonify({"result": text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/llm/lmstudio-proxy", methods=["POST"])
+@bot_protection
+@turnstile_required
+def lmstudio_proxy():
+    """CORS proxy for LM Studio — browser can't call localhost:1234 directly due to
+    missing Access-Control-Allow-Origin headers. Same pattern as cf_proxy above.
+    In staging mode, the server IS on the same machine as LM Studio, so server-to-server
+    HTTP works. In production (Railway), this endpoint returns 502 since the server
+    can't reach the user's localhost:1234 — user must enable CORS in LM Studio settings
+    or use a Cloudflare Tunnel for that scenario."""
+    import httpx as _hx
+    body = request.get_json(force=True) or {}
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    max_tokens = min(int(body.get("max_tokens", 16384)), 65536)
+    temperature = float(body.get("temperature", 0.3))
+    base_url = body.get("base_url", "http://localhost:1234")
+    if not model:
+        return jsonify({"error": "model is required"}), 400
+    try:
+        url = base_url.rstrip("/") + "/v1/chat/completions"
+        resp = _hx.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            },
+            timeout=120.0,
+        )
+        # Forward the actual LM Studio response — don't swallow error bodies with
+        # raise_for_status(). The client needs to see the real error message (e.g.
+        # "No user query found in messages" from Jinja template errors).
+        return jsonify(resp.json()), resp.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 

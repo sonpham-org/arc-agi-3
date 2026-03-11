@@ -608,29 +608,38 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     return data.content?.map(c => c.text).filter(Boolean).join('') || '';
   }
 
-  // ── LM Studio (local OpenAI-compatible, client-side) ──
-  // No API key needed — LM Studio runs on the user's machine. The dummy key
-  // 'local-no-key-needed' was set in loadModels() during discovery so we pass
-  // the key gate above. We don't use `key` here — we use baseUrl from localStorage.
+  // ── LM Studio (local, via server CORS proxy) ──
+  // LM Studio does NOT send CORS headers, so the browser can't call localhost:1234
+  // directly. Instead we route through /api/llm/lmstudio-proxy on our own server,
+  // which forwards to localhost:1234 server-to-server (no CORS needed). Same pattern
+  // as the Cloudflare proxy above. The dummy key 'local-no-key-needed' was set in
+  // loadModels() during discovery so we pass the key gate — we don't use it here.
   if (provider === 'lmstudio') {
     const baseUrl = localStorage.getItem('byok_lmstudio_base_url') || 'http://localhost:1234';
-    const url = baseUrl.replace(/\/$/, '') + '/v1/chat/completions';
-    const resp = await fetch(url, {
+    // LM Studio Jinja templates require at least one user message. If only system
+    // messages were provided (common in scaffold orchestrator calls), promote the
+    // system message to user role. Same pattern as the Gemini branch above.
+    let lmsMsgs = messages.map(m => ({ role: m.role, content: m.content }));
+    const hasUser = lmsMsgs.some(m => m.role === 'user');
+    if (!hasUser && lmsMsgs.length) {
+      const sysIdx = lmsMsgs.findIndex(m => m.role === 'system');
+      if (sysIdx !== -1) lmsMsgs[sysIdx] = { role: 'user', content: lmsMsgs[sysIdx].content };
+    }
+    const resp = await fetch('/api/llm/lmstudio-proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: apiModel,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        messages: lmsMsgs,
         temperature: 0.3,
         max_tokens: maxTokens,
-        stream: false,
+        base_url: baseUrl,
       }),
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(`LM Studio error ${resp.status}: ${err.error?.message || resp.statusText}. Check LM Studio is running and the model is loaded.`);
-    }
     const data = await resp.json();
+    if (!resp.ok || data.error) {
+      throw new Error(`LM Studio error: ${data.error || resp.statusText}. Check LM Studio is running and the model is loaded.`);
+    }
     callLLM._lastUsage = data.usage ? { input_tokens: data.usage.prompt_tokens || 0, output_tokens: data.usage.completion_tokens || 0 } : null;
     const msg = data.choices?.[0]?.message || {};
     // GLM-series models return thinking tokens in reasoning_content; content may be null
