@@ -1448,14 +1448,18 @@ def llm_models():
         except Exception:
             pass
 
-    # Discover local OpenAI-compatible servers (llama.cpp, vLLM, etc.) — staging only.
-    # NOTE: LM Studio (port 1234) is NOT discovered here. LM Studio discovery runs
-    # client-side in scaffolding.js loadModels() because the server deploys on Railway
-    # where localhost:1234 resolves to Railway's own host, not the user's machine.
-    # See docs/2026-03-10-lmstudio-discovery-plan.md for full rationale.
+    # Discover local OpenAI-compatible servers — staging only.
+    # Hybrid discovery strategy for LM Studio (port 1234):
+    #   - Staging: server probes localhost:1234 directly (no CORS needed, always works)
+    #   - Production (Railway): server CAN'T reach user's localhost:1234, so the browser
+    #     does client-side discovery in scaffolding.js loadModels() (requires LM Studio CORS).
+    #   - Client-side discovery deduplicates against server results to avoid double entries.
+    # See docs/lmstudio-integration.md "CORS pitfall" for why both paths are needed.
     if mode == "staging":
         import httpx
+        from models import LMSTUDIO_CAPABILITIES
         LOCAL_PORTS = [
+            (1234, "LM Studio"),
             (8080, "Local Server"),
             (8000, "Local Server"),
         ]
@@ -1472,15 +1476,21 @@ def llm_models():
                         # Skip embedding models — not chat models
                         if "embedding" in mid.lower():
                             continue
+                        is_lmstudio = (port == 1234)
+                        provider_name = "lmstudio" if is_lmstudio else "local"
+                        caps = LMSTUDIO_CAPABILITIES.get(mid, {}) if is_lmstudio else {}
+                        has_reasoning = caps.get("reasoning", False)
+                        has_image = caps.get("image", False)
                         entry = {
                             "name": mid,
                             "api_model": mid,
-                            "provider": "local",
+                            "provider": provider_name,
                             "local_port": port,
                             "local_label": label,
                             "price": f"Free ({label}:{port})",
-                            "context_window": None,
-                            "capabilities": {"image": False, "reasoning": False, "tools": False},
+                            # LM Studio context window override — default 3900 silently truncates.
+                            "context_window": 8192 if is_lmstudio else None,
+                            "capabilities": {"image": has_image, "reasoning": has_reasoning, "tools": False},
                             "available": True,
                         }
                         models.append(entry)

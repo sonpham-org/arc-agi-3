@@ -92,22 +92,25 @@ async function loadModels() {
   const data = await fetchJSON('/api/llm/models');
   modelsData = data.models || [];
 
-  // ── LM Studio client-side discovery ──
-  // The browser fetches localhost:1234/v1/models directly. This is the ONLY correct
-  // approach: the server deploys on Railway where localhost:1234 is Railway's own host,
-  // not the user's machine. CORS is enabled by default in LM Studio 0.3+.
-  // Custom base URLs (e.g. Cloudflare Tunnel) are supported via the BYOK settings panel.
-  // If LM Studio isn't running, the fetch fails silently — no error, no dropdown group.
-  // See docs/2026-03-10-lmstudio-discovery-plan.md for full architecture rationale.
+  // ── LM Studio client-side discovery (production path) ──
+  // In production (Railway), the server can't reach user's localhost:1234, so the browser
+  // fetches it directly. In staging, the server already discovered LM Studio models above
+  // via /api/llm/models — the dedup set below prevents doubles.
+  // IMPORTANT: LM Studio does NOT always send CORS headers. If CORS is disabled, this
+  // fetch fails silently and models come from server-side discovery only (staging mode).
+  // In production, user MUST enable CORS in LM Studio settings for discovery to work.
+  // See docs/lmstudio-integration.md "CORS pitfall" for details.
   try {
     const lmsBaseUrl = (localStorage.getItem('byok_lmstudio_base_url') || 'http://localhost:1234').replace(/\/$/, '');
     const lmsResp = await fetch(`${lmsBaseUrl}/v1/models`, { signal: AbortSignal.timeout(1500) });
     if (lmsResp.ok) {
       const lmsData = await lmsResp.json();
+      // Dedup: skip models the server already returned (staging mode server-side discovery)
+      const existingLms = new Set(modelsData.filter(m => m.provider === 'lmstudio').map(m => m.api_model));
       for (const m of (lmsData.data || [])) {
         const mid = m.id || '';
-        // Skip empty IDs and embedding models (not usable for chat)
-        if (!mid || mid.toLowerCase().includes('embedding')) continue;
+        // Skip empty IDs, embedding models, and duplicates from server discovery
+        if (!mid || mid.toLowerCase().includes('embedding') || existingLms.has(mid)) continue;
         // Look up known capabilities; unknown models default to text-only
         const caps = LMSTUDIO_CAPABILITIES[mid] || { reasoning: false, image: false };
         modelsData.push({
@@ -121,7 +124,11 @@ async function loadModels() {
         });
       }
     }
-  } catch (_) { /* LM Studio not running or unreachable — silently skip */ }
+  } catch (e) {
+    // LM Studio not running, unreachable, or CORS blocked — silently skip.
+    // In production (HTTPS → HTTP localhost), CORS must be enabled in LM Studio settings.
+    if (e.name !== 'AbortError') console.warn('[LM Studio discovery] client-side fetch failed:', e.message);
+  }
 
   // Add Puter.js models to modelsData (before grouping)
   if (FEATURES.puter_js) {

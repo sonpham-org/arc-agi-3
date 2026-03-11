@@ -77,7 +77,18 @@ Known reasoning-capable models (confirmed as of Mar 2026):
 ### 7. Vision/image capability — check load logs
 `qwen3.5-35b-a3b` has a vision encoder (confirmed from LM Studio load logs) but the model ID doesn't make this obvious. Image capability is set in `LMSTUDIO_CAPABILITIES` (both `scaffolding.js` and `models.py`). When confirming a new vision model, add it to both files.
 
-### 8. MLX Outlines + Pydantic enums = broken JSON schema
+### 8. CORS headers missing — browser discovery fails silently
+LM Studio does **NOT** send `Access-Control-Allow-Origin` headers by default (confirmed Mar 2026, Express-based server). When the browser fetches `http://localhost:1234/v1/models` from a page served on a different origin (e.g. `localhost:5050` or `https://your-app.railway.app`), the browser blocks the response. The `catch` block swallows the error, and no LM Studio models appear in the dropdown.
+
+**Fix:** Hybrid discovery strategy:
+- **Staging mode**: server probes `localhost:1234` directly in `/api/llm/models` (server-to-server HTTP, no CORS needed). This always works when server and LM Studio are on the same machine.
+- **Production mode (Railway)**: server can't reach user's localhost:1234, so the browser must do it. User **must enable CORS** in LM Studio → Settings → Server → Enable CORS.
+- **Client-side dedup**: `loadModels()` in `scaffolding.js` builds a `Set` of `api_model` IDs already returned by the server, skips any model the server already discovered.
+- **Console warning**: non-timeout fetch failures log `[LM Studio discovery] client-side fetch failed:` to browser console for debugging.
+
+**If a user reports "LM Studio models don't appear"**: check (1) LM Studio is running with at least one model loaded, (2) CORS is enabled in LM Studio settings if accessing from a different origin.
+
+### 9. MLX Outlines + Pydantic enums = broken JSON schema
 Pydantic enums (`Enum(str)`) generate `$defs/$ref` in their JSON schema. MLX Outlines can't handle `$ref` and returns empty content.
 
 **Fix:** Use `Literal["a", "b", "c"]` instead of `Enum` for any field used in structured output.

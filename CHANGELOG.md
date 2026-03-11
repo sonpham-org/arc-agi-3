@@ -34,6 +34,7 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 - **`docs/lmstudio-integration.md` rewritten** — architecture section now documents client-side discovery flow; pitfalls #3, #6, #7 updated to reference correct files; testing section replaced with browser-based verification; client↔server communication analysis and next-developer notes added.
 - **`CHANGELOG.md` created and maintained** (this file) — was missing, now tracks all changes.
 - **Dead `LMSTUDIO_CAPABILITIES` import removed** from `server.py` — no longer used after server-side discovery removal. Comment added explaining it lives in `models.py` for CLI agent path only.
+- **Hybrid discovery strategy implemented** — LM Studio does NOT send CORS headers by default, so browser-only discovery fails silently. Fix: server-side discovery restored for staging mode (server is local, no CORS needed); client-side discovery kept for production (Railway, requires user to enable CORS in LM Studio). Client-side dedup prevents doubles when both paths find models. Console warning added for CORS/network failures to aid debugging. New pitfall documented in `docs/lmstudio-integration.md`.
 
 ---
 
