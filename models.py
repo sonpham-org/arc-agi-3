@@ -220,6 +220,31 @@ MODEL_REGISTRY: dict[str, dict] = {
         "context_window": 128000,
         "capabilities": {"image": True, "reasoning": False, "tools": False},
     },
+    # ── OpenAI / Codex ────────────────────────────────────────────────────
+    "openai/o4-mini": {
+        "provider": "openai", "api_model": "o4-mini",
+        "env_key": "OPENAI_API_KEY",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "price": "$1.10/$4.40 per 1M tok",
+        "context_window": 200000,
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
+    },
+    "openai/o3": {
+        "provider": "openai", "api_model": "o3",
+        "env_key": "OPENAI_API_KEY",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "price": "$10/$40 per 1M tok",
+        "context_window": 200000,
+        "capabilities": {"image": True, "reasoning": True, "tools": True},
+    },
+    "openai/codex-mini": {
+        "provider": "openai", "api_model": "codex-mini-latest",
+        "env_key": "OPENAI_API_KEY",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "price": "$1.50/$6 per 1M tok",
+        "context_window": 200000,
+        "capabilities": {"image": False, "reasoning": True, "tools": True},
+    },
     # ── GitHub Copilot (local only, requires OAuth) ──────────────────────
     "copilot/gpt-4.1": {
         "provider": "copilot", "api_model": "gpt-4.1",

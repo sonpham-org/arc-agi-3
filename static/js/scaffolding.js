@@ -467,10 +467,15 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
   // ── OpenAI-compatible (OpenAI, Groq, Mistral) ──
   if (provider === 'openai' || provider === 'groq' || provider === 'mistral') {
     const urls = { openai: 'https://api.openai.com/v1/chat/completions', groq: 'https://api.groq.com/openai/v1/chat/completions', mistral: 'https://api.mistral.ai/v1/chat/completions' };
+    // o-series and codex models require max_completion_tokens (not max_tokens) and omit temperature
+    const isOSeries = provider === 'openai' && /^(o1|o3|o4|codex)/.test(apiModel);
+    const bodyParams = isOSeries
+      ? { model: apiModel, messages: messages.map(m => ({ role: m.role, content: m.content })), max_completion_tokens: maxTokens }
+      : { model: apiModel, messages: messages.map(m => ({ role: m.role, content: m.content })), temperature: 0.3, max_tokens: maxTokens };
     const resp = await fetch(urls[provider], {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model: apiModel, messages: messages.map(m => ({ role: m.role, content: m.content })), temperature: 0.3, max_tokens: maxTokens }),
+      body: JSON.stringify(bodyParams),
     });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);

@@ -3,7 +3,7 @@
 **Author:** Bubba (OpenClaw agent)  
 **Date:** 2026-03-11  
 **Branch:** refactor/phase-1-modularization  
-**Status:** Design document — not yet implemented  
+**Status:** Implemented — 2026-03-11
 **Sources:** Official Anthropic API docs (platform.claude.com), Official OpenAI API docs (platform.openai.com), Claude Code docs (code.claude.com)
 
 ---

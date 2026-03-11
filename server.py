@@ -161,6 +161,9 @@ RESEND_FROM = os.environ.get("RESEND_FROM", "noreply@arc3.sonpham.net")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
+# OpenAI / Codex
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
 
 # ── Auth helpers ──────────────────────────────────────────────────────────
 
@@ -1195,6 +1198,60 @@ def copilot_auth_status():
         "authenticated": authenticated,
         "pending": pending,
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CLAUDE CODE AUTH ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/api/claude/auth/status")
+@bot_protection
+def claude_auth_status():
+    """Check whether an Anthropic API key is configured (env or session)."""
+    return jsonify({
+        "authenticated": bool(llm_providers.claude_api_key),
+        "source": "env" if os.environ.get("ANTHROPIC_API_KEY") else "session",
+    })
+
+
+@app.route("/api/claude/auth/set-key", methods=["POST"])
+@bot_protection
+def claude_set_key():
+    """Allow the user to supply their own Anthropic API key for this session."""
+    data = request.get_json() or {}
+    key = data.get("api_key", "").strip()
+    if not key.startswith("sk-ant-"):
+        return jsonify({"error": "Invalid Anthropic API key format (expected sk-ant-...)"}), 400
+    llm_providers.claude_api_key = key
+    return jsonify({"status": "ok"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# OPENAI / CODEX AUTH ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/api/openai/auth/status")
+@bot_protection
+def openai_auth_status():
+    """Check whether an OpenAI API key is configured (env or session)."""
+    return jsonify({
+        "authenticated": bool(llm_providers.openai_api_key),
+        "source": "env" if os.environ.get("OPENAI_API_KEY") else "session",
+    })
+
+
+@app.route("/api/openai/auth/set-key", methods=["POST"])
+@bot_protection
+def openai_set_key():
+    """Allow the user to supply their own OpenAI API key for this session."""
+    data = request.get_json() or {}
+    key = data.get("api_key", "").strip()
+    if not key.startswith("sk-"):
+        return jsonify({"error": "Invalid OpenAI API key format (expected sk-...)"}), 400
+    llm_providers.openai_api_key = key
+    return jsonify({"status": "ok"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════

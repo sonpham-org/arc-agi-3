@@ -53,12 +53,27 @@ copilot_device_code: Optional[str] = None
 copilot_auth_lock = threading.Lock()
 
 # ═══════════════════════════════════════════════════════════════════════════
+# CLAUDE CODE AUTH STATE
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Initialized from env var; can be overridden at runtime via /api/claude/auth/set-key
+claude_api_key: Optional[str] = os.environ.get("ANTHROPIC_API_KEY") or None
+
+# ═══════════════════════════════════════════════════════════════════════════
+# OPENAI / CODEX AUTH STATE
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Initialized from env var; can be overridden at runtime via /api/openai/auth/set-key
+openai_api_key: Optional[str] = os.environ.get("OPENAI_API_KEY") or None
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PER-PROVIDER THROTTLE
 # ═══════════════════════════════════════════════════════════════════════════
 
 PROVIDER_MIN_DELAY: dict[str, float] = {
     "gemini":      4.0,
     "anthropic":   1.0,
+    "openai":      1.0,
     "groq":        2.5,
     "mistral":     2.0,
     "huggingface": 6.0,
@@ -423,7 +438,7 @@ def _call_gemini(model_name: str, prompt: str, image_b64: str | None = None,
 
 def _call_anthropic(model_name: str, prompt: str, image_b64: str | None = None, max_tokens: int = 16384) -> str:
     import httpx
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = claude_api_key or ""
     content_blocks: list[dict] = []
     if image_b64:
         content_blocks.append({
@@ -450,6 +465,48 @@ def _call_anthropic(model_name: str, prompt: str, image_b64: str | None = None, 
     data = resp.json()
     text = data["content"][0]["text"]
     if data.get("stop_reason") == "max_tokens":
+        return {"text": text, "truncated": True}
+    return text
+
+
+def _call_openai(model_name: str, prompt: str, image_b64: str | None = None, max_tokens: int = 16384) -> str | dict:
+    import httpx
+    api_key = openai_api_key or ""
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not configured")
+
+    # o-series and codex models require max_completion_tokens (not max_tokens) and no temperature
+    is_o_series = model_name.startswith(("o1", "o3", "o4", "codex"))
+
+    if image_b64 and not is_o_series:
+        user_content: list | str = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+    else:
+        user_content = prompt
+
+    messages = [
+        {"role": "system", "content": SYSTEM_MSG},
+        {"role": "user", "content": user_content},
+    ]
+    body: dict = {"model": model_name, "messages": messages}
+    if is_o_series:
+        body["max_completion_tokens"] = max_tokens
+    else:
+        body["max_tokens"] = max_tokens
+        body["temperature"] = 0.3
+
+    resp = httpx.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=body,
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    text = data["choices"][0]["message"]["content"]
+    if data["choices"][0].get("finish_reason") == "length":
         return {"text": text, "truncated": True}
     return text
 
@@ -642,6 +699,8 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
                             max_tokens=max_tokens)
     if provider == "anthropic":
         return _call_anthropic(api_model, prompt, img, max_tokens=max_tokens)
+    if provider == "openai":
+        return _call_openai(api_model, prompt, img, max_tokens=max_tokens)
     if provider == "cloudflare":
         return _call_cloudflare(api_model, prompt, img, max_tokens=max_tokens)
     if provider == "copilot":
