@@ -223,33 +223,18 @@ function updateModelEta() { /* removed — countdown/ETA disabled */ }
 
 function renderGrid(grid) {
   if (!grid || !grid.length) return;
-  currentGrid = grid;
-  const h = grid.length, w = grid[0].length;
-  const scale = Math.floor(512 / Math.max(h, w));
-  canvas.width = w * scale;
-  canvas.height = h * scale;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      ctx.fillStyle = COLORS[grid[y][x]] || '#000';
-      ctx.fillRect(x * scale, y * scale, scale, scale);
-    }
-  }
+  currentGrid = grid;  // ui.js-specific side effect
+  renderGridOnCanvas(grid, canvas, ctx, COLORS);
 }
 
 function renderGridWithChanges(grid, changeMap) {
-  renderGrid(grid);
-  if (!changeMap?.changes?.length) return;
-  if (!document.getElementById('showChanges').checked) return;
-  const h = grid.length, w = grid[0].length;
-  const scale = Math.floor(512 / Math.max(h, w));
-  const opacity = parseInt(document.getElementById('changeOpacity').value) / 100;
-  const color = document.getElementById('changeColor').value;
-  const r = parseInt(color.slice(1,3), 16), g = parseInt(color.slice(3,5), 16), b = parseInt(color.slice(5,7), 16);
-  ctx.fillStyle = `rgba(${r},${g},${b},${opacity})`;
-  for (const c of changeMap.changes) ctx.fillRect(c.x * scale, c.y * scale, scale, scale);
-  ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(opacity + 0.3, 1)})`;
-  ctx.lineWidth = 1;
-  for (const c of changeMap.changes) ctx.strokeRect(c.x * scale + 0.5, c.y * scale + 0.5, scale - 1, scale - 1);
+  renderGridOnCanvas(grid, canvas, ctx, COLORS);
+  const enabled = document.getElementById('showChanges') ? document.getElementById('showChanges').checked : true;
+  const opacityEl = document.getElementById('changeOpacity');
+  const colorEl = document.getElementById('changeColor');
+  const opacity = opacityEl ? parseInt(opacityEl.value) / 100 : 0.4;
+  const color = colorEl ? colorEl.value : '#ff0000';
+  renderGridWithChangesOnCanvas(grid, changeMap, canvas, ctx, COLORS, { opacity, color, stroke: true, enabled });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

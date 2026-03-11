@@ -659,10 +659,14 @@ window.PROMPTS = {{ prompts | tojson }};
 
 <!-- Application JS (load order matters) -->
 <script src="/static/js/utils/formatting.js?v={{ static_v }}"></script>
+<script src="/static/js/config/scaffolding-schemas.js?v={{ static_v }}"></script>
 <script src="/static/js/state.js?v={{ static_v }}"></script>
 <script src="/static/js/engine.js?v={{ static_v }}"></script>
 <script src="/static/js/reasoning.js?v={{ static_v }}"></script>
+<script src="/static/js/utils/tokens.js?v={{ static_v }}"></script>
+<script src="/static/js/rendering/grid-renderer.js?v={{ static_v }}"></script>
 <script src="/static/js/ui.js?v={{ static_v }}"></script>
+<script src="/static/js/utils/json-parsing.js?v={{ static_v }}"></script>
 <script src="/static/js/llm.js?v={{ static_v }}"></script>
 <script src="/static/js/scaffolding.js?v={{ static_v }}"></script>
 <script src="/static/js/session.js?v={{ static_v }}"></script>

@@ -319,46 +319,13 @@ function buildRlmUserContinue(planHorizon) {
   return _RLM_USER_CONTINUE_TEMPLATE.replace('{plan_instruction}', _rlmPlanInstruction(planHorizon));
 }
 
-function _rlmFindFinal(text) {
-  if (typeof text !== 'string') return null;
-  // Strip code blocks before checking for FINAL
-  const stripped = text.replace(/```repl\s*\n[\s\S]*?\n```/g, '');
-  // Check for FINAL(...)
-  const finalMatch = stripped.match(/^\s*FINAL\((.+)\)\s*$/ms);
-  if (finalMatch) return finalMatch[1].trim();
-  return null;
-}
-
-function _extractJsonFromText(text) {
-  if (typeof text !== 'string') text = JSON.stringify(text);
-  // Balanced-brace JSON extraction (same logic as parseClientLLMResponse)
-  const cleaned = text.replace(/^\s*\/\/.*$/gm, '');
-  for (let i = 0; i < cleaned.length; i++) {
-    if (cleaned[i] !== '{') continue;
-    let depth = 0, inStr = false, esc = false;
-    for (let j = i; j < cleaned.length; j++) {
-      const ch = cleaned[j];
-      if (esc) { esc = false; continue; }
-      if (ch === '\\' && inStr) { esc = true; continue; }
-      if (ch === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) {
-        try {
-          const parsed = JSON.parse(cleaned.substring(i, j + 1));
-          if (parsed.action !== undefined || parsed.plan || parsed.actions || parsed.command) return parsed;
-        } catch {}
-        break;
-      }}
-    }
-  }
-  return null;
-}
+// _rlmFindFinal → findFinalMarker, _extractJsonFromText → extractJsonFromText
+// Both defined in utils/json-parsing.js (loaded before scaffolding.js)
 
 function _parseRlmClientOutput(finalAnswer, iterationsLog, planHorizon) {
   let parsed = null;
   if (finalAnswer) {
-    parsed = _extractJsonFromText(finalAnswer);
+    parsed = extractJsonFromText(finalAnswer);
     if (!parsed) {
       try { parsed = JSON.parse(finalAnswer); } catch {}
     }
@@ -366,7 +333,7 @@ function _parseRlmClientOutput(finalAnswer, iterationsLog, planHorizon) {
   // Fallback: try to extract from last response
   if (!parsed && iterationsLog.length) {
     const lastResp = iterationsLog[iterationsLog.length - 1].response || '';
-    parsed = _extractJsonFromText(lastResp);
+    parsed = extractJsonFromText(lastResp);
   }
   if (!parsed) return null;
   // Normalize: "actions" array → "plan"
@@ -684,7 +651,7 @@ if 'SHOW_VARS' not in dir():
     }
 
     // Check for FINAL() in response text (outside code blocks)
-    finalAnswer = _rlmFindFinal(responseText);
+    finalAnswer = findFinalMarker(responseText);
     if (finalAnswer) break;
 
     // Append to conversation
@@ -752,6 +719,11 @@ const TS_WM_SYSTEM_PROMPT = getPrompt('three_system.wm_system');
 const TS_WM_CONTEXT = window.PROMPTS.three_system.wm_context;
 const TS_MONITOR_PROMPT = window.PROMPTS.three_system.monitor;
 
+/**
+ * Template fill for Three-System (TS) prompts.
+ * Supports {{/}} escaping for literal brace output.
+ * NOTE: Do NOT replace with _asFill — _asFill lacks {{ }} escape support.
+ */
 function _tsTemplateFill(template, vars) {
   return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] !== undefined ? vars[key] : '')
                  .replace(/\{\{/g, '{').replace(/\}\}/g, '}');
@@ -854,7 +826,7 @@ If uncertain, say "uncertain — <best guess>". Keep each prediction under 100 c
       [{role: 'system', content: prompt}],
       wmModel, { maxTokens: wmMaxTokens, thinkingLevel: wmThinking }
     );
-    const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
+    const parsed = extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
     if (parsed && parsed.predictions) {
       const preds = parsed.predictions;
       while (preds.length < actions.length) preds.push('no prediction');
@@ -935,7 +907,7 @@ async function _tsRunWmUpdate(tsState, context, settings, waitEl, isActive) {
     // Emit obs event for WM call
     emitObsEvent(getActiveSession(), { event: 'wm_update', agent: 'world_model', model: wmModel, duration_ms: durMs, summary: (raw || '').slice(0, 200) });
 
-    const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
+    const parsed = extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.type) {
       const recovered = _tsRecoverTruncatedRules(raw);
@@ -1005,7 +977,7 @@ async function _tsMonitorCheck(step, expected, changeData, gameState, settings, 
   try {
     const raw = await callLLM([{role: 'system', content: prompt}], monitorModel, { maxTokens: monitorMaxTokens, thinkingLevel: monitorThinking });
     const durMs = Math.round(performance.now() - t0);
-    const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
+    const parsed = extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
     if (!parsed) return {verdict: 'CONTINUE', reason: 'monitor parse error', discovery: null, duration_ms: durMs};
 
     let verdict = (parsed.verdict || 'CONTINUE').toUpperCase();
@@ -1171,7 +1143,7 @@ async function askLLMThreeSystem(_cur, model, modelInfo, waitEl, isActiveFn, his
     // Emit obs event for planner call
     emitObsEvent(getActiveSession(), { event: 'planner_call', agent: 'planner', model: plannerModel, duration_ms: durMs, summary: (raw || '').slice(0, 200) });
 
-    const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
+    const parsed = extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.type) {
       plannerLog.push({turn, type: 'error', error: 'unparseable', duration_ms: durMs, raw});
@@ -1645,6 +1617,12 @@ Option B — Use a frame tool to analyze the grid:
 Option C — Report findings and yield to orchestrator:
 {"command": "report", "findings": ["finding1", ...], "hypotheses": ["hypothesis1", ...], "summary": "what I learned"}`;
 
+/**
+ * Template fill for Agent-Spawn (AS) prompts.
+ * Uses replaceAll with explicit String() coercion.
+ * NOTE: Does not support {{/}} escaping. Do NOT replace with _tsTemplateFill
+ * without verifying no AS templates need literal { } output.
+ */
 function _asFill(template, vars) {
   let s = template;
   for (const [k, v] of Object.entries(vars)) s = s.replaceAll('{' + k + '}', String(v));
@@ -1665,26 +1643,8 @@ async function askLLMAgentSpawn(_cur, model, modelInfo, waitEl, isActiveFn, hist
   const maxSubBudget = parseInt(settings.max_subagent_budget) || 5;
   const orchMaxTurns = parseInt(settings.orchestrator_max_turns) || 5;
 
-  // Token/cost tracking helper — accumulates into session totals
+  // Token/cost tracking — uses trackTokenUsage() from utils/tokens.js
   const _asTokens = _cur.sessionTotalTokens || sessionTotalTokens;
-  function _asTrackUsage(model, rawText) {
-    const usage = callLLM._lastUsage;
-    let inputTok = usage?.input_tokens || 0;
-    let outputTok = usage?.output_tokens || 0;
-    // Estimate if API didn't report
-    if (!inputTok && rawText) inputTok = Math.ceil((rawText).length / 4);
-    if (!outputTok && rawText) outputTok = Math.ceil((rawText).length / 4);
-    _asTokens.input += inputTok;
-    _asTokens.output += outputTok;
-    const prices = TOKEN_PRICES[model] || null;
-    let cost = 0;
-    if (prices) {
-      cost = (inputTok * prices[0] + outputTok * prices[1]) / 1_000_000;
-      _asTokens.cost += cost;
-    }
-    callLLM._lastUsage = null;
-    return { input_tokens: inputTok, output_tokens: outputTok, cost };
-  }
 
   // Init shared memory on session (stack-based)
   if (!_cur._asMemories) {
@@ -1841,8 +1801,8 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
       break;
     }
     const durMs = Math.round(performance.now() - t0);
-    const orchUsage = _asTrackUsage(orchModel, raw || '');
-    const parsed = _extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
+    const orchUsage = trackTokenUsage(orchModel, raw || '', _asTokens);
+    const parsed = extractJsonFromText(raw) || (() => { try { return JSON.parse(raw); } catch { return null; } })();
 
     if (!parsed || !parsed.command) {
       console.warn(`[agent_spawn] orchestrator turn ${turn}: unparseable response (${(raw||'').length} chars):`, raw?.substring(0, 500));
@@ -1944,9 +1904,9 @@ Decide your next move. Respond with a JSON object (delegate or think).`, turnVar
           console.error(`[agent_spawn] ${agentType} iter ${si} failed:`, e);
           break;
         }
-        const subUsage = _asTrackUsage(subModel, subRaw || '');
+        const subUsage = trackTokenUsage(subModel, subRaw || '', _asTokens);
 
-        const subParsed = _extractJsonFromText(subRaw) || (() => { try { return JSON.parse(subRaw); } catch { return null; } })();
+        const subParsed = extractJsonFromText(subRaw) || (() => { try { return JSON.parse(subRaw); } catch { return null; } })();
         if (!subParsed || !subParsed.command) {
           console.warn(`[agent_spawn] ${agentType} iter ${si}: unparseable response (${(subRaw||'').length} chars):`, subRaw?.substring(0, 500));
           break;
@@ -2213,39 +2173,7 @@ Rules:
   return parts.join('\n\n');
 }
 
-function parseClientLLMResponse(content, modelName) {
-  let thinking = '';
-  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
-  if (thinkMatch) {
-    thinking = thinkMatch[1].trim();
-    content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  }
-  // Extract JSON using balanced-brace matching
-  // Strip comments first, then find each top-level { } block via brace counting
-  const cleaned = content.replace(/^\s*\/\/.*$/gm, '');
-  for (let i = 0; i < cleaned.length; i++) {
-    if (cleaned[i] !== '{') continue;
-    let depth = 0, inStr = false, esc = false;
-    for (let j = i; j < cleaned.length; j++) {
-      const ch = cleaned[j];
-      if (esc) { esc = false; continue; }
-      if (ch === '\\' && inStr) { esc = true; continue; }
-      if (ch === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) {
-        try {
-          const parsed = JSON.parse(cleaned.substring(i, j + 1));
-          if (parsed.action !== undefined || parsed.plan) {
-            return { raw: content, thinking: thinking ? thinking.substring(0, 500) : null, parsed, model: modelName };
-          }
-        } catch {}
-        break;
-      }}
-    }
-  }
-  return { raw: content, parsed: null, model: modelName };
-}
+// parseClientLLMResponse / parseLLMResponse — defined in utils/json-parsing.js (loaded before scaffolding.js)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT-SIDE LLM PROVIDERS (Puter.js + BYOK)
