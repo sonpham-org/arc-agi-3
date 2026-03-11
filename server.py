@@ -856,6 +856,45 @@ def dev_jump_level():
     return jsonify(state)
 
 
+@app.route("/api/llm/lmstudio-proxy", methods=["POST"])
+@bot_protection
+@turnstile_required
+def lmstudio_proxy():
+    """CORS proxy for LM Studio — browser can't call localhost:1234 directly due to
+    missing Access-Control-Allow-Origin headers. Same pattern as cf_proxy below.
+    In staging mode the server and LM Studio share the same machine, so server-to-server
+    HTTP works. In prod (Railway) the server can't reach the user's localhost:1234 —
+    user must enable CORS in LM Studio settings for that scenario."""
+    import httpx as _hx
+    body = request.get_json(force=True) or {}
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    max_tokens = min(int(body.get("max_tokens", 16384)), 65536)
+    temperature = float(body.get("temperature", 0.3))
+    base_url = body.get("base_url", "http://localhost:1234")
+    if not model:
+        return jsonify({"error": "model is required"}), 400
+    try:
+        url = base_url.rstrip("/") + "/v1/chat/completions"
+        resp = _hx.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            },
+            timeout=300.0,
+        )
+        # Forward the actual LM Studio response body and status — don't swallow error
+        # details with raise_for_status() (e.g. "No user query found in messages").
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/llm/cf-proxy", methods=["POST"])
 @bot_protection
 @turnstile_required
