@@ -23,30 +23,11 @@ load_dotenv(Path(__file__).parent / ".env")
 
 ROOT = Path(__file__).parent
 
+from constants import COLOR_NAMES, ACTION_NAMES, ARC_AGI3_DESCRIPTION, SYSTEM_MSG
+
 # Thread-safety locks for shared file writes
 _memory_lock = threading.Lock()
 _session_log_lock = threading.Lock()
-
-# ── Palette & action labels ────────────────────────────────────────────────
-
-COLOR_NAMES = {
-    0: "White", 1: "LightGray", 2: "Gray", 3: "DarkGray",
-    4: "VeryDarkGray", 5: "Black", 6: "Magenta", 7: "LightMagenta",
-    8: "Red", 9: "Blue", 10: "LightBlue", 11: "Yellow",
-    12: "Orange", 13: "Maroon", 14: "Green", 15: "Purple",
-}
-
-ACTION_NAMES = {
-    0: "RESET", 1: "ACTION1", 2: "ACTION2", 3: "ACTION3",
-    4: "ACTION4", 5: "ACTION5", 6: "ACTION6", 7: "ACTION7",
-}
-
-ARC_AGI3_DESCRIPTION = (Path(__file__).parent / "prompts" / "shared" / "arc_description.txt").read_text().strip()
-
-SYSTEM_MSG = (
-    "You are an expert puzzle-solving AI. Analyse game grids and output ONLY "
-    "valid JSON — no markdown, no explanation outside JSON."
-)
 
 
 @dataclass

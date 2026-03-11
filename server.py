@@ -42,6 +42,7 @@ from llm_providers import (
     copilot_auth_lock, _save_copilot_token, PROVIDER_MIN_DELAY,
 )
 import llm_providers
+from constants import COLOR_MAP, COLOR_NAMES, ACTION_NAMES, ARC_AGI3_DESCRIPTION
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -365,28 +366,6 @@ from db import (
     claim_sessions, get_user_sessions,
     count_recent_magic_links, AUTH_TOKEN_TTL,
 )
-
-COLOR_MAP = {
-    0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999", 3: "#666666",
-    4: "#333333", 5: "#000000", 6: "#E53AA3", 7: "#FF7BCC",
-    8: "#F93C31", 9: "#1E93FF", 10: "#88D8F1", 11: "#FFDC00",
-    12: "#FF851B", 13: "#921231", 14: "#4FCC30", 15: "#A356D6",
-}
-
-COLOR_NAMES = {
-    0: "White", 1: "LightGray", 2: "Gray", 3: "DarkGray",
-    4: "VeryDarkGray", 5: "Black", 6: "Magenta", 7: "LightMagenta",
-    8: "Red", 9: "Blue", 10: "LightBlue", 11: "Yellow",
-    12: "Orange", 13: "Maroon", 14: "Green", 15: "Purple",
-}
-
-ACTION_NAMES = {
-    0: "RESET", 1: "ACTION1", 2: "ACTION2", 3: "ACTION3",
-    4: "ACTION4", 5: "ACTION5", 6: "ACTION6", 7: "ACTION7",
-}
-
-ARC_AGI3_DESCRIPTION = (Path(__file__).parent / "prompts" / "shared" / "arc_description.txt").read_text().strip()
-
 
 def _load_prompts():
     """Load all prompt .txt files from prompts/ directory for injection into templates."""

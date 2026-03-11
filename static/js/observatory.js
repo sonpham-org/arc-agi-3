@@ -49,14 +49,9 @@ let obsTimelineAutoScroll = true;
 let _obsSyncTimer = null;
 let _obsElapsedTimer = null;
 
-function obsAgentColor(agent) {
-  if (!agent) return OBS_DEFAULT_COLOR;
-  return agentColor(agent);
-}
-
 function obsAgentBadge(agent) {
   if (!agent) return '<span style="color:var(--text-dim)">--</span>';
-  const c = obsAgentColor(agent);
+  const c = agentColor(agent) || OBS_DEFAULT_COLOR;
   return `<span class="obs-agent-badge" style="background:${c}">${agent}</span>`;
 }
 
@@ -71,11 +66,6 @@ function obsHexToRgba(hex, alpha) {
   const g = parseInt(hex.slice(3,5), 16);
   const b = parseInt(hex.slice(5,7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
-}
-
-function obsEscHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── Event model ──
@@ -315,7 +305,7 @@ function appendObsLogRow(ev, evIdx) {
   const tr = document.createElement('tr');
   if (ev.step_num != null) tr.dataset.step = ev.step_num;
   const agent = ev.agent || '';
-  const c = obsAgentColor(agent);
+  const c = agentColor(agent) || OBS_DEFAULT_COLOR;
   tr.style.borderLeft = `3px solid ${c}`;
 
   const time = ev.t ? ev.t.split('T')[1]?.split('.')[0] || ev.t : '';
@@ -324,13 +314,13 @@ function appendObsLogRow(ev, evIdx) {
   const tokOut = ev.output_tokens || '';
   const dur = ev.duration_ms ? `${ev.duration_ms}ms` : '';
 
-  let details = obsEscHtml(obsBuildDetails(ev));
+  let details = escapeHtml(obsBuildDetails(ev));
   let expandHtml = '';
   if (ev.summary || ev.error || ev.response_preview) {
     const parts = [];
-    if (ev.response_preview) parts.push(obsEscHtml(ev.response_preview));
-    if (ev.error) parts.push(`<span style="color:var(--red)">Error: ${obsEscHtml(ev.error)}</span>`);
-    if (ev.summary) parts.push(obsEscHtml(ev.summary));
+    if (ev.response_preview) parts.push(escapeHtml(ev.response_preview));
+    if (ev.error) parts.push(`<span style="color:var(--red)">Error: ${escapeHtml(ev.error)}</span>`);
+    if (ev.summary) parts.push(escapeHtml(ev.summary));
     expandHtml = `<div class="obs-response-detail">${parts.join('\n')}</div>`;
   }
 
@@ -520,7 +510,7 @@ function renderObsSwimlane(ss) {
   let tracksHtml = '';
 
   for (const [agent, entries] of laneMap) {
-    const c = obsAgentColor(agent);
+    const c = agentColor(agent) || OBS_DEFAULT_COLOR;
     labelsHtml += `<div class="obs-swimlane-label" style="color:${c}">${agent}</div>`;
     tracksHtml += '<div class="obs-swimlane-row">';
 
@@ -560,7 +550,7 @@ function renderObsSwimlane(ss) {
       const ev = events[idx];
       if (!ev) return;
       const agent = ev.agent || '';
-      const c = obsAgentColor(agent);
+      const c = agentColor(agent) || OBS_DEFAULT_COLOR;
       let html = `<div class="tt-agent" style="color:${c}">${agent || 'system'}</div>`;
       html += `<div>${ev.event || ''}</div>`;
       if (ev.elapsed_s != null) html += `<div class="tt-dim">t = +${ev.elapsed_s.toFixed(1)}s</div>`;

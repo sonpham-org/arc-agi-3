@@ -250,7 +250,7 @@ function renderNewEvents(events) {
       <td class="dur">${elapsed}</td>
       <td>${agentBadge(agent)}</td>
       <td>${ev.event || ''}</td>
-      <td class="details" title="Click to expand">${escHtml(details)}${expandHtml}</td>
+      <td class="details" title="Click to expand">${escapeHtmlAttr(details)}${expandHtml}</td>
       <td class="tok">${tokIn ? fmtK(tokIn) + '/' + fmtK(tokOut) : ''}</td>
       <td class="dur">${dur}</td>
     `;
@@ -349,7 +349,7 @@ function buildExpandDetail(ev) {
 
   // Full response gets priority display
   if (ev.response && ev.response.length > 0) {
-    parts.push(`<span class="resp-label">LLM Response (${ev.response.length.toLocaleString()} chars)</span>${escHtml(ev.response)}`);
+    parts.push(`<span class="resp-label">LLM Response (${ev.response.length.toLocaleString()} chars)</span>${escapeHtmlAttr(ev.response)}`);
   }
 
   // Show all other fields as structured key-value pairs (prompt_preview last)
@@ -357,7 +357,7 @@ function buildExpandDetail(ev) {
   if (fields.length > 0) {
     const fieldLines = fields.map(([k, v]) => {
       const val = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
-      return `<span style="color:#666">${k}:</span> ${escHtml(val)}`;
+      return `<span style="color:#666">${k}:</span> ${escapeHtmlAttr(val)}`;
     }).join('\n');
     if (parts.length > 0) {
       parts.push(`\n<span class="resp-label" style="margin-top:8px">Event Fields</span>${fieldLines}`);
@@ -368,16 +368,13 @@ function buildExpandDetail(ev) {
 
   // Prompt preview at the bottom, collapsed
   if (ev.prompt_preview && ev.prompt_preview.length > 0) {
-    parts.push(`\n<span class="resp-label" style="margin-top:8px;color:#555">Prompt Preview (${ev.prompt_preview.length.toLocaleString()} chars)</span><span style="color:#555">${escHtml(ev.prompt_preview)}</span>`);
+    parts.push(`\n<span class="resp-label" style="margin-top:8px;color:#555">Prompt Preview (${ev.prompt_preview.length.toLocaleString()} chars)</span><span style="color:#555">${escapeHtmlAttr(ev.prompt_preview)}</span>`);
   }
 
   if (parts.length === 0) return '';
   return `<div class="response-detail">${parts.join('\n')}</div>`;
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 
 function toggleAutoScroll() {
   autoScroll = !autoScroll;
@@ -592,9 +589,9 @@ function renderChips(groupEvents, agentHex) {
   for (const { ev } of groupEvents) {
     if (ev.event === 'act' && ev.action) {
       const displayAction = typeof humanAction === 'function' ? humanAction(ev.action) : ev.action;
-      chips.push(`<span class="chip" style="background:${hexToRgba(agentHex,0.18)};color:${agentHex};border:1px solid ${hexToRgba(agentHex,0.3)}" title="${escHtml(displayAction)}">${escHtml(displayAction)}</span>`);
+      chips.push(`<span class="chip" style="background:${hexToRgba(agentHex,0.18)};color:${agentHex};border:1px solid ${hexToRgba(agentHex,0.3)}" title="${escapeHtmlAttr(displayAction)}">${escapeHtmlAttr(displayAction)}</span>`);
     } else if (ev.event === 'frame_tool' && ev.tool) {
-      chips.push(`<span class="chip" style="background:${hexToRgba(agentHex,0.12)};color:${agentHex};border:1px solid ${hexToRgba(agentHex,0.2)}" title="${escHtml(ev.tool)}">${escHtml(ev.tool)}</span>`);
+      chips.push(`<span class="chip" style="background:${hexToRgba(agentHex,0.12)};color:${agentHex};border:1px solid ${hexToRgba(agentHex,0.2)}" title="${escapeHtmlAttr(ev.tool)}">${escapeHtmlAttr(ev.tool)}</span>`);
     }
   }
   if (chips.length === 0) return '';
@@ -777,7 +774,7 @@ function showSimpleEventTooltip(ev, e) {
   if (ev.input_tokens) html += `<div>Tokens: ${fmtK(ev.input_tokens)} in / ${fmtK(ev.output_tokens || 0)} out</div>`;
   if (ev.action) html += `<div>Action: ${typeof humanAction === 'function' ? humanAction(ev.action) : ev.action}</div>`;
   if (ev.tool) html += `<div>Tool: ${ev.tool}</div>`;
-  if (ev.reasoning) html += `<div style="max-width:300px;word-break:break-word;color:#aaa">${escHtml(ev.reasoning)}</div>`;
+  if (ev.reasoning) html += `<div style="max-width:300px;word-break:break-word;color:#aaa">${escapeHtmlAttr(ev.reasoning)}</div>`;
   if (ev.task) html += `<div style="max-width:300px;word-break:break-word;">Task: ${ev.task}</div>`;
 
   const tt = document.getElementById('tooltip');
@@ -812,7 +809,7 @@ function showProportionalTooltipForSG(sg, fraction, e) {
   html += `<div>${ev.event}</div>`;
   if (ev.action) html += `<div>Action: ${typeof humanAction === 'function' ? humanAction(ev.action) : ev.action}</div>`;
   if (ev.tool) html += `<div>Tool: ${ev.tool}</div>`;
-  if (ev.reasoning) html += `<div style="max-width:300px;word-break:break-word;color:#aaa">${escHtml(ev.reasoning)}</div>`;
+  if (ev.reasoning) html += `<div style="max-width:300px;word-break:break-word;color:#aaa">${escapeHtmlAttr(ev.reasoning)}</div>`;
   if (ev.task) html += `<div style="max-width:300px;word-break:break-word;">Task: ${ev.task}</div>`;
   if (ev.summary) html += `<div style="max-width:300px;word-break:break-word;">Summary: ${ev.summary}</div>`;
   if (ev.elapsed_s != null) html += `<div class="tt-dim">t = +${ev.elapsed_s.toFixed(1)}s</div>`;
@@ -1309,7 +1306,7 @@ async function fetchSessionList() {
     const curModel = modelSelect.value;
     modelSelect.innerHTML = '<option value="">All models</option>';
     for (const m of models) {
-      modelSelect.innerHTML += `<option value="${escHtml(m)}">${escHtml(m.replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</option>`;
+      modelSelect.innerHTML += `<option value="${escapeHtmlAttr(m)}">${escapeHtmlAttr(m.replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</option>`;
     }
     modelSelect.value = curModel;
 
@@ -1347,11 +1344,11 @@ function applySessionFilters() {
     const date = s.created_at ? new Date(s.created_at * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '--';
     const cost = s.total_cost ? '$' + s.total_cost.toFixed(3) : '--';
     tr.innerHTML = `
-      <td style="color:#e0e0e0;font-weight:500">${escHtml(s.game_id || '')}</td>
-      <td>${escHtml((s.model || '').replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</td>
+      <td style="color:#e0e0e0;font-weight:500">${escapeHtmlAttr(s.game_id || '')}</td>
+      <td>${escapeHtmlAttr((s.model || '').replace(/^(gemini|claude|groq|mistral|ollama)\//, ''))}</td>
       <td>${s.steps || 0}</td>
       <td>${s.levels || 0}</td>
-      <td><span class="result-badge ${badgeClass}">${escHtml(s.result || 'N/A')}</span></td>
+      <td><span class="result-badge ${badgeClass}">${escapeHtmlAttr(s.result || 'N/A')}</span></td>
       <td>${cost}</td>
       <td style="color:#666">${date}</td>
     `;

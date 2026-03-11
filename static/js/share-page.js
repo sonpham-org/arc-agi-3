@@ -175,18 +175,6 @@ function renderShareTimeline() {
   container.innerHTML = html;
 }
 
-// ── Utility ───────────────────────────────────────────────────────────
-function formatDuration(seconds) {
-  if (!seconds || seconds < 0) return '';
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  if (m > 60) return `${Math.floor(m / 60)}h${m % 60}m`;
-  if (m > 0) return `${m}m${s}s`;
-  return `${s}s`;
-}
-
-function esc(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
-
 // ── Header info ───────────────────────────────────────────────────────
 (function() {
   // Format level info from last step
