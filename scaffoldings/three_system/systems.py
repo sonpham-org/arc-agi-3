@@ -7,15 +7,19 @@ from dataclasses import dataclass, field
 from agent import (
     ARC_AGI3_DESCRIPTION,
     ACTION_NAMES,
+    effective_model,
+    relevant_memory_section,
+)
+from agent_llm import (
     call_model_with_metadata,
     call_model_with_retry,
+)
+from agent_response_parsing import _parse_json
+from grid_analysis import (
     compress_row,
     compute_change_map,
     compute_color_histogram,
     compute_region_map,
-    effective_model,
-    relevant_memory_section,
-    _parse_json,
 )
 from db import _log_llm_call
 

@@ -1,31 +1,32 @@
-"""Session management route handlers (Phase 8 placeholder).
+"""Session management routes.
 
-ROUTES (currently in server/app.py lines 1366-1770 + 2094-2312):
-- POST /api/sessions/import → import_session()
-- POST /api/sessions/resume → resume_session()
-- POST /api/sessions/<session_id>/event → log_session_event()
-- GET /api/sessions/<session_id>/obs-events → session_obs_events()
-- GET /api/sessions/browse → browse_sessions()
-- POST /api/sessions/branch → branch_session()
-- GET /api/sessions → list_sessions()
-- GET /api/sessions/<session_id> → get_session()
-- GET /api/sessions/<session_id>/step/<step_num> → get_session_step()
-- GET /api/sessions/<session_id>/calls → session_calls()
-- GET /share → share_session()
-- GET /share/<session_id> → share_session()
-- GET /api/sessions/public → list_public_sessions()
+PHASE 10: Modularization framework.
 
-DEPENDENCIES:
-- Shared state: game_sessions, session_grids, session_lock
-- DB: _db_insert_session, _db_update_session, _get_session_calls, etc.
-- Decorators: @bot_protection
+ROUTES PLANNED (12 routes):
+- POST /api/sessions/import - Import session from JSON
+- POST /api/sessions/resume - Resume a saved session
+- POST /api/sessions/<session_id>/event - Log session event
+- POST /api/sessions/<session_id>/obs-events - Observable events stream
+- GET /api/sessions/browse - List user's sessions
+- POST /api/sessions/branch - Create branch from session
+- GET /api/sessions - List all sessions (paginated)
+- GET /api/sessions/<session_id> - Get session details
+- GET /api/sessions/<session_id>/step/<int:step_num> - Get specific step
+- GET /api/sessions/<session_id>/calls - Get LLM calls for session
+- GET /share/<session_id> - Render share page
+- GET /api/sessions/public - List public sessions
 
-TODO (Phase 9+):
-- Extract shared state to server/state.py
-- Move handlers to this file
-- Create Flask Blueprint: session_bp = Blueprint('session', __name__)
-- Register routes on blueprint
-- Import and register in server/app.py
-
-STATUS: Phase 8 preserves all routes in app.py for stability.
+STATUS: Routes in app.py; blueprints registered for future extraction.
 """
+
+from flask import Blueprint
+
+# Blueprint registration
+session_bp = Blueprint('session', __name__)
+
+# TODO: Extract session route handlers in Phase 10
+# Most tightly coupled to session_manager module
+# Blocked by: Heavy dependencies on session_lock, session_grids, _db_* functions
+# Solution: Phase 10 full implementation
+
+__all__ = ['session_bp']

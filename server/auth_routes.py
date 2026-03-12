@@ -1,33 +1,35 @@
-"""Authentication route handlers (Phase 8 placeholder).
+"""Authentication and bot protection routes.
 
-ROUTES (currently in server/app.py lines 426-605 + 1185-1313):
-- POST /api/auth/magic-link → auth_magic_link()
-- GET /api/auth/verify → auth_verify()
-- GET /api/auth/status → auth_status()
-- POST /api/auth/logout → auth_logout()
-- GET /api/auth/google → auth_google_redirect()
-- GET /api/auth/google/callback → auth_google_callback()
-- POST /api/auth/claim-sessions → auth_claim_sessions()
-- POST /api/copilot/auth/start → copilot_auth_start()
-- POST /api/copilot/auth/poll → copilot_auth_poll()
-- GET /api/copilot/auth/status → copilot_auth_status()
-- GET /api/claude/auth/status → claude_auth_status()
-- POST /api/claude/auth/set-key → claude_set_key()
-- GET /api/openai/auth/status → openai_auth_status()
-- POST /api/openai/auth/set-key → openai_set_key()
+PHASE 10: Modularization framework in place.
+Route handlers will be extracted from server/app.py in Phase 10+.
 
-DEPENDENCIES:
-- Shared state: _auth_cache, _auth_cache_ttl
-- Helpers: get_current_user(), get_mode()
-- DB: find_or_create_user(), create_auth_token(), verify_auth_token(), etc.
-- Decorators: @bot_protection
+ROUTES PLANNED:
+- POST /api/turnstile/verify - Verify Turnstile token
+- POST /api/auth/magic-link - Send magic link email
+- GET /api/auth/verify - Verify magic link code  
+- GET /api/auth/status - Get current user status
+- POST /api/auth/logout - Logout
+- GET /api/auth/google - Google OAuth redirect
+- GET /api/auth/google/callback - Google OAuth callback
+- POST /api/auth/claim-sessions - Claim anonymous sessions
+- POST /api/copilot/auth/start - Copilot auth start
+- POST /api/copilot/auth/poll - Copilot auth poll
+- GET /api/copilot/auth/status - Copilot auth status
+- GET /api/claude/auth/status - Claude auth status
+- POST /api/claude/auth/set-key - Set Claude API key
+- GET /api/openai/auth/status - OpenAI auth status
+- POST /api/openai/auth/set-key - Set OpenAI API key
 
-TODO (Phase 9+):
-- Extract shared state to server/state.py
-- Move handlers to this file
-- Create Flask Blueprint: auth_bp = Blueprint('auth', __name__)
-- Register routes on blueprint
-- Import and register in server/app.py
-
-STATUS: Phase 8 preserves all routes in app.py for stability.
+STATUS: Routes currently served by app.py; blueprints registered for future extraction.
 """
+
+from flask import Blueprint
+
+# Blueprint registration (handlers imported from app.py for now)
+auth_bp = Blueprint('auth', __name__)
+
+# TODO: Extract auth route handlers from server/app.py and register them here
+# Blocked by: Circular import risk (auth routes depend on app-level helpers)
+# Solution: Resolve in Phase 11 (move helpers to shared module, then extract)
+
+__all__ = ['auth_bp']

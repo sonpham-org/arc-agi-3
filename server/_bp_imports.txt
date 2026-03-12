@@ -1,0 +1,57 @@
+
+from flask import Blueprint, request, jsonify, make_response, render_template, session as flask_session
+import hashlib
+import secrets
+import time
+import os
+from pathlib import Path
+from typing import Optional
+import logging
+import json
+import subprocess
+import zlib
+import re
+import base64
+from functools import wraps
+
+import httpx as _httpx
+import arc_agi
+from arcengine import GameAction, GameState
+
+from server import state
+from server.state import arcade_instance, _custom_system_prompt, _custom_hard_memory, _auth_cache
+
+# Import helper functions and db modules  
+from db import (
+    DB_PATH, _init_db, _get_db, db_conn, _compress_grid, _decompress_grid,
+    _db_insert_session, _db_insert_action, _db_update_session,
+    _log_llm_call, _get_session_calls, _read_session_from_file,
+    _list_file_sessions, _log_tool_execution, _get_session_tool_executions,
+    find_or_create_user, create_auth_token, verify_auth_token,
+    create_magic_link, verify_magic_link, delete_auth_token,
+    claim_sessions, get_user_sessions, count_recent_magic_links, AUTH_TOKEN_TTL,
+)
+
+from session_manager import (
+    game_sessions, session_grids, session_snapshots,
+    session_api_mode, session_api_keys,
+    session_lock, session_step_counts, session_last_llm,
+    _reconstruct_session, _try_recover_session, _action_dict_from_row,
+)
+
+from constants import COLOR_MAP, COLOR_NAMES, ACTION_NAMES, ARC_AGI3_DESCRIPTION
+from grid_analysis import (
+    compress_row, compute_change_map, compute_color_histogram, compute_region_map,
+)
+from prompt_builder import (
+    _build_prompt_parts, _build_prompt, _parse_llm_response, _extract_json,
+)
+from bot_protection import (
+    TURNSTILE_SITE_KEY, TURNSTILE_SECRET_KEY, TURNSTILE_TOKEN_TTL,
+    _rate_buckets, _rate_lock, RATE_LIMIT, RATE_WINDOW,
+    _verified_tokens, _token_lock, _get_client_ip, _is_bot_ua,
+    _check_rate_limit, _verify_turnstile_token, _is_turnstile_verified,
+    bot_protection, turnstile_required,
+)
+from llm_providers import copilot_auth_lock, _save_copilot_token, PROVIDER_MIN_DELAY, llm_providers
+

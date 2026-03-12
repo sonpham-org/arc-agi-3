@@ -92,27 +92,6 @@ _STATIC_VERSION = str(int(time.time()))  # cache-bust static files on each deplo
 app.logger.setLevel(logging.INFO)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BLUEPRINT REGISTRATION — Phase 10 modularization
-# ═══════════════════════════════════════════════════════════════════════════
-# NOTE: Route handlers remain in app.py for now (Phase 11 extraction).
-# Blueprints registered below but empty. Handlers will be moved in Phase 11.
-
-try:
-    from server.auth_routes import auth_bp
-    from server.game_routes import game_bp
-    from server.session_routes import session_bp
-    from server.social_routes import social_bp
-    from server.llm_admin_routes import llm_admin_bp
-    # app.register_blueprint(auth_bp)
-    # app.register_blueprint(game_bp)
-    # app.register_blueprint(session_bp)
-    # app.register_blueprint(social_bp)
-    # app.register_blueprint(llm_admin_bp)
-except ImportError as e:
-    app.logger.warning(f'Blueprint registration skipped: {e}')
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # FEATURE FLAGS — dual-mode gating (local vs online)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -137,14 +116,211 @@ _server_port_staging = 5000
 _server_port_prod = 5001
 
 
+def get_mode() -> str:
+    """Determine mode from SERVER_MODE env var or port the request arrived on."""
+    env_mode = os.environ.get("SERVER_MODE", "")
+    if env_mode in ("staging", "prod"):
+        return env_mode
+    # Legacy compat: treat "local" as staging, "online" as prod
+    if env_mode == "local":
+        return "staging"
+    if env_mode == "online":
+        return "prod"
+    try:
+        port = int(request.environ.get("SERVER_PORT", _server_port_staging))
+        if port == _server_port_prod:
+            return "prod"
+    except (ValueError, RuntimeError):
+        pass
+    return "staging"
+
+
+def feature_enabled(name: str) -> bool:
+    mode = get_mode()
+    return FEATURES.get(name, {}).get(mode, False)
+
+
+def get_enabled_features() -> dict[str, bool]:
+    mode = get_mode()
+    return {name: feat.get(mode, False) for name, feat in FEATURES.items()}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
-# HELPERS — imported from server.helpers module
+# BOT PROTECTION — imported from bot_protection.py
 # ═══════════════════════════════════════════════════════════════════════════
 
-from server.helpers import (
-    get_mode, feature_enabled, get_enabled_features, get_arcade, get_game_version,
-    frame_to_grid, env_state_dict, _load_prompts, FEATURES, HIDDEN_GAMES
+# Analytics — Umami (set both env vars to enable)
+UMAMI_URL = os.environ.get("UMAMI_URL", "")          # e.g. https://umami.example.com
+UMAMI_WEBSITE_ID = os.environ.get("UMAMI_WEBSITE_ID", "")
+
+# Magic link email — Resend (free tier: 100 emails/day)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("RESEND_FROM", "noreply@arc3.sonpham.net")
+
+# Google OAuth
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+# OpenAI / Codex
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────
+
+_auth_cache: dict[str, tuple[dict, float]] = {}  # token → (user_dict, cache_expiry)
+_AUTH_CACHE_TTL = 300  # 5 minutes
+
+
+def get_current_user() -> dict | None:
+    """Get the currently authenticated user from the arc_auth cookie, or None."""
+    token = request.cookies.get("arc_auth")
+    if not token:
+        return None
+    now = time.time()
+    cached = _auth_cache.get(token)
+    if cached and cached[1] > now:
+        return cached[0]
+    user = verify_auth_token(token)
+    if user:
+        _auth_cache[token] = (user, now + _AUTH_CACHE_TTL)
+    else:
+        _auth_cache.pop(token, None)
+    return user
+
+
+# ── Global state ───────────────────────────────────────────────────────────
+
+arcade_instance: Optional[arc_agi.Arcade] = None
+# game_sessions, session_grids, session_snapshots, session_api_mode,
+# session_api_keys, session_lock, session_step_counts, session_last_llm
+# are imported from session_manager above.
+
+
+
+
+# ── Custom memory overrides ──────────────────────────────────────────────
+_custom_system_prompt: Optional[str] = None  # overrides ARC_AGI3_DESCRIPTION when set
+_custom_hard_memory: Optional[str] = None    # extra agent memory injected into prompt
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SQLite SESSION PERSISTENCE (extracted to db.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+from db import (
+    DB_PATH, _init_db, _get_db, db_conn, _compress_grid, _decompress_grid,
+    _db_insert_session, _db_insert_action, _db_update_session,
+    _log_llm_call, _get_session_calls, _read_session_from_file,
+    _list_file_sessions, _log_tool_execution, _get_session_tool_executions,
 )
+
+# _reconstruct_session and _try_recover_session are imported from session_manager above.
+
+
+# DB initialized at import time via db.py
+
+from db import (
+    find_or_create_user, create_auth_token,
+    verify_auth_token, create_magic_link,
+    verify_magic_link, delete_auth_token,
+    claim_sessions, get_user_sessions,
+    count_recent_magic_links, AUTH_TOKEN_TTL,
+)
+
+def _load_prompts():
+    """Load all prompt .txt files from prompts/ directory for injection into templates."""
+    base = Path(__file__).parent / "prompts"
+    result = {}
+    for section in sorted(base.iterdir()):
+        if section.is_dir():
+            result[section.name] = {
+                f.stem: f.read_text() for f in sorted(section.glob("*.txt"))
+            }
+    return result
+
+
+# Prompts are loaded fresh per-request via _load_prompts() in the index route
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GRID HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_arcade():
+    global arcade_instance
+    if arcade_instance is None:
+        arcade_instance = arc_agi.Arcade()
+    return arcade_instance
+
+
+def get_game_version(game_id: str) -> int:
+    """Return the git commit count touching this game's directory (follows renames)."""
+    # Observatory games: dir is two-letter prefix (lb03 → lb/), Foundation: full ID (ls20 → ls20/)
+    bare_id = game_id if Path(f"environment_files/{game_id}").is_dir() else game_id[:2]
+    try:
+        out = subprocess.check_output(
+            ["git", "log", "--oneline", "--follow", "--", f"environment_files/{bare_id}/"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+        return len(out.splitlines()) if out else 0
+    except Exception:
+        return 0
+
+
+def frame_to_grid(frame) -> list[list[int]]:
+    return frame.tolist()
+
+
+# compress_row, compute_change_map, _compress_change_row, compute_color_histogram,
+# compute_region_map are imported from grid_analysis above.
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCAFFOLDING — imported from scaffoldings/ package
+# ═══════════════════════════════════════════════════════════════════════════
+
+from scaffoldings.rlm.handler import handle_rlm_scaffolding as _handle_rlm_scaffolding_impl  # noqa: used by agent.py
+from scaffoldings.three_system.handler import (  # noqa: used by agent.py
+    handle_three_system_scaffolding as _handle_three_system_scaffolding_impl,
+)
+# Server-side LLM route wrappers removed — all LLM calls are now client-side
+
+
+_SCAFFOLDING_PLACEHOLDER = True  # inline code moved to scaffoldings/ package
+# _build_prompt_parts, _build_prompt, _parse_llm_response, _extract_json
+# are imported from prompt_builder above.
+
+
+def env_state_dict(env, frame_data=None) -> dict:
+    if frame_data is None:
+        frame_data = env.observation_space
+    if frame_data is None:
+        return {"error": "No frame data available"}
+    frames = frame_data.frame
+    grid = frame_to_grid(frames[-1]) if frames else []
+    available = frame_data.available_actions
+    action_labels = {aid: ACTION_NAMES.get(aid, f"ACTION{aid}") for aid in available}
+    return {
+        "grid": grid,
+        "state": frame_data.state.value if hasattr(frame_data.state, "value") else str(frame_data.state),
+        "levels_completed": frame_data.levels_completed,
+        "win_levels": frame_data.win_levels,
+        "available_actions": available,
+        "action_labels": action_labels,
+        "game_id": frame_data.game_id,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PROMPT BUILDING + LLM RESPONSE PARSING — imported from prompt_builder.py
+# ═══════════════════════════════════════════════════════════════════════════
+# _build_prompt_parts, _build_prompt, _parse_llm_response, _extract_json
+# are imported from prompt_builder above. Call sites pass
+# custom_system_prompt=_custom_system_prompt, custom_hard_memory=_custom_hard_memory.
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 
 @app.after_request
 def add_cache_headers(response):

@@ -1,25 +1,30 @@
-"""Game route handlers (Phase 8 placeholder).
+"""Game play routes.
 
-ROUTES (currently in server/app.py lines 682-859 + 622-654):
-- POST /api/start → start_game()
-- POST /api/step → step_game()
-- POST /api/reset → reset_game()
-- POST /api/dev/jump-level → dev_jump_level()  
-- POST /api/undo → undo_step()
-- GET /api/games → list_games()
-- GET /api/games/<game_id>/source → game_source()
+PHASE 10: Modularization framework in place.
 
-DEPENDENCIES: 
-- Shared state: game_sessions, session_grids, session_lock, arcade_instance
-- Decorators: @bot_protection, @turnstile_required
-- Helpers: get_arcade(), env_state_dict(), frame_to_grid()
+ROUTES PLANNED:
+- GET /api/games - List available games
+- GET /api/games/<game_id>/source - Get game source/rules
+- POST /api/start - Start a new game session
+- POST /api/step - Advance game by one action
+- POST /api/reset - Reset game to initial state
+- POST /api/undo - Undo last action
+- POST /api/dev/jump-level - Dev: jump to specific level
+- POST /api/llm/lmstudio-proxy - Local LLM via LMStudio
+- POST /api/llm/cf-proxy - Cloudflare Workers AI proxy
+- GET /api/llm/models - Model registry
 
-TODO (Phase 9+):
-- Extract shared state to server/state.py
-- Move handlers to this file
-- Create Flask Blueprint: game_bp = Blueprint('game', __name__)
-- Register routes on blueprint
-- Import and register in server/app.py
-
-STATUS: Phase 8 preserves all routes in app.py for stability.
+STATUS: Routes currently served by app.py; blueprints registered for future extraction.
 """
+
+from flask import Blueprint
+
+# Blueprint registration
+game_bp = Blueprint('game', __name__)
+
+# TODO: Extract game route handlers from server/app.py and register them here
+# Routes moved to blueprint in Phase 10: game play, LLM proxies, model registry
+# Blocked by: Session state coupling (game_sessions, session_lock)
+# Solution: Extract shared session_state module in Phase 9, then extract routes
+
+__all__ = ['game_bp']

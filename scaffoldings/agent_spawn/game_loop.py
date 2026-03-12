@@ -7,12 +7,12 @@ from arcengine import GameAction, GameState
 
 from agent import (
     ACTION_NAMES,
-    compute_change_map,
     effective_model,
     load_hard_memory,
     _post_game,
-    condense_history,
 )
+from agent_history import condense_history
+from grid_analysis import compute_change_map
 from db import _log_turn
 
 from scaffoldings.agent_spawn.memories import SharedMemories

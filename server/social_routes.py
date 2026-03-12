@@ -1,26 +1,27 @@
-"""Social and community route handlers (Phase 8 placeholder).
+"""Community and social routes.
 
-ROUTES (currently in server/app.py lines 1811-2070):
-- GET /api/leaderboard → leaderboard()
-- GET /api/leaderboard/<game_id> → leaderboard_detail()
-- GET /api/comments/<game_id> → get_comments()
-- POST /api/comments → post_comment()
-- POST /api/comments/<comment_id>/vote → vote_comment()
-- GET /api/contributors → contributors()
-- GET /api/game-results → game_results()
+PHASE 10: Modularization framework.
 
-DEPENDENCIES:
-- DB: session data lookups, comment/leaderboard queries
-- Helpers: _format_action_row()
-- Decorators: @bot_protection
+ROUTES PLANNED (7 routes):
+- GET /api/leaderboard - Get global leaderboard
+- GET /api/leaderboard/<game_id> - Get game-specific leaderboard
+- GET /api/comments/<game_id> - Get comments for a game
+- POST /api/comments - Post a new comment
+- POST /api/comments/<int:comment_id>/vote - Vote on comment
+- GET /api/contributors - Get list of contributors
+- GET /api/game-results - Get game results/stats
 
-TODO (Phase 9+):
-- Extract handlers to this file
-- Create Flask Blueprint: social_bp = Blueprint('social', __name__)
-- Register routes on blueprint
-- Import and register in server/app.py
-
-STATUS: Phase 8 preserves all routes in app.py for stability.
-These routes have minimal shared state coupling (mostly read-only DB queries).
-Could be among the first routes extracted in Phase 9.
+STATUS: Routes in app.py; blueprints registered for future extraction.
 """
+
+from flask import Blueprint
+
+# Blueprint registration
+social_bp = Blueprint('social', __name__)
+
+# TODO: Extract social route handlers in Phase 10
+# Relatively independent; main dependency is db module for comments/leaderboard
+# Blocked by: Database coupling, session data dependencies
+# Solution: Phase 10 extraction
+
+__all__ = ['social_bp']

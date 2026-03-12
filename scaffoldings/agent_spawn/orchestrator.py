@@ -4,10 +4,10 @@ import json
 
 from agent import (
     ACTION_NAMES,
-    call_model_with_metadata,
     effective_model,
-    _parse_json,
 )
+from agent_llm import call_model_with_metadata
+from agent_response_parsing import _parse_json
 from db import _log_llm_call
 
 from scaffoldings.agent_spawn.memories import SharedMemories

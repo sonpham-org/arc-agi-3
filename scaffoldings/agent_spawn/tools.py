@@ -2,7 +2,8 @@
 
 from arcengine import GameAction
 
-from agent import ACTION_NAMES, compress_row, compute_change_map
+from agent import ACTION_NAMES
+from grid_analysis import compress_row, compute_change_map
 
 
 # ═══════════════════════════════════════════════════════════════════════════

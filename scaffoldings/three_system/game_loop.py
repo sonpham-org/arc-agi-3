@@ -7,13 +7,15 @@ from arcengine import GameAction, GameState
 
 from agent import (
     ACTION_NAMES,
-    compute_change_map,
-    compress_row,
     effective_model,
     load_hard_memory,
     _post_game,
-    condense_history,
     append_memory_bullet,
+)
+from agent_history import condense_history
+from grid_analysis import (
+    compute_change_map,
+    compress_row,
 )
 from db import _log_turn
 
