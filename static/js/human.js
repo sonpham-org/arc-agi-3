@@ -598,19 +598,7 @@ function humanTogglePause() {
 }
 
 // ── Timer ───────────────────────────────────────────────────────────────
-
-function _humanUpdateTimer() {
-  if (!_humanStartTime) return;
-  _humanDuration = (Date.now() - _humanStartTime) / 1000;
-  const el = document.getElementById('humanTimer');
-  if (el) el.textContent = _formatDuration(_humanDuration);
-}
-
-function _formatDuration(secs) {
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
+// _humanUpdateTimer() and _formatDuration() moved to human-render.js
 
 // ── Undo ────────────────────────────────────────────────────────────────
 
@@ -818,68 +806,11 @@ function humanNewGame() {
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────
-
-function _humanRenderGrid(grid) {
-  if (!grid || !grid.length) return;
-  _humanGrid = grid;
-  const c = _humanCanvas();
-  if (!c) return;
-  const ctx = c.getContext('2d');
-  const h = grid.length, w = grid[0].length;
-  const scale = Math.floor(512 / Math.max(h, w));
-  c.width = w * scale;
-  c.height = h * scale;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      ctx.fillStyle = COLORS[grid[y][x]] || '#000';
-      ctx.fillRect(x * scale, y * scale, scale, scale);
-    }
-  }
-}
-
-function _humanUpdateTopBar() {
-  const status = _humanState.state || 'NOT_FINISHED';
-  const statusEl = document.getElementById('humanGameStatus');
-  statusEl.textContent = status === 'NOT_FINISHED' ? 'IN PROGRESS' : status.replace(/_/g, ' ');
-  statusEl.className = 'status status-' + status;
-
-  const levels = _humanState.levels_completed || 0;
-  const total = _humanState.win_levels || _humanLevelCount || '?';
-  document.getElementById('humanLevelInfo').textContent = `Level ${levels}/${total}`;
-  document.getElementById('humanStepCounter').textContent = `Step ${_humanStepCount}`;
-
-  // Update level card highlighting to reflect current progress
-  _humanUpdateLevelCards();
-}
-
-function _humanUpdateLevelCards() {
-  const levelsCompleted = _humanState.levels_completed || 0;
-  document.querySelectorAll('.human-level-card').forEach((card, i) => {
-    card.classList.remove('active', 'completed');
-    if (i < levelsCompleted) {
-      card.classList.add('completed');
-    } else if (i === levelsCompleted) {
-      card.classList.add('active');
-    }
-  });
-}
-
-// ── Session Recorder ────────────────────────────────────────────────────
-
-function _humanUpdateRecorder(actionId, actionData) {
-  document.getElementById('humanRecSteps').textContent = `${_humanStepCount} steps`;
-  document.getElementById('humanRecLevel').textContent = `Level ${(_humanState.levels_completed || 0) + 1}`;
-
-  if (actionId !== null && actionId !== undefined) {
-    const log = document.getElementById('humanMoveLog');
-    const entry = document.createElement('div');
-    entry.className = 'recorder-move-entry';
-    const coordStr = actionData?.x !== undefined ? ` (${actionData.x},${actionData.y})` : '';
-    entry.textContent = `#${_humanStepCount} ${ACTION_NAMES[actionId] || '?'}${coordStr}`;
-    log.appendChild(entry);
-    log.scrollTop = log.scrollHeight;
-  }
-}
+// Moved to human-render.js
+// - _humanRenderGrid()
+// - _humanUpdateTopBar()
+// - _humanUpdateLevelCards()
+// - _humanUpdateRecorder()
 
 // ── Level Stats Tracking ─────────────────────────────────────────────────
 
@@ -896,32 +827,7 @@ function _humanTrackLevelTransition(prevLevels, newLevels) {
   _humanRenderLevelResults();
 }
 
-function _humanRenderLevelResults() {
-  const body = document.getElementById('humanResultsBody');
-  if (!body || !_humanRecording) return;
-
-  if (_humanLevelStats.length === 0) {
-    body.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Start playing to see per-level stats.</div>';
-    return;
-  }
-
-  let html = '<table class="human-results-table"><thead><tr><th>Level</th><th>Steps</th><th>Time</th><th>Status</th></tr></thead><tbody>';
-  for (const ls of _humanLevelStats) {
-    const steps = (ls.endStep !== null ? ls.endStep : _humanStepCount) - ls.startStep;
-    const elapsed = ((ls.endTime !== null ? ls.endTime : Date.now()) - ls.startTime) / 1000;
-    const done = ls.endStep !== null;
-    const statusClass = done ? 'result-win' : '';
-    const statusText = done ? 'Cleared' : 'In Progress';
-    html += `<tr>
-      <td>Level ${ls.level + 1}</td>
-      <td>${steps}</td>
-      <td>${_formatDuration(elapsed)}</td>
-      <td class="${statusClass}">${statusText}</td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-  body.innerHTML = html;
-}
+// _humanRenderLevelResults() moved to human-render.js
 
 // ── Session End ─────────────────────────────────────────────────────────
 
@@ -975,27 +881,7 @@ function _humanCheckEnd() {
 }
 
 // ── Confetti ─────────────────────────────────────────────────────────────
-
-function _humanFireConfetti() {
-  const container = document.getElementById('humanConfettiHost');
-  if (!container) return;
-  container.innerHTML = '';
-  const colors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff6fff', '#ff9f43', '#54a0ff', '#f368e0'];
-  const count = 80;
-  for (let i = 0; i < count; i++) {
-    const piece = document.createElement('div');
-    piece.className = 'confetti-piece';
-    piece.style.left = Math.random() * 100 + '%';
-    piece.style.background = colors[Math.floor(Math.random() * colors.length)];
-    piece.style.animationDelay = (Math.random() * 0.8) + 's';
-    piece.style.animationDuration = (1.5 + Math.random() * 1.5) + 's';
-    // Randomize horizontal drift
-    piece.style.setProperty('--drift', (Math.random() * 200 - 100) + 'px');
-    container.appendChild(piece);
-  }
-  // Clean up after animation
-  setTimeout(() => { container.innerHTML = ''; }, 4000);
-}
+// _humanFireConfetti() moved to human-render.js
 
 // ── Persistence ─────────────────────────────────────────────────────────
 
@@ -1149,244 +1035,9 @@ function switchHumanSubTab(tab) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// COMMENTS SYSTEM
+// SOCIAL FEATURES — Moved to human-social.js
 // ═══════════════════════════════════════════════════════════════════════════
-
-function _getCommenterId() {
-  // Use logged-in user ID, or generate a persistent anonymous ID
-  if (typeof currentUser !== 'undefined' && currentUser?.id) return currentUser.id;
-  let id = localStorage.getItem('arc_commenter_id');
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem('arc_commenter_id', id); }
-  return id;
-}
-
-function _getCommenterName() {
-  if (typeof currentUser !== 'undefined' && currentUser) {
-    return currentUser.display_name || currentUser.email?.split('@')[0] || 'User';
-  }
-  return 'anon-' + _getCommenterId().slice(0, 6);
-}
-
-function _timeAgo(ts) {
-  const s = Math.floor(Date.now() / 1000 - ts);
-  if (s < 60) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  return Math.floor(s / 86400) + 'd ago';
-}
-
-async function loadComments() {
-  const gameId = _humanGameId;
-  const list = document.getElementById('commentsList');
-  const compose = document.getElementById('commentCompose');
-  if (!gameId) {
-    list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Select a game to see comments.</div>';
-    compose.style.display = 'none';
-    return;
-  }
-  compose.style.display = '';
-  list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Loading...</div>';
-  try {
-    const comments = await fetchJSON('/api/comments/' + encodeURIComponent(gameId.split('-')[0]) + '?voter_id=' + encodeURIComponent(_getCommenterId()));
-    if (!comments.length) {
-      list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No comments yet. Be the first!</div>';
-      return;
-    }
-    list.innerHTML = comments.map(c => _renderComment(c, 'game')).join('');
-  } catch (e) {
-    list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Failed to load comments.</div>';
-  }
-}
-
-function _renderComment(c, context) {
-  const upClass = c.my_vote === 1 ? ' active-up' : '';
-  const downClass = c.my_vote === -1 ? ' active-down' : '';
-  const ctx = context ? `,'${context}'` : '';
-  return `<div class="comment-card" id="comment-${c.id}">
-    <div class="comment-header">
-      <span class="comment-author">${_esc(c.author_name)}</span>
-      <span class="comment-time">${_timeAgo(c.created_at)}</span>
-    </div>
-    <div class="comment-body">${_esc(c.body)}</div>
-    <div class="comment-actions">
-      <button class="vote-btn${upClass}" onclick="voteComment(${c.id}, ${c.my_vote === 1 ? 0 : 1}${ctx})">&#9650; ${c.upvotes || 0}</button>
-      <button class="vote-btn${downClass}" onclick="voteComment(${c.id}, ${c.my_vote === -1 ? 0 : -1}${ctx})">&#9660; ${c.downvotes || 0}</button>
-    </div>
-  </div>`;
-}
-
-function _esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-async function submitComment() {
-  const input = document.getElementById('commentInput');
-  const body = input.value.trim();
-  if (!body || !_humanGameId) return;
-  const gameId = _humanGameId.split('-')[0];
-  try {
-    const resp = await fetch('/api/comments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        game_id: gameId,
-        body,
-        author_id: _getCommenterId(),
-        author_name: _getCommenterName(),
-      }),
-    });
-    if (resp.ok) {
-      input.value = '';
-      document.getElementById('commentCharCount').textContent = '0 / 2000';
-      loadComments();
-    }
-  } catch (e) { /* ignore */ }
-}
-
-async function voteComment(commentId, vote, context) {
-  const card = document.getElementById('comment-' + commentId);
-  const btns = card?.querySelectorAll('.vote-btn');
-  // Optimistic UI: update buttons immediately
-  if (btns && btns.length >= 2) {
-    const upBtn = btns[0], downBtn = btns[1];
-    const wasUp = upBtn.classList.contains('active-up');
-    const wasDown = downBtn.classList.contains('active-down');
-    upBtn.classList.remove('active-up');
-    downBtn.classList.remove('active-down');
-    let upCount = parseInt(upBtn.textContent.replace(/[^\d]/g, '')) || 0;
-    let downCount = parseInt(downBtn.textContent.replace(/[^\d]/g, '')) || 0;
-    if (wasUp) upCount--;
-    if (wasDown) downCount--;
-    if (vote === 1) { upCount++; upBtn.classList.add('active-up'); }
-    if (vote === -1) { downCount++; downBtn.classList.add('active-down'); }
-    upBtn.innerHTML = '&#9650; ' + upCount;
-    downBtn.innerHTML = '&#9660; ' + downCount;
-    // Update onclick to toggle correctly
-    upBtn.setAttribute('onclick', `voteComment(${commentId}, ${vote === 1 ? 0 : 1}, '${context || ''}')`);
-    downBtn.setAttribute('onclick', `voteComment(${commentId}, ${vote === -1 ? 0 : -1}, '${context || ''}')`);
-  }
-  try {
-    await fetch('/api/comments/' + commentId + '/vote', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voter_id: _getCommenterId(), vote }),
-    });
-  } catch (e) { /* ignore */ }
-}
-
-// Wire up char counter
-document.addEventListener('DOMContentLoaded', () => {
-  const input = document.getElementById('commentInput');
-  if (input) input.addEventListener('input', () => {
-    document.getElementById('commentCharCount').textContent = input.value.length + ' / 2000';
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CONTRIBUTORS PAGE
-// ═══════════════════════════════════════════════════════════════════════════
-
-let _contribLoaded = false;
-
-function _fmtTime(secs) {
-  if (!secs) return '-';
-  if (secs < 60) return Math.round(secs) + 's';
-  if (secs < 3600) return Math.round(secs / 60) + 'm';
-  return (secs / 3600).toFixed(1) + 'h';
-}
-
-async function loadContributors() {
-  if (_contribLoaded) return;
-  try {
-    const data = await fetchJSON('/api/contributors');
-    // Human players
-    const hBody = document.getElementById('contribHumans');
-    if (data.human_players?.length) {
-      hBody.innerHTML = data.human_players.map((r, i) => `<tr>
-        <td>${i + 1}</td><td>${_esc(r.uid === 'anon' ? 'Anonymous' : r.uid.slice(0, 8))}</td>
-        <td>${r.session_count}</td><td>${r.games_played}</td>
-        <td>${r.total_steps}</td><td>${_fmtTime(r.total_time)}</td>
-      </tr>`).join('');
-    } else {
-      hBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center;">No data yet</td></tr>';
-    }
-    // Commenters
-    const cBody = document.getElementById('contribCommenters');
-    if (data.commenters?.length) {
-      cBody.innerHTML = data.commenters.map((r, i) => `<tr>
-        <td>${i + 1}</td><td>${_esc(r.author_name)}</td>
-        <td>${r.comment_count}</td><td>${r.total_upvotes || 0}</td>
-      </tr>`).join('');
-    } else {
-      cBody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim);text-align:center;">No data yet</td></tr>';
-    }
-    // AI contributors
-    const aBody = document.getElementById('contribAI');
-    if (data.ai_contributors?.length) {
-      aBody.innerHTML = data.ai_contributors.map((r, i) => `<tr>
-        <td>${i + 1}</td><td>${_esc(r.uid === 'anon' ? 'Anonymous' : r.uid.slice(0, 8))}</td>
-        <td>${r.session_count}</td><td>${r.games_played}</td>
-        <td>${r.total_steps}</td><td>${_esc(r.model || '-')}</td>
-      </tr>`).join('');
-    } else {
-      aBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center;">No data yet</td></tr>';
-    }
-    _contribLoaded = true;
-  } catch (e) {
-    console.error('Failed to load contributors', e);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// FEEDBACK PAGE (reuses comments API with game_id = '_feedback')
-// ═══════════════════════════════════════════════════════════════════════════
-
-let _feedbackLoaded = false;
-
-async function loadFeedback() {
-  const list = document.getElementById('feedbackList');
-  list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Loading...</div>';
-  try {
-    const comments = await fetchJSON('/api/comments/_feedback?voter_id=' + encodeURIComponent(_getCommenterId()));
-    if (!comments.length) {
-      list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">No feedback yet. Be the first!</div>';
-    } else {
-      list.innerHTML = comments.map(c => _renderComment(c, 'feedback')).join('');
-    }
-  } catch (e) {
-    list.innerHTML = '<div class="empty-state" style="height:auto;font-size:12px;">Failed to load feedback.</div>';
-  }
-}
-
-async function submitFeedback() {
-  const input = document.getElementById('feedbackInput');
-  const body = input.value.trim();
-  if (!body) return;
-  try {
-    const resp = await fetch('/api/comments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        game_id: '_feedback',
-        body,
-        author_id: _getCommenterId(),
-        author_name: _getCommenterName(),
-      }),
-    });
-    if (resp.ok) {
-      input.value = '';
-      document.getElementById('feedbackCharCount').textContent = '0 / 2000';
-      loadFeedback();
-    }
-  } catch (e) { /* ignore */ }
-}
-
-// Wire up feedback char counter
-document.addEventListener('DOMContentLoaded', () => {
-  const input = document.getElementById('feedbackInput');
-  if (input) input.addEventListener('input', () => {
-    document.getElementById('feedbackCharCount').textContent = input.value.length + ' / 2000';
-  });
-});
+// Includes:
+// - Comments system: loadComments(), _renderComment(), submitComment(), voteComment()
+// - Contributors page: loadContributors()
+// - Feedback page: loadFeedback(), submitFeedback()
