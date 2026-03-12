@@ -1,0 +1,9 @@
+{
+  "game_id": "mw01",
+  "title": "Medieval War",
+  "default_fps": 30,
+  "baseline_actions": [],
+  "tags": [],
+  "local_dir": "mw",
+  "date_downloaded": "2026-03-10"
+}
