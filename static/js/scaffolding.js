@@ -1,3 +1,18 @@
+// Author: Cascade, using Claude Opus 4.6 Thinking
+// Date: 2026-03-10 21:08
+// PURPOSE: Client-side scaffolding logic for ARC-AGI-3 web UI. Handles:
+//   - Model discovery (cloud providers via server API + LM Studio via direct browser fetch)
+//   - LLM call routing (Puter.js, Gemini, Anthropic, OpenAI-compat, LM Studio, Cloudflare)
+//   - RLM (Reflective Language Model) scaffolding with REPL code execution via Pyodide
+//   - Prompt building, context compaction, and multi-turn conversation management
+//   - All scaffolding iteration loops run client-side per CLAUDE.md architecture
+// Integration points: /api/llm/models (server model registry), localStorage (BYOK keys),
+//   Pyodide (in-browser Python REPL), LM Studio localhost:1234, Puter.js SDK
+// Dependencies: ui.js (DOM helpers), index.html (DOM structure), server.py (model registry API)
+// SRP/DRY check: Pass — LLM routing consolidated in callLLM/_callLLMInner; model population
+//   shared via _populateSubModelSelect; LMSTUDIO_CAPABILITIES mirrors models.py (intentional
+//   client/server split documented in CLAUDE.md)
+
 // ═══════════════════════════════════════════════════════════════════════════
 // API MODE (Local vs Official)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -64,9 +79,67 @@ function _populateSubModelSelect(sel, groups, providerOrder, providerLabels, byo
   if (savedVal && [...sel.options].some(o => o.value === savedVal)) sel.value = savedVal;
 }
 
+// Known LM Studio capability overrides keyed on api_model ID.
+// Mirrors LMSTUDIO_CAPABILITIES in models.py — update both together.
+const LMSTUDIO_CAPABILITIES = {
+  'zai-org/glm-4.7-flash':  { reasoning: true,  image: false },
+  'zai-org/glm-4.6v-flash': { reasoning: true,  image: true  },
+  'qwen/qwen3.5-35b-a3b':   { reasoning: true,  image: true  },
+  'qwen/qwen3.5-9b':        { reasoning: true,  image: false },
+};
+
 async function loadModels() {
   const data = await fetchJSON('/api/llm/models');
   modelsData = data.models || [];
+
+  // If the server already returned LM Studio models (staging mode server-side discovery),
+  // set a dummy API key so they pass the key gate in _callLLMInner. LM Studio is a local
+  // program — no real key needed — but the key gate expects something truthy.
+  if (modelsData.some(m => m.provider === 'lmstudio')) {
+    localStorage.setItem('byok_key_lmstudio', 'local-no-key-needed');
+  }
+
+  // ── LM Studio client-side discovery (production path) ──
+  // In production (Railway), the server can't reach user's localhost:1234, so the browser
+  // fetches it directly. In staging, the server already discovered LM Studio models above
+  // via /api/llm/models — the dedup set below prevents doubles.
+  // IMPORTANT: LM Studio does NOT always send CORS headers. If CORS is disabled, this
+  // fetch fails silently and models come from server-side discovery only (staging mode).
+  // In production, user MUST enable CORS in LM Studio settings for discovery to work.
+  // See docs/lmstudio-integration.md "CORS pitfall" for details.
+  try {
+    const lmsBaseUrl = (localStorage.getItem('byok_lmstudio_base_url') || 'http://localhost:1234').replace(/\/$/, '');
+    const lmsResp = await fetch(`${lmsBaseUrl}/v1/models`, { signal: AbortSignal.timeout(1500) });
+    if (lmsResp.ok) {
+      const lmsData = await lmsResp.json();
+      // Dedup: skip models the server already returned (staging mode server-side discovery)
+      const existingLms = new Set(modelsData.filter(m => m.provider === 'lmstudio').map(m => m.api_model));
+      for (const m of (lmsData.data || [])) {
+        const mid = m.id || '';
+        // Skip empty IDs, embedding models, and duplicates from server discovery
+        if (!mid || mid.toLowerCase().includes('embedding') || existingLms.has(mid)) continue;
+        // Look up known capabilities; unknown models default to text-only
+        const caps = LMSTUDIO_CAPABILITIES[mid] || { reasoning: false, image: false };
+        modelsData.push({
+          name: mid, api_model: mid, provider: 'lmstudio',
+          price: 'Free (local)',
+          // Context window set to 8192 — LM Studio default is 3900 which silently truncates.
+          // See docs/lmstudio-integration.md pitfall #3 for details.
+          context_window: 8192,
+          capabilities: { ...caps, tools: false },
+          available: true,
+        });
+      }
+      // Client-side discovery found models — set dummy key for the key gate
+      if (modelsData.some(m => m.provider === 'lmstudio')) {
+        localStorage.setItem('byok_key_lmstudio', 'local-no-key-needed');
+      }
+    }
+  } catch (e) {
+    // LM Studio not running, unreachable, or CORS blocked — silently skip.
+    // In production (HTTPS → HTTP localhost), CORS must be enabled in LM Studio settings.
+    if (e.name !== 'AbortError') console.warn('[LM Studio discovery] client-side fetch failed:', e.message);
+  }
 
   // Add Puter.js models to modelsData (before grouping)
   if (FEATURES.puter_js) {
@@ -86,8 +159,15 @@ async function loadModels() {
     const key = m.provider.charAt(0).toUpperCase() + m.provider.slice(1);
     (groups[key] ??= []).push(m);
   }
-  const providerOrder = ['Local', 'Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface', 'Ollama'];
-  const providerLabels = { Local: 'Local Models (free)', Puter: 'Puter.js (free)' };
+  const providerOrder = ['Local', 'Lmstudio', 'Ollama', 'Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface'];
+  const providerLabels = { Local: 'Local Models (free)', Lmstudio: 'LM Studio (free, local)', Puter: 'Puter.js (free)' };
+  // Pin qwen3.5-35b to top of LM Studio group
+  if (groups['Lmstudio']) {
+    groups['Lmstudio'].sort((a, b) => {
+      const pin = m => (m.api_model || m.name || '').includes('qwen3.5-35b') ? 0 : 1;
+      return pin(a) - pin(b);
+    });
+  }
 
   const unavail = modelsData.filter(m => !m.available);
   const byokGroups = {};
@@ -431,6 +511,8 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
   }
 
   // ── All other providers need an API key ──
+  // LM Studio passes this gate via a dummy key set during discovery in loadModels().
+  // See loadModels() — localStorage 'byok_key_lmstudio' is set to 'local-no-key-needed'.
   const key = getByokKey(provider);
   if (!key) throw new Error(`No API key for ${PROVIDER_LABELS[provider] || provider}. Select the model and paste your key in Model Keys.`);
 
@@ -524,6 +606,46 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);
     callLLM._lastUsage = data.usage ? { input_tokens: data.usage.input_tokens || 0, output_tokens: data.usage.output_tokens || 0 } : null;
     return data.content?.map(c => c.text).filter(Boolean).join('') || '';
+  }
+
+  // ── LM Studio (local, via server CORS proxy) ──
+  // LM Studio does NOT send CORS headers, so the browser can't call localhost:1234
+  // directly. Instead we route through /api/llm/lmstudio-proxy on our own server,
+  // which forwards to localhost:1234 server-to-server (no CORS needed). Same pattern
+  // as the Cloudflare proxy above. The dummy key 'local-no-key-needed' was set in
+  // loadModels() during discovery so we pass the key gate — we don't use it here.
+  if (provider === 'lmstudio') {
+    const baseUrl = localStorage.getItem('byok_lmstudio_base_url') || 'http://localhost:1234';
+    // LM Studio Jinja templates require at least one user message. If only system
+    // messages were provided (common in scaffold orchestrator calls), promote the
+    // system message to user role. Same pattern as the Gemini branch above.
+    let lmsMsgs = messages.map(m => ({ role: m.role, content: m.content }));
+    const hasUser = lmsMsgs.some(m => m.role === 'user');
+    if (!hasUser && lmsMsgs.length) {
+      const sysIdx = lmsMsgs.findIndex(m => m.role === 'system');
+      if (sysIdx !== -1) lmsMsgs[sysIdx] = { role: 'user', content: lmsMsgs[sysIdx].content };
+    }
+    const resp = await fetch('/api/llm/lmstudio-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: apiModel,
+        messages: lmsMsgs,
+        temperature: 0.3,
+        max_tokens: maxTokens,
+        base_url: baseUrl,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      throw new Error(`LM Studio error: ${data.error || resp.statusText}. Check LM Studio is running and the model is loaded.`);
+    }
+    callLLM._lastUsage = data.usage ? { input_tokens: data.usage.prompt_tokens || 0, output_tokens: data.usage.completion_tokens || 0 } : null;
+    const msg = data.choices?.[0]?.message || {};
+    // GLM-series models return thinking tokens in reasoning_content; content may be null
+    const text = msg.content || msg.reasoning_content || '';
+    if (data.choices?.[0]?.finish_reason === 'length') return { text, truncated: true };
+    return text;
   }
 
   // ── Cloudflare Workers AI (via server proxy — no browser CORS) ──

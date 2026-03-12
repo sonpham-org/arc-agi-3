@@ -1,3 +1,22 @@
+# Author: Cascade, using Claude Opus 4.6 Thinking
+# Date: 2026-03-10 21:08
+# PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities LIMITED to:
+#   - Static file serving (index.html, game data, JS/CSS assets)
+#   - Session persistence (save/resume/branch via SQLite on Railway Volume)
+#   - Game step proxying (when Pyodide unavailable in browser)
+#   - Model registry API (/api/llm/models) — cloud + Ollama + local servers + LM Studio (staging only)
+#   - Cloudflare Workers AI proxy (/api/llm/cf-proxy — no browser CORS)
+#   - LM Studio CORS proxy (/api/llm/lmstudio-proxy — LM Studio has no CORS headers)
+#   - Observatory, share/replay, and admin endpoints
+#   NOTE: All LLM orchestration runs CLIENT-SIDE. See CLAUDE.md — Client-Side Architecture.
+#   NOTE: LM Studio discovery is HYBRID (Mar 2026): server probes localhost:1234 in
+#         staging mode (no CORS needed); browser does client-side discovery in production
+#         (Railway can't reach user's localhost). See docs/lmstudio-integration.md pitfall #8.
+# Integration points: models.py (MODEL_REGISTRY, LMSTUDIO_CAPABILITIES, OLLAMA_*),
+#   llm_providers.py (Copilot OAuth), db.py (SQLite), arc_agi/arcengine (game runtime)
+# Dependencies: Flask, httpx, sqlite3, Pyodide (client), Railway (deployment)
+# SRP/DRY check: Pass — model registry in models.py, LLM routing in scaffolding.js,
+#   DB ops in db.py; server is glue layer only
 """ARC-AGI-3 Web Player + LLM Reasoning Server."""
 
 import argparse
@@ -35,6 +54,9 @@ load_dotenv(Path(__file__).parent / ".env")
 from models import (
     MODEL_REGISTRY, SYSTEM_MSG, THINKING_BUDGETS,
     OLLAMA_VRAM, OLLAMA_VISION_MODELS, _discovered_local_models,
+    # NOTE: LMSTUDIO_CAPABILITIES is NOT imported here — server no longer does
+    # LM Studio discovery. It lives in models.py for the CLI agent path only.
+    # Browser-side discovery uses its own copy in scaffolding.js.
 )
 from llm_providers import (
     _route_model_call, _get_or_create_gemini_cache,
@@ -1377,6 +1399,47 @@ def cf_proxy():
         return jsonify({"error": str(e)}), 502
 
 
+@app.route("/api/llm/lmstudio-proxy", methods=["POST"])
+@bot_protection
+@turnstile_required
+def lmstudio_proxy():
+    """CORS proxy for LM Studio — browser can't call localhost:1234 directly due to
+    missing Access-Control-Allow-Origin headers. Same pattern as cf_proxy above.
+    In staging mode, the server IS on the same machine as LM Studio, so server-to-server
+    HTTP works. In production (Railway), this endpoint returns 502 since the server
+    can't reach the user's localhost:1234 — user must enable CORS in LM Studio settings
+    or use a Cloudflare Tunnel for that scenario."""
+    import httpx as _hx
+    body = request.get_json(force=True) or {}
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    max_tokens = min(int(body.get("max_tokens", 16384)), 65536)
+    temperature = float(body.get("temperature", 0.3))
+    base_url = body.get("base_url", "http://localhost:1234")
+    if not model:
+        return jsonify({"error": "model is required"}), 400
+    try:
+        url = base_url.rstrip("/") + "/v1/chat/completions"
+        resp = _hx.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            },
+            timeout=120.0,
+        )
+        # Forward the actual LM Studio response — don't swallow error bodies with
+        # raise_for_status(). The client needs to see the real error message (e.g.
+        # "No user query found in messages" from Jinja template errors).
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/llm/models")
 @bot_protection
 @turnstile_required
@@ -1428,9 +1491,16 @@ def llm_models():
         except Exception:
             pass
 
-    # Discover local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)
+    # Discover local OpenAI-compatible servers — staging only.
+    # Hybrid discovery strategy for LM Studio (port 1234):
+    #   - Staging: server probes localhost:1234 directly (no CORS needed, always works)
+    #   - Production (Railway): server CAN'T reach user's localhost:1234, so the browser
+    #     does client-side discovery in scaffolding.js loadModels() (requires LM Studio CORS).
+    #   - Client-side discovery deduplicates against server results to avoid double entries.
+    # See docs/lmstudio-integration.md "CORS pitfall" for why both paths are needed.
     if mode == "staging":
         import httpx
+        from models import LMSTUDIO_CAPABILITIES
         LOCAL_PORTS = [
             (1234, "LM Studio"),
             (8080, "Local Server"),
@@ -1446,14 +1516,24 @@ def llm_models():
                         mid = m.get("id", "")
                         if not mid:
                             continue
+                        # Skip embedding models — not chat models
+                        if "embedding" in mid.lower():
+                            continue
+                        is_lmstudio = (port == 1234)
+                        provider_name = "lmstudio" if is_lmstudio else "local"
+                        caps = LMSTUDIO_CAPABILITIES.get(mid, {}) if is_lmstudio else {}
+                        has_reasoning = caps.get("reasoning", False)
+                        has_image = caps.get("image", False)
                         entry = {
                             "name": mid,
                             "api_model": mid,
-                            "provider": "local",
+                            "provider": provider_name,
                             "local_port": port,
                             "local_label": label,
                             "price": f"Free ({label}:{port})",
-                            "capabilities": {"image": False, "reasoning": False, "tools": False},
+                            # LM Studio context window override — default 3900 silently truncates.
+                            "context_window": 8192 if is_lmstudio else None,
+                            "capabilities": {"image": has_image, "reasoning": has_reasoning, "tools": False},
                             "available": True,
                         }
                         models.append(entry)

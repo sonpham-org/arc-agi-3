@@ -1,3 +1,16 @@
+# Author: Cascade, using Claude Opus 4.6 Thinking
+# Date: 2026-03-10 21:08
+# PURPOSE: Model registry and capability constants for ARC-AGI-3. Contains:
+#   - MODEL_REGISTRY: all cloud/hosted provider models with capabilities, pricing, context windows
+#   - LMSTUDIO_CAPABILITIES: known LM Studio model overrides (reasoning, image) keyed on api_model ID
+#     — mirrors LMSTUDIO_CAPABILITIES in scaffolding.js; update BOTH when adding models
+#   - OLLAMA_VRAM / OLLAMA_VISION_MODELS: Ollama model metadata for server-side discovery
+#   - THINKING_BUDGETS: Gemini thinking token budget presets
+#   Used by: server.py (web UI model registry API), agent.py (CLI agent), batch_runner.py
+# Integration points: server.py (/api/llm/models endpoint), scaffolding.js (client-side mirror
+#   of LMSTUDIO_CAPABILITIES), agent.py (CLI MODELS dict references these)
+# SRP/DRY check: Pass — single source of truth for server-side model metadata;
+#   LMSTUDIO_CAPABILITIES intentionally duplicated client-side (see CLAUDE.md architecture)
 """Model registry and constants for ARC-AGI-3."""
 
 SYSTEM_MSG = (
@@ -256,6 +269,16 @@ MODEL_REGISTRY: dict[str, dict] = {
         "context_window": 1000000,
         "capabilities": {"image": True, "reasoning": True, "tools": True},
     },
+}
+
+# LM Studio capability overrides — keyed on api_model ID as returned by /v1/models.
+# Used by server.py dynamic discovery to annotate whatever models the user has loaded.
+# Add entries here when a model's reasoning/image capabilities are confirmed.
+LMSTUDIO_CAPABILITIES: dict[str, dict] = {
+    "zai-org/glm-4.7-flash":   {"reasoning": True,  "image": False},
+    "zai-org/glm-4.6v-flash":  {"reasoning": True,  "image": True},
+    "qwen/qwen3.5-35b-a3b":    {"reasoning": True,  "image": True},
+    "qwen/qwen3.5-9b":         {"reasoning": True,  "image": False},
 }
 
 # Ollama models discovered at runtime; all support text only by default.
