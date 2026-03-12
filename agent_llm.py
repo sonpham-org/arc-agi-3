@@ -255,8 +255,10 @@ def _call_cloudflare(model: str, messages: list, temperature: float, max_tokens:
 
 def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
                tools_enabled: bool = False, session_id: str = "",
-               grid=None, prev_grid=None, thinking_budget: int = 0) -> dict:
-    """Route to the right provider. Returns dict with {text, input_tokens, output_tokens}.
+               grid=None, prev_grid=None, thinking_budget: int = 0) -> str:
+    """Route to the right provider. Returns just the text response (string).
+
+    For metadata (tokens, timing, errors), use call_model_with_metadata() instead.
 
     Optional kwargs for Gemini tool calling:
         tools_enabled: enable run_python tool
@@ -284,24 +286,28 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
     api_model = info["api_model"]
     messages = [{"role": "system", "content": SYSTEM_MSG}, {"role": "user", "content": prompt}]
 
+    result = None
     if provider == "gemini":
-        return _call_gemini(api_model, prompt, temp, max_tok,
+        result = _call_gemini(api_model, prompt, temp, max_tok,
                             tools_enabled=tools_enabled, session_id=session_id,
                             grid=grid, prev_grid=prev_grid,
                             thinking_budget=thinking_budget)
-    if provider == "anthropic":
-        return _call_anthropic(api_model, [{"role": "user", "content": prompt}],
+    elif provider == "anthropic":
+        result = _call_anthropic(api_model, [{"role": "user", "content": prompt}],
                                 SYSTEM_MSG, temp, max_tok)
-    if provider == "cloudflare":
-        return _call_cloudflare(api_model, messages, temp, max_tok)
-    if provider == "ollama":
-        return _call_openai_compatible(info["url"], "", api_model, messages, temp, max_tok)
-    if provider == "lmstudio":
-        return _call_openai_compatible("http://localhost:1234/v1/chat/completions", "no-key-needed", api_model, messages, temp, max_tok)
-
-    # Groq / Mistral / HuggingFace (OpenAI-compatible)
-    api_key = os.environ.get(info["env_key"], "")
-    return _call_openai_compatible(info["url"], api_key, api_model, messages, temp, max_tok)
+    elif provider == "cloudflare":
+        result = _call_cloudflare(api_model, messages, temp, max_tok)
+    elif provider == "ollama":
+        result = _call_openai_compatible(info["url"], "", api_model, messages, temp, max_tok)
+    elif provider == "lmstudio":
+        result = _call_openai_compatible("http://localhost:1234/v1/chat/completions", "no-key-needed", api_model, messages, temp, max_tok)
+    else:
+        # Groq / Mistral / HuggingFace (OpenAI-compatible)
+        api_key = os.environ.get(info["env_key"], "")
+        result = _call_openai_compatible(info["url"], api_key, api_model, messages, temp, max_tok)
+    
+    # Extract and return just the text
+    return result.get("text", "") if result else ""
 
 
 def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str = "executor",

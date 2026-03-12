@@ -18,12 +18,36 @@ Usage:
     pytest tests/e2e/test_lmstudio_regression.py -v  # headless
     pytest tests/e2e/test_lmstudio_regression.py -k test_model_discovery -v --headed
 """
+import os
 import re
+import sys
+from pathlib import Path
 
 import pytest
-from playwright.sync_api import expect
 
-from conftest import LLM_TIMEOUT_MS, UI_TIMEOUT_MS
+# Skip all tests if playwright not available or server not running
+try:
+    from playwright.sync_api import expect
+    # Import conftest constants by adding the test directory to sys.path
+    _e2e_dir = Path(__file__).parent
+    if str(_e2e_dir) not in sys.path:
+        sys.path.insert(0, str(_e2e_dir))
+
+    # Now import the constants from conftest
+    import conftest as _conftest
+    LLM_TIMEOUT_MS = _conftest.LLM_TIMEOUT_MS
+    UI_TIMEOUT_MS = _conftest.UI_TIMEOUT_MS
+    _HAS_PLAYWRIGHT = True
+except (ImportError, ModuleNotFoundError):
+    _HAS_PLAYWRIGHT = False
+    LLM_TIMEOUT_MS = 120_000
+    UI_TIMEOUT_MS = 15_000
+
+# Mark module to skip if playwright not available or ARC_TEST_URL not set
+pytestmark = pytest.mark.skipif(
+    not _HAS_PLAYWRIGHT or not os.environ.get("ARC_TEST_URL"),
+    reason="Requires pytest-playwright and running ARC-AGI-3 server (ARC_TEST_URL)"
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

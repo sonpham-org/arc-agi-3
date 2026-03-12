@@ -39,7 +39,7 @@ class TestThrottling(unittest.TestCase):
 class TestCopilotTokenHandling(unittest.TestCase):
     """Test Copilot OAuth token management."""
 
-    @patch('llm_providers._COPILOT_TOKEN_FILE')
+    @patch('llm_providers_copilot._COPILOT_TOKEN_FILE')
     def test_load_copilot_token_from_file(self, mock_file):
         """Load Copilot token from file if exists."""
         mock_file.exists.return_value = True
@@ -48,7 +48,7 @@ class TestCopilotTokenHandling(unittest.TestCase):
         result = llm_providers._load_copilot_token()
         self.assertEqual(result, "test-token-123")
 
-    @patch('llm_providers._COPILOT_TOKEN_FILE')
+    @patch('llm_providers_copilot._COPILOT_TOKEN_FILE')
     def test_load_copilot_token_returns_none_if_not_exists(self, mock_file):
         """Return None if token file doesn't exist."""
         mock_file.exists.return_value = False
@@ -56,7 +56,7 @@ class TestCopilotTokenHandling(unittest.TestCase):
         result = llm_providers._load_copilot_token()
         self.assertIsNone(result)
 
-    @patch('llm_providers._COPILOT_TOKEN_FILE')
+    @patch('llm_providers_copilot._COPILOT_TOKEN_FILE')
     def test_load_copilot_token_handles_exception(self, mock_file):
         """Handle exceptions gracefully when reading token."""
         mock_file.exists.side_effect = Exception("Permission denied")
@@ -64,7 +64,7 @@ class TestCopilotTokenHandling(unittest.TestCase):
         result = llm_providers._load_copilot_token()
         self.assertIsNone(result)
 
-    @patch('llm_providers._COPILOT_TOKEN_FILE')
+    @patch('llm_providers_copilot._COPILOT_TOKEN_FILE')
     def test_save_copilot_token_creates_file(self, mock_file):
         """Save token to file."""
         mock_file.parent.mkdir = MagicMock()
@@ -72,7 +72,7 @@ class TestCopilotTokenHandling(unittest.TestCase):
         llm_providers._save_copilot_token("new-token")
         mock_file.write_text.assert_called_once_with("new-token")
 
-    @patch('llm_providers._COPILOT_TOKEN_FILE')
+    @patch('llm_providers_copilot._COPILOT_TOKEN_FILE')
     def test_save_copilot_token_none_deletes_file(self, mock_file):
         """Delete file when saving None token."""
         mock_file.exists.return_value = True
