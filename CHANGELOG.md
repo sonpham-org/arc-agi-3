@@ -5,6 +5,14 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.2.2] — UI: Move agent transport controls above Intervene button
+*Author: Claude Sonnet 4.6 | 2026-03-12*
+
+### Changed
+- **`templates/index.html`** — Swapped the vertical order of the agent transport bar (Autoplay / Undo / Restart) and the "Intervene as Human" controls. The transport bar now appears directly below the game canvas (where Intervene was), so agent start controls are visible without scrolling. Intervene sits below it.
+
+---
+
 ## [1.2.1] — Senior Audit of Phase 1 Modularization
 *Author: Claude Opus 4.6 (audit) | 2026-03-12*
 

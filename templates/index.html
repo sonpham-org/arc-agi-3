@@ -417,6 +417,24 @@
         <div id="pyodideGameLoading" style="display:none;" class="empty-state"></div>
         <canvas id="gameCanvas" width="512" height="512" style="display:none;"></canvas>
         <div id="coordTooltip" style="display:none;position:fixed;pointer-events:none;background:rgba(0,0,0,0.85);color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;font-family:monospace;z-index:1000;border:1px solid var(--border);"></div>
+        <!-- Transport controls (hidden until game loads) -->
+        <div class="transport-strip" id="transportBar" style="display:none;">
+          <div class="transport-bar">
+            <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
+              onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
+              onmouseleave="clearTransportDesc()">&#187; Agent Autoplay</button>
+            <button class="btn" onclick="undoStep()" id="undoBtn" disabled
+              onmouseenter="showTransportDesc('Undo last turn')"
+              onmouseleave="clearTransportDesc()">&#9198; Undo</button>
+            <button class="btn" onclick="resetSession()" id="resetBtn"
+              onmouseenter="showTransportDesc('Restart the current game from scratch')"
+              onmouseleave="clearTransportDesc()">&#8635; Restart</button>
+            <button class="btn" id="backToObsBtn" onclick="enterObsMode()" style="display:none;"
+              onmouseenter="showTransportDesc('Return to the observatory view')"
+              onmouseleave="clearTransportDesc()">&#128300; Observatory</button>
+          </div>
+          <div class="transport-desc" id="transportDesc"></div>
+        </div>
         <div class="controls controls-lockable locked" id="controls" style="display:none;">
           <button class="intervene-toggle" id="interveneBtn" onclick="toggleHumanLock()">&#128274; Intervene as Human</button>
           <div class="controls-inner">
@@ -464,24 +482,6 @@
             <button class="btn btn-step" onclick="liveScrubReturnToLive()" style="padding:2px 10px;font-size:11px;">&#9654; Return to Live</button>
           </div>
         </div>
-        </div>
-        <!-- Transport controls (hidden until game loads) -->
-        <div class="transport-strip" id="transportBar" style="display:none;">
-          <div class="transport-bar">
-            <button class="btn" onclick="toggleAutoPlay()" id="autoPlayBtn"
-              onmouseenter="showTransportDesc('Repeatedly call the agent until paused')"
-              onmouseleave="clearTransportDesc()">&#187; Agent Autoplay</button>
-            <button class="btn" onclick="undoStep()" id="undoBtn" disabled
-              onmouseenter="showTransportDesc('Undo last turn')"
-              onmouseleave="clearTransportDesc()">&#9198; Undo</button>
-            <button class="btn" onclick="resetSession()" id="resetBtn"
-              onmouseenter="showTransportDesc('Restart the current game from scratch')"
-              onmouseleave="clearTransportDesc()">&#8635; Restart</button>
-            <button class="btn" id="backToObsBtn" onclick="enterObsMode()" style="display:none;"
-              onmouseenter="showTransportDesc('Return to the observatory view')"
-              onmouseleave="clearTransportDesc()">&#128300; Observatory</button>
-          </div>
-          <div class="transport-desc" id="transportDesc"></div>
         </div>
       </div>
 
