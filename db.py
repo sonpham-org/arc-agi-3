@@ -428,7 +428,7 @@ def db_conn():
         conn.commit()
     except Exception as e:
         conn.rollback()
-        log.error(f"db_conn transaction rolled back: {e}")
+        log.exception("db_conn transaction rolled back: %s", str(e), extra={"operation": "db_conn", "error_type": type(e).__name__})
         raise
     finally:
         conn.close()

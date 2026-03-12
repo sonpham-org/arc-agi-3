@@ -136,7 +136,7 @@ def _export_session_to_file(session_id: str) -> Path | None:
         log.info(f"Exported session {session_id} to {out_dir}")
         return out_dir
     except Exception as e:
-        log.warning(f"_export_session_to_file failed: {e}")
+        log.exception("Error in _export_session_to_file (session_id=%s): %s", session_id, str(e), extra={"operation": "_export_session_to_file", "session_id": session_id, "error_type": type(e).__name__})
         return None
 
 
@@ -169,7 +169,7 @@ def _read_session_from_file(session_id: str) -> dict | None:
         conn.close()
         return {"session": dict(sess_row), "actions": actions, "calls": calls, "tool_executions": tool_execs}
     except Exception as e:
-        log.warning(f"_read_session_from_file failed for {session_id}: {e}")
+        log.exception("Error in _read_session_from_file (session_id=%s): %s", session_id, str(e), extra={"operation": "_read_session_from_file", "session_id": session_id, "error_type": type(e).__name__})
         return None
 
 

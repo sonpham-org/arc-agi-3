@@ -220,6 +220,7 @@ def run_single_game(arcade, game_id: str, cfg: dict, max_steps: int,
     except Exception as e:
         import traceback
         traceback.print_exc()
+        log.exception("Error in run_single_game (game_id=%s, session_id=%s): %s", game_id, session_id, str(e), extra={"operation": "run_single_game", "game_id": game_id, "session_id": session_id, "error_type": type(e).__name__})
         error_msg = str(e)
         result = "ERROR"
 
@@ -394,6 +395,7 @@ def run_batch(
                     tag = f"{result['result']:12s}"
                     print(f"  [done] {game_id} r{repeat_idx} -> {tag} ({result['steps']} steps, {result['elapsed']}s)")
                 except Exception as e:
+                    log.exception("Error processing future result (game_id=%s, repeat_idx=%d): %s", game_id, repeat_idx, str(e), extra={"operation": "process_future_result", "game_id": game_id, "repeat_idx": repeat_idx, "error_type": type(e).__name__})
                     print(f"  [error] {game_id} r{repeat_idx}: {e}")
                     results.append({
                         "game_id": game_id, "repeat_idx": repeat_idx,
@@ -457,6 +459,7 @@ def _start_obs_server():
         _obs_port = start_obs_server()
         print(f"\n  Observatory dashboard: http://localhost:{_obs_port}/obs\n")
     except Exception as e:
+        log.exception("Error in _start_obs_server: %s", str(e), extra={"operation": "_start_obs_server", "error_type": type(e).__name__})
         print(f"  [obs] Failed to start dashboard server: {e}")
 
 
