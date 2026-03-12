@@ -105,7 +105,7 @@ async function loadModels() {
   // See docs/lmstudio-integration.md "CORS pitfall" for details.
   try {
     const lmsBaseUrl = (localStorage.getItem('byok_lmstudio_base_url') || 'http://localhost:1234').replace(/\/$/, '');
-    const lmsResp = await fetch(`${lmsBaseUrl}/v1/models`, { signal: AbortSignal.timeout(1500) });
+    const lmsResp = await fetch(`${lmsBaseUrl}/v1/models`, { signal: AbortSignal.timeout(15000) });
     if (lmsResp.ok) {
       const lmsData = await lmsResp.json();
       // Dedup: skip models the server already returned (staging mode server-side discovery)

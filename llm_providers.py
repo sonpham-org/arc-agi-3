@@ -19,6 +19,9 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
+# Local model timeout configuration (seconds)
+LOCAL_MODEL_TIMEOUT = float(os.environ.get("LOCAL_MODEL_TIMEOUT", "180.0"))
+
 # ═══════════════════════════════════════════════════════════════════════════
 # COPILOT AUTH STATE
 # ═══════════════════════════════════════════════════════════════════════════
@@ -535,7 +538,7 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
 
     last_exc = None
     for attempt in range(10):
-        resp = httpx.post(url, headers=headers, json=body, timeout=90.0)
+        resp = httpx.post(url, headers=headers, json=body, timeout=LOCAL_MODEL_TIMEOUT)
         if resp.status_code == 429:
             retry_after = float(resp.headers.get("retry-after", min(10 * (2 ** attempt), 120)))
             retry_after = min(retry_after, 120)

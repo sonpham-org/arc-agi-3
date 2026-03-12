@@ -987,7 +987,7 @@ def llm_models():
         ]
         for port, label in LOCAL_PORTS:
             try:
-                resp = httpx.get(f"http://localhost:{port}/v1/models", timeout=1.0)
+                resp = httpx.get(f"http://localhost:{port}/v1/models", timeout=5.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     model_list = data.get("data", [])
