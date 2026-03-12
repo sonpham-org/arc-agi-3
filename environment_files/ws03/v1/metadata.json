@@ -1,0 +1,8 @@
+{
+  "game_id": "ws03-v1",
+  "title": "WS03",
+  "default_fps": 5,
+  "baseline_actions": [],
+  "tags": ["fog-of-war", "puzzle", "energy-management"],
+  "local_dir": "environment_files/ws03/v1"
+}

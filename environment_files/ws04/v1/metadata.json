@@ -1,0 +1,8 @@
+{
+  "game_id": "ws04-v1",
+  "title": "WS04",
+  "default_fps": 5,
+  "baseline_actions": [],
+  "tags": ["puzzle", "energy-management", "vertical-ui", "fog-of-war"],
+  "local_dir": "environment_files/ws04/v1"
+}
