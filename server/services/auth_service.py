@@ -225,3 +225,89 @@ def openai_set_key(api_key: str) -> tuple[dict, str]:
         return {"error": "Invalid OpenAI API key format (expected sk-...)"}, "Invalid key"
     llm_providers.openai_api_key = key
     return {"status": "ok"}, ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GOOGLE OAUTH CALLBACK — Exchange code for auth token
+# ═══════════════════════════════════════════════════════════════════════════
+
+def google_callback(code: str, state: str, expected_state: str | None, base_url: str,
+                   google_client_id: str, google_client_secret: str) -> tuple[dict | None, str]:
+    """Handle Google OAuth callback — exchange code for tokens and create user.
+    
+    Args:
+        code: authorization code from Google
+        state: state token from callback
+        expected_state: expected state token (from session)
+        base_url: base URL for redirect_uri (e.g., "https://example.com")
+        google_client_id: Google OAuth client ID
+        google_client_secret: Google OAuth client secret
+    
+    Returns:
+        ({"token": ..., "user": ..., "ttl": ...}, error_msg)
+    """
+    if not code:
+        return None, "Missing authorization code"
+    
+    # Verify state token
+    if not expected_state or state != expected_state:
+        log.warning(f"[GOOGLE_AUTH] state mismatch: expected={expected_state}, got={state[:20] if state else 'none'}...")
+        return None, "Invalid state token — please try again"
+    
+    redirect_uri = f"{base_url.rstrip('/')}/api/auth/google/callback"
+    
+    # Exchange authorization code for tokens
+    try:
+        token_resp = httpx.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": google_client_id,
+                "client_secret": google_client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=10,
+        )
+        if token_resp.status_code != 200:
+            log.warning(f"Google token exchange failed: {token_resp.text}")
+            return None, "Google login failed — token exchange error"
+        tokens = token_resp.json()
+    except Exception as e:
+        log.warning(f"Google token exchange error: {e}")
+        return None, "Google login failed — network error"
+    
+    # Verify the ID token
+    id_token = tokens.get("id_token", "")
+    try:
+        info_resp = httpx.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": id_token},
+            timeout=10,
+        )
+        if info_resp.status_code != 200:
+            return None, "Google login failed — invalid token"
+        token_info = info_resp.json()
+    except Exception as e:
+        log.warning(f"Google tokeninfo failed: {e}")
+        return None, "Google login failed — verification error"
+    
+    if token_info.get("aud") != google_client_id:
+        return None, "Google login failed — audience mismatch"
+    
+    email = token_info.get("email", "").lower().strip()
+    email_verified = token_info.get("email_verified")
+    if not email or email_verified not in ("true", True):
+        return None, "Google login failed — email not verified"
+    
+    # Create/find user and issue auth token using oauth_user_from_google
+    google_name = token_info.get("name", "")
+    google_sub = token_info.get("sub", "")
+    auth_info, error_msg = oauth_user_from_google(
+        email, display_name=google_name, google_id=google_sub
+    )
+    if error_msg or not auth_info:
+        return None, error_msg or "Service unavailable"
+    
+    log.info(f"[GOOGLE_AUTH] login success: email={email} user_id={auth_info['user']['id'][:8]}...")
+    return auth_info, ""

@@ -326,3 +326,99 @@ def branch(parent_id: str, step_num: int, mode: str = "staging",
     except Exception as e:
         log.warning(f"Session branch failed: {e}")
         return {}, str(e)
+
+
+def obs_events_handle_post(cursor: int, events: list) -> tuple[dict, str]:
+    """Handle POST to obs_events (backward compat — obs_events table removed).
+    
+    Args:
+        cursor: cursor value from request
+        events: list of event objects
+    
+    Returns:
+        (response_dict, error_msg)
+    """
+    # obs_events table removed — accept POST for backward compat but don't store
+    return {"ok": True, "cursor": cursor + len(events)}, ""
+
+
+def obs_events_get(session_id: str) -> tuple[dict, str]:
+    """Reconstruct obs events for replay from llm_calls + session_actions.
+    
+    Args:
+        session_id: session ID
+    
+    Returns:
+        ({"events": [...]}, error_msg)
+    """
+    try:
+        conn = _get_db()
+        calls = conn.execute(
+            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY timestamp",
+            (session_id,),
+        ).fetchall()
+        action_rows = conn.execute(
+            "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+
+        from arcengine import GameAction
+        
+        raw_events = []
+        for c in [dict(c) for c in calls]:
+            raw_events.append({
+                "ts": c.get("timestamp", 0),
+                "agent": c.get("agent_type", "planner"),
+                "event": "llm_call",
+                "model": c.get("model", ""),
+                "input_tokens": c.get("input_tokens", 0),
+                "output_tokens": c.get("output_tokens", 0),
+                "cost": c.get("cost", 0),
+                "duration_ms": c.get("duration_ms", 0),
+                "step_num": c.get("step_num"),
+                "turn_num": c.get("turn_num"),
+                "response": (c.get("output_json") or "")[:1000],
+            })
+        for s in [dict(s) for s in action_rows]:
+            grid = None
+            if s.get("states_json"):
+                try:
+                    states = json.loads(s["states_json"])
+                    if states and isinstance(states, list) and states[0].get("grid"):
+                        grid = _decompress_grid(states[0]["grid"])
+                except Exception:
+                    pass
+            action_id = s.get("action", 0)
+            try:
+                action_name = GameAction.from_id(int(action_id)).name
+            except Exception:
+                action_name = str(action_id)
+            if s.get("row") is not None and s.get("col") is not None:
+                action_name = f"{action_name}@({s['col']},{s['row']})"
+            raw_events.append({
+                "ts": s.get("timestamp", 0),
+                "agent": "executor",
+                "event": "act",
+                "action": action_name,
+                "step_num": s.get("step_num", 0),
+                "grid": grid,
+            })
+
+        if not raw_events:
+            return {"events": []}, ""
+
+        raw_events.sort(key=lambda e: e.get("ts", 0))
+        t0 = raw_events[0]["ts"]
+        from datetime import datetime, timezone
+        events = []
+        for ev in raw_events:
+            ts = ev.pop("ts", 0)
+            ev["t"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            ev["elapsed_s"] = round(ts - t0, 2)
+            events.append(ev)
+
+        return {"events": events}, ""
+    except Exception as e:
+        log.warning(f"GET obs-events failed: {e}")
+        return {}, str(e)

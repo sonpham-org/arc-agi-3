@@ -385,68 +385,24 @@ def auth_google_callback():
     state = request.args.get("state", "")
     if not code:
         return "Missing authorization code", 400
-    # Verify state token (log for debugging)
+    
+    # Verify state token (pop from session)
     expected_state = flask_session.pop("google_oauth_state", None)
     app.logger.info(f"[GOOGLE_AUTH] callback: code={code[:10]}... state_match={state == expected_state if expected_state else 'no_expected'}")
-    if not expected_state or state != expected_state:
-        app.logger.warning(f"[GOOGLE_AUTH] state mismatch: expected={expected_state}, got={state[:20]}...")
-        return "Invalid state token — please try again. <a href='/'>Go back</a> and try again.", 400
+    
+    # Call service to handle OAuth token exchange and user creation
     base_url = request.host_url.rstrip("/").replace("http://", "https://", 1)
-    redirect_uri = f"{base_url}/api/auth/google/callback"
-    # Exchange authorization code for tokens
-    try:
-        token_resp = _httpx.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            },
-            timeout=10,
-        )
-        if token_resp.status_code != 200:
-            app.logger.warning(f"Google token exchange failed: {token_resp.text}")
-            return "Google login failed — token exchange error", 500
-        tokens = token_resp.json()
-    except Exception as e:
-        app.logger.warning(f"Google token exchange error: {e}")
-        return "Google login failed — network error", 500
-    # Verify the ID token
-    id_token = tokens.get("id_token", "")
-    try:
-        info_resp = _httpx.get(
-            "https://oauth2.googleapis.com/tokeninfo",
-            params={"id_token": id_token},
-            timeout=10,
-        )
-        if info_resp.status_code != 200:
-            return "Google login failed — invalid token", 401
-        token_info = info_resp.json()
-    except Exception as e:
-        app.logger.warning(f"Google tokeninfo failed: {e}")
-        return "Google login failed — verification error", 500
-    if token_info.get("aud") != GOOGLE_CLIENT_ID:
-        return "Google login failed — audience mismatch", 401
-    email = token_info.get("email", "").lower().strip()
-    email_verified = token_info.get("email_verified")
-    if not email or email_verified not in ("true", True):
-        return "Google login failed — email not verified", 401
-    # Create/find user and issue auth token using auth_service
-    google_name = token_info.get("name", "")
-    google_sub = token_info.get("sub", "")
-    auth_info, error_msg = auth_service.oauth_user_from_google(
-        email, display_name=google_name, google_id=google_sub
+    auth_info, error_msg = auth_service.google_callback(
+        code, state, expected_state, base_url,
+        GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
     )
     if error_msg or not auth_info:
-        return error_msg or "Service unavailable", 503
-    token = auth_info["token"]
-    user = auth_info["user"]
-    app.logger.info(f"[GOOGLE_AUTH] login success: email={email} user_id={user['id'][:8]}...")
+        return error_msg or "Service unavailable", 400 if "Invalid state" in (error_msg or "") else 503
+    
+    # Set cookie and redirect
     resp = make_response("", 302, {"Location": "/?logged_in=1"})
     # Note: secure=False behind proxy (Railway terminates SSL), but SameSite=Lax is sufficient
-    resp.set_cookie("arc_auth", token,
+    resp.set_cookie("arc_auth", auth_info["token"],
                      max_age=auth_info["ttl"], httponly=True,
                      samesite="Lax", secure=False)
     return resp
@@ -716,104 +672,9 @@ def cf_proxy():
 @turnstile_required
 def llm_models():
     """Return all models with capabilities and availability (mode-aware)."""
-    models = []
-    mode = get_mode()
-
-    for key, info in MODEL_REGISTRY.items():
-        provider = info["provider"]
-        # Copilot models need OAuth, not env key
-        if provider == "copilot":
-            if not feature_enabled("copilot"):
-                continue
-            available = llm_providers.copilot_oauth_token is not None
-        elif mode == "prod":
-            # In prod mode, all server providers shown but marked unavailable
-            # (user provides their own key via BYOK)
-            available = False
-        else:
-            env_key = info.get("env_key", "")
-            available = bool(not env_key or os.environ.get(env_key))
-        models.append({
-            "name": key,
-            "api_model": info.get("api_model", key),
-            "provider": provider,
-            "price": info.get("price", "?"),
-            "context_window": info.get("context_window", 128000),
-            "capabilities": info.get("capabilities", {}),
-            "available": available,
-        })
-
-    # Discover Ollama models (staging only)
-    if mode == "staging":
-        try:
-            import ollama
-            ollama_list = ollama.list()
-            ollama_names = [m.model for m in ollama_list.models] if hasattr(ollama_list, "models") else []
-            for name in ollama_names:
-                vram = OLLAMA_VRAM.get(name, "local")
-                is_vision = name.split(":")[0] in OLLAMA_VISION_MODELS
-                models.append({
-                    "name": name,
-                    "provider": "ollama",
-                    "price": f"Free ({vram})",
-                    "capabilities": {"image": is_vision, "reasoning": False, "tools": False},
-                    "available": True,
-                })
-        except Exception:
-            pass
-
-    # Discover local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)
-    if mode == "staging":
-        import httpx
-        LOCAL_PORTS = [
-            (1234, "LM Studio"),
-            (8080, "Local Server"),
-            (8000, "Local Server"),
-        ]
-        for port, label in LOCAL_PORTS:
-            try:
-                resp = httpx.get(f"http://localhost:{port}/v1/models", timeout=5.0)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    model_list = data.get("data", [])
-                    for m in model_list:
-                        mid = m.get("id", "")
-                        if not mid:
-                            continue
-                        # Skip embedding models — not chat models
-                        if "embedding" in mid.lower():
-                            continue
-                        is_lmstudio = (port == 1234)
-                        provider_name = "lmstudio" if is_lmstudio else "local"
-                        # Capability overrides for known LM Studio models
-                        # Mirrors LMSTUDIO_CAPABILITIES in scaffolding.js — update both together
-                        _LMS_CAPS = {
-                            'zai-org/glm-4.7-flash':  {'reasoning': True,  'image': False},
-                            'zai-org/glm-4.6v-flash': {'reasoning': True,  'image': True},
-                            'qwen/qwen3.5-35b-a3b':   {'reasoning': True,  'image': True},
-                            'qwen/qwen3.5-9b':        {'reasoning': True,  'image': False},
-                        }
-                        caps = _LMS_CAPS.get(mid, {}) if is_lmstudio else {}
-                        has_reasoning = caps.get("reasoning", False)
-                        has_image = caps.get("image", False)
-                        entry = {
-                            "name": mid,
-                            "api_model": mid,
-                            "provider": provider_name,
-                            "local_port": port,
-                            "local_label": label,
-                            "price": f"Free ({label}:{port})",
-                            # LM Studio context window override — default 3900 silently truncates.
-                            "context_window": 8192 if is_lmstudio else None,
-                            "capabilities": {"image": has_image, "reasoning": has_reasoning, "tools": False},
-                            "available": True,
-                        }
-                        models.append(entry)
-                        _discovered_local_models[mid] = entry
-            except Exception:
-                pass
-
-    return jsonify({"models": models, "mode": mode, "default": DEFAULT_MODEL})
+    from server.services import llm_admin_service
+    result = llm_admin_service.get_models(request.args)
+    return jsonify(result)
 
 
 
@@ -1127,82 +988,19 @@ def log_session_event(session_id):
 def session_obs_events(session_id):
     """GET: reconstruct obs events for replay. POST: no-op (obs_events table removed)."""
     if request.method == "POST":
-        # obs_events table removed — accept POST for backward compat but don't store
         payload = request.get_json(force=True)
         cursor = payload.get("cursor", 0)
         events = payload.get("events", [])
-        return jsonify({"ok": True, "cursor": cursor + len(events)})
+        result, error_msg = session_service.obs_events_handle_post(cursor, events)
+        if error_msg:
+            return jsonify({"error": error_msg}), 500
+        return jsonify(result)
 
     # GET — reconstruct events from llm_calls + session_actions
-    try:
-        conn = _get_db()
-        calls = conn.execute(
-            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY timestamp",
-            (session_id,),
-        ).fetchall()
-        action_rows = conn.execute(
-            "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num",
-            (session_id,),
-        ).fetchall()
-        conn.close()
-
-        raw_events = []
-        for c in [dict(c) for c in calls]:
-            raw_events.append({
-                "ts": c.get("timestamp", 0),
-                "agent": c.get("agent_type", "planner"),
-                "event": "llm_call",
-                "model": c.get("model", ""),
-                "input_tokens": c.get("input_tokens", 0),
-                "output_tokens": c.get("output_tokens", 0),
-                "cost": c.get("cost", 0),
-                "duration_ms": c.get("duration_ms", 0),
-                "step_num": c.get("step_num"),
-                "turn_num": c.get("turn_num"),
-                "response": (c.get("output_json") or "")[:1000],
-            })
-        for s in [dict(s) for s in action_rows]:
-            grid = None
-            if s.get("states_json"):
-                try:
-                    states = json.loads(s["states_json"])
-                    if states and isinstance(states, list) and states[0].get("grid"):
-                        grid = _decompress_grid(states[0]["grid"])
-                except Exception:
-                    pass
-            action_id = s.get("action", 0)
-            try:
-                action_name = GameAction.from_id(int(action_id)).name
-            except Exception:
-                action_name = str(action_id)
-            if s.get("row") is not None and s.get("col") is not None:
-                action_name = f"{action_name}@({s['col']},{s['row']})"
-            raw_events.append({
-                "ts": s.get("timestamp", 0),
-                "agent": "executor",
-                "event": "act",
-                "action": action_name,
-                "step_num": s.get("step_num", 0),
-                "grid": grid,
-            })
-
-        if not raw_events:
-            return jsonify({"events": []})
-
-        raw_events.sort(key=lambda e: e.get("ts", 0))
-        t0 = raw_events[0]["ts"]
-        from datetime import datetime, timezone
-        events = []
-        for ev in raw_events:
-            ts = ev.pop("ts", 0)
-            ev["t"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-            ev["elapsed_s"] = round(ts - t0, 2)
-            events.append(ev)
-
-        return jsonify({"events": events})
-    except Exception as e:
-        app.logger.warning(f"GET obs-events failed: {e}")
-        return jsonify({"error": str(e)}), 500
+    result, error_msg = session_service.obs_events_get(session_id)
+    if error_msg:
+        return jsonify({"error": error_msg}), 500
+    return jsonify(result)
 
 
 @app.route("/api/sessions/browse")
