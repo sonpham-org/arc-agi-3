@@ -36,7 +36,7 @@ ROOT = Path(__file__).parent
 
 from constants import COLOR_NAMES, ACTION_NAMES, ARC_AGI3_DESCRIPTION, SYSTEM_MSG
 from models import MODELS, compute_cost, DEFAULT_MODEL
-from agent_llm import LLMResult, call_model_with_metadata, call_model_with_retry
+from agent_llm import LLMResult, call_model_with_metadata, call_model_with_retry, call_model
 from grid_analysis import compress_row, compute_change_map, compute_color_histogram, compute_region_map
 from agent_response_parsing import _parse_json, _fallback_parse, _force_extract_action, _fallback_action
 from agent_history import condense_history, reflect_and_update_memory

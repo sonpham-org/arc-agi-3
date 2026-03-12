@@ -367,7 +367,8 @@ import glob
 REFACTOR_FILES_PY = [
     "constants.py", "bot_protection.py", "grid_analysis.py",
     "prompt_builder.py", "session_manager.py", "agent.py",
-    "server.py", "db.py",
+    "agent_llm.py", "agent_history.py", "agent_response_parsing.py",
+    "db.py",
 ]
 REFACTOR_FILES_JS = [
     "static/js/utils/formatting.js", "static/js/utils/json-parsing.js",

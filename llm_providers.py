@@ -27,8 +27,14 @@ LOCAL_MODEL_TIMEOUT = float(os.environ.get("LOCAL_MODEL_TIMEOUT", "180.0"))
 # Initialize from environment at module load time
 import llm_providers_anthropic
 import llm_providers_openai
+import llm_providers_google
 llm_providers_anthropic.claude_api_key = os.environ.get("ANTHROPIC_API_KEY") or None
 llm_providers_openai.openai_api_key = os.environ.get("OPENAI_API_KEY") or None
+
+# Re-export globals for backward compatibility
+claude_api_key = llm_providers_anthropic.claude_api_key
+openai_api_key = llm_providers_openai.openai_api_key
+_tool_session_lock = llm_providers_google._tool_session_lock
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PER-PROVIDER THROTTLE
