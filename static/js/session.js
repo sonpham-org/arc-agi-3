@@ -242,6 +242,55 @@ function updateEmptyAppState() {
 function startCountdown(s) { /* removed — countdown disabled */ }
 function stopCountdown(s) { /* removed — countdown disabled */ }
 
+// ── Session tab bar rendering ─────────────────────────────────────────────
+
+function getTabDotClass(s) {
+  if (s.status === 'WIN') return 'tab-dot-win';
+  if (s.status === 'GAME_OVER') return 'tab-dot-gameover';
+  if ((s.autoPlaying || s.waitingForLLM) && s.status === 'NOT_FINISHED') return 'tab-dot-running';
+  return 'tab-dot-idle';
+}
+
+function renderSessionTabs() {
+  const bar = document.getElementById('sessionTabBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+
+  // Menu tab (always first)
+  const menuTab = document.createElement('div');
+  menuTab.className = 'session-tab-menu' + (_menuActive ? ' active' : '');
+  menuTab.innerHTML = '<span class="menu-icon">&#9776;</span> Menu';
+  menuTab.onclick = () => showMenuView();
+  bar.appendChild(menuTab);
+
+  // Session tabs
+  for (const [id, s] of sessions) {
+    const tab = document.createElement('div');
+    tab.className = 'session-tab' + (id === activeSessionId && !_menuActive ? ' active' : '');
+    const label = s.tabLabel || s.gameId || (id.startsWith('pending_') ? 'New Session' : id.slice(0, 8));
+    const dotClass = getTabDotClass(s);
+    const stepBadge = s.stepCount > 0 ? `<span class="tab-steps">${s.stepCount}</span>` : '';
+    tab.innerHTML = `
+      <span class="tab-dot ${dotClass}"></span>${stepBadge}
+      <span class="tab-label">${label}</span>
+      <span class="tab-countdown" id="tabCountdown_${id}"></span>
+      <button class="tab-close" onclick="event.stopPropagation(); closeSession('${id}');">&times;</button>`;
+    tab.title = `${s.gameId || 'No game'} | ${s.stepCount} steps | $${(s.sessionTotalTokens?.cost || 0).toFixed(3)}`;
+    tab.onclick = () => switchSession(id);
+    bar.appendChild(tab);
+  }
+
+  // Quick + button for new session
+  const newBtn = document.createElement('button');
+  newBtn.className = 'session-tab-new';
+  newBtn.textContent = '+';
+  newBtn.title = 'New Session';
+  newBtn.onclick = createNewSession;
+  bar.appendChild(newBtn);
+
+  updateEmptyAppState();
+}
+
 // ── localStorage session index ───────────────────────────────────────────
 
 const MULTI_SESSION_KEY = 'arc_multi_sessions';

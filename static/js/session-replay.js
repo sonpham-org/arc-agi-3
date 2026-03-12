@@ -22,9 +22,7 @@
 // LIVE SCRUBBER STATE
 // ═══════════════════════════════════════════════════════════════════════════
 
-let _liveScrubMode = true;
-let _liveScrubViewIdx = -1;
-let _liveScrubLiveGrid = null;
+// _liveScrubMode, _liveScrubViewIdx, _liveScrubLiveGrid declared in state.js
 
 async function loadSessionHistory() {
   const list = document.getElementById('historyList');
@@ -346,9 +344,4 @@ function _renderGridPreview(grid) {
   // Note: does NOT set currentGrid — that stays at the live value
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TURNSTILE VERIFICATION
-// ═══════════════════════════════════════════════════════════════════════════
-
-let turnstileVerified = !document.getElementById('turnstileGate');
-
+// turnstileVerified declared in session-persistence.js

@@ -12,9 +12,19 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 Independent senior audit of the `refactor/phase-1-modularization` branch (56 commits, 145 files, +30k/-14k lines) prior to opening PR against `master`. Audit conducted by a different author to catch issues missed during development.
 
 ### Bugs Found & Fixed
+
+**Python (3 issues):**
 - **Broken import in `agent_scaffold.py:28`** — `_PLANNER_SYSTEM_PROMPT` was renamed to `_PLANNER_SYSTEM_PROMPT_TEMPLATE` during the refactor but this import was never updated. Would crash at runtime on any code path that imports `agent_scaffold` (batch runner, CLI agent). Fixed by updating the import.
 - **`server/app.py` not directly executable** — Running `python server/app.py` failed with `ModuleNotFoundError: No module named 'models'` because the project root wasn't on `sys.path` when executed from the `server/` subdirectory. Fixed by adding `sys.path.insert(0, str(_ROOT))` after `_ROOT` is computed.
 - **Dead backup file committed** — `server/app.py.backup` (836 lines, the original `server.py`) was tracked in git. Removed.
+
+**JavaScript (7 issues — app completely broken in browser):**
+- **`redrawGrid` function dropped** — Existed in master's `ui.js`, removed during Phase 24 split but never added to `ui-grid.js`. Caused immediate crash on page load. Restored to `ui-grid.js`.
+- **Duplicate `let currentUser`** — Declared in both `state.js:20` and `session.js:23`. This `SyntaxError` prevented `session.js` from parsing at all, which cascaded into: `updateEmptyAppState` undefined, `initApp` never called, no games loaded, no session tabs. Removed duplicate from `session.js`.
+- **`_PROMPT_SECTION_MAP` dropped** — Was in master's `session.js`, removed during split, never added to `session-views.js` where `_getPromptSections()` uses it. Restored to `session-views.js`.
+- **3 split modules never added to template** — `session-storage.js`, `session-replay.js`, `session-persistence.js` were created on disk (Phase 9) but never added to `templates/index.html`. Meanwhile `session.js` was slimmed expecting them to be loaded. Added script tags in correct load order.
+- **Duplicate declarations across split files** — `session-replay.js` re-declared `_liveScrubMode`, `_liveScrubViewIdx`, `_liveScrubLiveGrid` (already in `state.js`) and `turnstileVerified` (already in `session-persistence.js`). Removed duplicates.
+- **`renderSessionTabs()` and `getTabDotClass()` dropped** — Were in master's `session.js`, removed during split, put in no file. Called 20+ times across the codebase. Restored to `session.js`.
 
 ### Fixed
 - `CLAUDE.md` — updated two stale references from `server.py` to `server/state.py` for `HIDDEN_GAMES` list location
