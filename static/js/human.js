@@ -197,21 +197,6 @@ async function _humanBuildLevelSelector() {
   }
 }
 
-function _renderThumbnail(thumbCanvas, grid) {
-  if (!grid || !grid.length) return;
-  const ctx = thumbCanvas.getContext('2d');
-  const h = grid.length, w = grid[0].length;
-  const scale = Math.floor(128 / Math.max(h, w));
-  thumbCanvas.width = w * scale;
-  thumbCanvas.height = h * scale;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      ctx.fillStyle = COLORS[grid[y][x]] || '#000';
-      ctx.fillRect(x * scale, y * scale, scale, scale);
-    }
-  }
-}
-
 async function _humanJumpToLevel(levelIndex) {
   if (_humanRecording) return; // can't change level during recorded session
 

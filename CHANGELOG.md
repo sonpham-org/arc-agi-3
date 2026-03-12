@@ -5,6 +5,25 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.2.5] — Clean up incomplete Phase 1 module split: remove dead files and duplicate functions
+*Author: Claude Opus 4.6 | 2026-03-12*
+
+### Context
+Independent audit found that Phase 1 modularization left two categories of broken artifacts: (1) files that were extracted from `state.js` but never wired into the HTML template, so they sat on disk doing nothing while `state.js` still contained all the original code; (2) functions that were copied into new modules but never removed from the originals, creating silent overwrites at runtime and a double-firing `beforeunload` handler.
+
+### Deleted (dead files, never loaded)
+- **`static/js/state-session.js`** (350 lines) — extracted from `state.js` in Phase 25 but never added to `index.html`. All code still lives in `state.js`.
+- **`static/js/state-scaffolding.js`** (635 lines) — same situation. All code still lives in `state.js`.
+
+### Removed (duplicate functions)
+- **`static/js/human-game.js`** — removed `_humanSaveSession()`, `_humanUploadPayload()`, `_humanBuildPayload()` (lines 187–233), and the duplicate `beforeunload` listener (lines 236–244). Canonical copies remain in `human-session.js`.
+- **`static/js/human.js`** — removed `_renderThumbnail()` (lines 200–213). Canonical copy remains in `human-render.js`.
+
+### Fixed
+- **Double `beforeunload` beacon upload** — the duplicate handler in `human-game.js` caused `navigator.sendBeacon()` to fire twice on every tab close, potentially uploading the same session data twice. Now fires once (from `human-session.js` only).
+
+---
+
 ## [1.2.4] — Fix: Analysis dropdown closes on every LLM response in Observatory
 *Author: Claude Sonnet 4.6 | 2026-03-12*
 
