@@ -18,7 +18,7 @@ from models import MODEL_REGISTRY, _discovered_local_models
 logger = logging.getLogger(__name__)
 
 # Local model timeout configuration (seconds)
-LOCAL_MODEL_TIMEOUT = float(os.environ.get("LOCAL_MODEL_TIMEOUT", "180.0"))
+LOCAL_MODEL_TIMEOUT = float(os.environ.get("LOCAL_MODEL_TIMEOUT", "600.0"))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PROVIDER AUTH STATE INITIALIZATION

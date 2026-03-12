@@ -629,7 +629,7 @@ def lmstudio_proxy():
                 "max_tokens": max_tokens,
                 "stream": False,
             },
-            timeout=300.0,
+            timeout=600.0,
         )
         # Forward the actual LM Studio response body and status — don't swallow error
         # details with raise_for_status() (e.g. "No user query found in messages").

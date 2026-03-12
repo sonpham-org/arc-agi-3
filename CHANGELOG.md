@@ -5,6 +5,16 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.2.3] — Increase LLM timeout to 600s for local models
+*Author: Claude Sonnet 4.6 | 2026-03-12*
+
+### Changed
+- **`server/app.py`** — LM Studio proxy timeout: 300s → 600s. Prevents timeouts on slow local models (e.g. large Qwen/Llama runs via LM Studio).
+- **`llm_providers.py`** — `LOCAL_MODEL_TIMEOUT` default: 180s → 600s.
+- **`llm_providers_openai.py`** — OpenAI-compatible call timeout: 180s → 600s (covers Ollama, LM Studio, Groq, Cloudflare, etc. through the CLI path).
+
+---
+
 ## [1.2.2] — UI: Move agent transport controls above Intervene button
 *Author: Claude Sonnet 4.6 | 2026-03-12*
 

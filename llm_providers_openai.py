@@ -82,7 +82,7 @@ def _call_openai_compatible(url: str, api_key: str, model: str, prompt: str,
 
     last_exc = None
     for attempt in range(10):
-        resp = httpx.post(url, headers=headers, json=body, timeout=180.0)
+        resp = httpx.post(url, headers=headers, json=body, timeout=600.0)
         if resp.status_code == 429:
             retry_after = float(resp.headers.get("retry-after", min(10 * (2 ** attempt), 120)))
             retry_after = min(retry_after, 120)
