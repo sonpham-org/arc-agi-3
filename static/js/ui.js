@@ -1,26 +1,60 @@
 // Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-// Date: 2026-03-11 13:47
+// Date: 2026-03-11 13:47 (Phase 24 refactor: extracted model mgmt, token display, grid UI)
 // PURPOSE: UI interaction handlers for ARC-AGI-3 web UI. Provides collapsible section
 //   toggling, compact settings, grid rendering wrappers (renderGrid, renderGridWithChanges
 //   delegating to grid-renderer.js), keyboard/mouse input handling, canvas click-to-act,
 //   cell info tooltips, navigation buttons, and DOM manipulation helpers. Modified in
 //   Phase 3 to extract pure grid rendering to rendering/grid-renderer.js.
-// 
-// PHASE 24 (2026-03-12): Modularized UI into focused files:
-//   - ui-models.js: Model selector, BYOK keys, model caps
-//   - ui-tokens.js: Token display, context limits, compact settings
-//   - ui-tabs.js: Tab/panel switching
-//   - ui-grid.js: Grid rendering, canvas interaction, coord tooltips
-//   This file now owns: core UI init, event listeners, game logic, actions, API calls
-//
-// SRP/DRY check: Pass — pure rendering in grid-renderer.js; focused module separation; this file owns init and interaction logic
+//   Phase 24: extracted model management (ui-models.js), token UI (ui-tokens.js),
+//   grid canvas helpers (ui-grid.js).
+// SRP/DRY check: Pass — pure rendering in grid-renderer.js; model mgmt in ui-models.js;
+//   token UI in ui-tokens.js; grid UI helpers in ui-grid.js; this file owns control flow
 // ═══════════════════════════════════════════════════════════════════════════
-// COLLAPSIBLE SECTIONS (tab switching extracted to ui-tabs.js)
+// COLLAPSIBLE SECTIONS
 // ═══════════════════════════════════════════════════════════════════════════
+
+function toggleSection(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+function toggleCompactSettings() {
+  const on = document.getElementById('compactContext')?.checked;
+  const body = document.getElementById('compactSettingsBody');
+  if (body) { body.style.opacity = on ? '1' : '0.4'; body.style.pointerEvents = on ? 'auto' : 'none'; }
+  updatePipelineOpacity();
+}
+
+function toggleInterruptSettings() {
+  const on = document.getElementById('interruptPlan')?.checked;
+  const body = document.getElementById('interruptSettingsBody');
+  if (body) { body.style.opacity = on ? '1' : '0.4'; body.style.pointerEvents = on ? 'auto' : 'none'; }
+  updatePipelineOpacity();
+}
+
+function switchTopTab(tab) {
+  // History tab removed — this is now a no-op kept for compat with resume/branch code
+  if (tab === 'agent') switchSubTab('settings');
+}
+
+function switchSubTab(tab) {
+  // Reasoning/timeline tabs removed — redirect to settings
+  if (tab === 'reasoning' || tab === 'timeline') tab = 'settings';
+  document.querySelectorAll('.subtab-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.subtab-pane').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+  const tabMap = { settings: 'subtabSettings', prompts: 'subtabPrompts', graphics: 'subtabGraphics' };
+  const buttons = document.querySelectorAll('.subtab-bar button');
+  const idx = { settings: 0, prompts: 1, graphics: 2 }[tab] || 0;
+  if (buttons[idx]) buttons[idx].classList.add('active');
+  const pane = document.getElementById(tabMap[tab]);
+  if (pane) { pane.classList.add('active'); pane.style.display = 'flex'; }
+  if (tab === 'prompts') renderPromptsTab();
+}
+
+function toggleAdBanner() {} // legacy no-op
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GRAPHICS LISTENERS (grid rendering functions extracted to ui-grid.js)
+// GRAPHICS LISTENERS
 // ═══════════════════════════════════════════════════════════════════════════
 
 document.getElementById('changeOpacity').addEventListener('input', (e) => {
@@ -37,74 +71,34 @@ function clearTransportDesc() {
   document.getElementById('transportDesc').textContent = '';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MODEL CAPABILITIES → auto-disable image toggle (extracted to ui-models.js)
-// ═══════════════════════════════════════════════════════════════════════════
-
-// Auto-save BYOK keys on input (single delegated listener)
-document.addEventListener('input', (e) => {
-  if (e.target.dataset.byokProvider) {
-    localStorage.setItem(`byok_key_${e.target.dataset.byokProvider}`, e.target.value.trim());
-    return;
-  }
-  if (e.target.dataset.byokExtra) {
-    localStorage.setItem(e.target.dataset.byokExtra, e.target.value.trim());
-    return;
-  }
-});
-
-// Canvas listeners and coord-ref hover (grid rendering extracted to ui-grid.js)
-canvas.addEventListener('mousemove', (e) => {
-  const tip = document.getElementById('coordTooltip');
-  if (!currentGrid) { tip.style.display = 'none'; _canvasHoverCell = null; return; }
-  const rect = canvas.getBoundingClientRect();
-  const h = currentGrid.length, w = currentGrid[0].length;
-  const scale = Math.floor(512 / Math.max(h, w));
-  const gx = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width) / scale);
-  const gy = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height) / scale);
-  if (gx < 0 || gx >= w || gy < 0 || gy >= h) {
-    tip.style.display = 'none';
-    if (_canvasHoverCell) { _canvasHoverCell = null; renderGrid(currentGrid); }
-    return;
-  }
-  // Tooltip
-  if (document.getElementById('coordToggle').checked) {
-    tip.textContent = `(${gy}, ${gx})`;
-    tip.style.display = 'block';
-    tip.style.left = (e.clientX + 12) + 'px';
-    tip.style.top = (e.clientY - 8) + 'px';
+function redrawGrid() {
+  if (!currentGrid) return;
+  if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
+    renderGridWithChanges(currentGrid, currentChangeMap);
   } else {
-    tip.style.display = 'none';
-  }
-  // Cell hover highlight
-  if (!_canvasHoverCell || _canvasHoverCell.row !== gy || _canvasHoverCell.col !== gx) {
-    _canvasHoverCell = {row: gy, col: gx};
     renderGrid(currentGrid);
-    if (_highlightCells.length) drawCellHighlights(_highlightCells);
-    drawCanvasHover(gy, gx);
   }
-});
+}
 
-canvas.addEventListener('mouseleave', () => {
-  document.getElementById('coordTooltip').style.display = 'none';
-  if (_canvasHoverCell) {
-    _canvasHoverCell = null;
-    renderGrid(currentGrid);
-    if (_highlightCells.length) drawCellHighlights(_highlightCells);
-  }
-});
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════════════════
 
-// Event delegation for coord-ref hover on reasoning content
-document.addEventListener('mouseover', (e) => {
-  const ref = e.target.closest('.coord-ref');
-  if (!ref) return;
-  highlightCellsOnCanvas(cellsFromCoordRef(ref));
-});
-document.addEventListener('mouseout', (e) => {
-  const ref = e.target.closest('.coord-ref');
-  if (!ref) return;
-  clearCellHighlights();
-});
+function renderGrid(grid) {
+  if (!grid || !grid.length) return;
+  currentGrid = grid;  // ui.js-specific side effect
+  renderGridOnCanvas(grid, canvas, ctx, COLORS);
+}
+
+function renderGridWithChanges(grid, changeMap) {
+  renderGridOnCanvas(grid, canvas, ctx, COLORS);
+  const enabled = document.getElementById('showChanges') ? document.getElementById('showChanges').checked : true;
+  const opacityEl = document.getElementById('changeOpacity');
+  const colorEl = document.getElementById('changeColor');
+  const opacity = opacityEl ? parseInt(opacityEl.value) / 100 : 0.4;
+  const color = colorEl ? colorEl.value : '#ff0000';
+  renderGridWithChangesOnCanvas(grid, changeMap, canvas, ctx, COLORS, { opacity, color, stroke: true, enabled });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // API
@@ -489,7 +483,7 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REASONING MODE HELPERS (token/compact helpers extracted to ui-tokens.js)
+// REASONING MODE HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
 function collectObservation(resp, ss) {
@@ -744,6 +738,7 @@ function getThinkingLevel() {
 }
 function getToolsMode() {
   return document.querySelector('input[name="toolsMode"]:checked')?.value || 'off';
+
 }
 
 function getPlanningMode() {
@@ -765,4 +760,3 @@ function shouldAskAdaptive() {
   const levels = last5.map(h => h.levels ?? 0);
   return new Set(levels).size <= 1;
 }
-

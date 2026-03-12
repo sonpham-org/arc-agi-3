@@ -1,18 +1,30 @@
-// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-// Date: 2026-03-12 17:38
-// PURPOSE: Grid canvas UI helpers for ARC-AGI-3: hover tooltips, cell highlighting,
-// coordinate annotation. Provides drawCanvasHover(), drawCellHighlights(),
-// highlightCellsOnCanvas(), clearCellHighlights(), annotateCoordRefs(), cellsFromCoordRef().
-// Extracted from ui.js in Phase 24 modularization.
-// Load order: after grid-renderer.js; before ui.js.
 // ═══════════════════════════════════════════════════════════════════════════
+// ui-grid.js — Grid rendering and canvas interaction
+// Extracted from ui.js (Phase 24)
+// Purpose: Grid cell rendering, canvas hover/highlight, coordinate annotation
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderGrid(grid) {
+  if (!grid || !grid.length) return;
+  currentGrid = grid;  // ui.js-specific side effect
+  renderGridOnCanvas(grid, canvas, ctx, COLORS);
+}
+
+function renderGridWithChanges(grid, changeMap) {
+  renderGridOnCanvas(grid, canvas, ctx, COLORS);
+  const enabled = document.getElementById('showChanges') ? document.getElementById('showChanges').checked : true;
+  const opacityEl = document.getElementById('changeOpacity');
+  const colorEl = document.getElementById('changeColor');
+  const opacity = opacityEl ? parseInt(opacityEl.value) / 100 : 0.4;
+  const color = colorEl ? colorEl.value : '#ff0000';
+  renderGridWithChangesOnCanvas(grid, changeMap, canvas, ctx, COLORS, { opacity, color, stroke: true, enabled });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COORDINATE TOOLTIP & HIGHLIGHT
 // ═══════════════════════════════════════════════════════════════════════════
 
 let _canvasHoverCell = null;  // {row, col} of cell under cursor
-let _highlightCells = [];
 
 function drawCanvasHover(row, col) {
   if (!currentGrid) return;
@@ -67,6 +79,8 @@ canvas.addEventListener('mouseleave', () => {
     if (_highlightCells.length) drawCellHighlights(_highlightCells);
   }
 });
+
+let _highlightCells = [];
 
 function drawCellHighlights(cells) {
   if (!cells.length || !currentGrid) return;

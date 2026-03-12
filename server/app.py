@@ -918,26 +918,12 @@ COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 def copilot_auth_start():
     if not feature_enabled("copilot"):
         return jsonify({"error": "Copilot not available in this mode"}), 403
-    import httpx
-    try:
-        resp = httpx.post(
-            "https://github.com/login/device/code",
-            headers={"Accept": "application/json"},
-            data={"client_id": COPILOT_CLIENT_ID, "scope": ""},
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        with copilot_auth_lock:
-            llm_providers.copilot_device_code = data.get("device_code")
-        return jsonify({
-            "user_code": data.get("user_code"),
-            "verification_uri": data.get("verification_uri"),
-            "expires_in": data.get("expires_in"),
-            "interval": data.get("interval", 5),
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    
+    # Use auth_service for business logic
+    result, error_msg = auth_service.copilot_auth_start()
+    if error_msg or not result:
+        return jsonify({"error": error_msg or "Service unavailable"}), 500
+    return jsonify(result)
 
 
 @app.route("/api/copilot/auth/poll", methods=["POST"])
@@ -946,38 +932,13 @@ def copilot_auth_start():
 def copilot_auth_poll():
     if not feature_enabled("copilot"):
         return jsonify({"error": "Copilot not available in this mode"}), 403
-    import httpx
-    with copilot_auth_lock:
-        dc = llm_providers.copilot_device_code
-    if not dc:
-        return jsonify({"error": "No pending auth. Call /api/copilot/auth/start first."}), 400
-    try:
-        resp = httpx.post(
-            "https://github.com/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": COPILOT_CLIENT_ID,
-                "device_code": dc,
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            },
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if "access_token" in data:
-            with copilot_auth_lock:
-                llm_providers.copilot_oauth_token = data["access_token"]
-                llm_providers.copilot_device_code = None
-            _save_copilot_token(llm_providers.copilot_oauth_token)
-            return jsonify({"status": "authenticated"})
-        elif data.get("error") == "authorization_pending":
-            return jsonify({"status": "pending"})
-        elif data.get("error") == "slow_down":
-            return jsonify({"status": "slow_down", "interval": data.get("interval", 10)})
-        else:
-            return jsonify({"status": "error", "error": data.get("error_description", data.get("error", "Unknown"))})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    
+    # Use auth_service for business logic
+    result, error_msg = auth_service.copilot_auth_poll()
+    if error_msg and not result:
+        return jsonify({"error": error_msg}), 400 if "No pending" in error_msg else 500
+    # result may be {"status": "pending"}, {"status": "authenticated"}, etc.
+    return jsonify(result or {"error": error_msg})
 
 
 @app.route("/api/copilot/auth/status")
@@ -986,14 +947,10 @@ def copilot_auth_poll():
 def copilot_auth_status():
     if not feature_enabled("copilot"):
         return jsonify({"available": False, "reason": "online_mode"})
-    with copilot_auth_lock:
-        authenticated = llm_providers.copilot_oauth_token is not None
-        pending = llm_providers.copilot_device_code is not None
-    return jsonify({
-        "available": True,
-        "authenticated": authenticated,
-        "pending": pending,
-    })
+    
+    # Use auth_service for business logic
+    result, _ = auth_service.copilot_auth_status()
+    return jsonify(result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1005,10 +962,9 @@ def copilot_auth_status():
 @bot_protection
 def claude_auth_status():
     """Check whether an Anthropic API key is configured (env or session)."""
-    return jsonify({
-        "authenticated": bool(llm_providers.claude_api_key),
-        "source": "env" if os.environ.get("ANTHROPIC_API_KEY") else "session",
-    })
+    # Use auth_service for business logic
+    result, _ = auth_service.claude_auth_status()
+    return jsonify(result)
 
 
 @app.route("/api/claude/auth/set-key", methods=["POST"])
@@ -1016,11 +972,13 @@ def claude_auth_status():
 def claude_set_key():
     """Allow the user to supply their own Anthropic API key for this session."""
     data = request.get_json() or {}
-    key = data.get("api_key", "").strip()
-    if not key.startswith("sk-ant-"):
-        return jsonify({"error": "Invalid Anthropic API key format (expected sk-ant-...)"}), 400
-    llm_providers.claude_api_key = key
-    return jsonify({"status": "ok"})
+    api_key = data.get("api_key", "")
+    
+    # Use auth_service for validation and setting
+    result, error_msg = auth_service.claude_set_key(api_key)
+    if error_msg:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1032,10 +990,9 @@ def claude_set_key():
 @bot_protection
 def openai_auth_status():
     """Check whether an OpenAI API key is configured (env or session)."""
-    return jsonify({
-        "authenticated": bool(llm_providers.openai_api_key),
-        "source": "env" if os.environ.get("OPENAI_API_KEY") else "session",
-    })
+    # Use auth_service for business logic
+    result, _ = auth_service.openai_auth_status()
+    return jsonify(result)
 
 
 @app.route("/api/openai/auth/set-key", methods=["POST"])
@@ -1043,11 +1000,13 @@ def openai_auth_status():
 def openai_set_key():
     """Allow the user to supply their own OpenAI API key for this session."""
     data = request.get_json() or {}
-    key = data.get("api_key", "").strip()
-    if not key.startswith("sk-"):
-        return jsonify({"error": "Invalid OpenAI API key format (expected sk-...)"}), 400
-    llm_providers.openai_api_key = key
-    return jsonify({"status": "ok"})
+    api_key = data.get("api_key", "")
+    
+    # Use auth_service for validation and setting
+    result, error_msg = auth_service.openai_set_key(api_key)
+    if error_msg:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
