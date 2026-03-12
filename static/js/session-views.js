@@ -31,6 +31,13 @@
 
 // ── Prompt section helpers (scaffolding-specific prompts from window.PROMPTS) ──
 
+const _PROMPT_SECTION_MAP = {
+  linear: ['shared', 'linear'],
+  linear_interrupt: ['shared', 'linear'],
+  rlm: ['shared', 'rlm'],
+  three_system: ['shared', 'three_system'],
+};
+
 function _humanizePromptName(name) {
   return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }

@@ -4,6 +4,15 @@
 // Purpose: Grid cell rendering, canvas hover/highlight, coordinate annotation
 // ═══════════════════════════════════════════════════════════════════════════
 
+function redrawGrid() {
+  if (!currentGrid) return;
+  if (currentChangeMap && currentChangeMap.change_count > 0 && document.getElementById('showChanges').checked) {
+    renderGridWithChanges(currentGrid, currentChangeMap);
+  } else {
+    renderGrid(currentGrid);
+  }
+}
+
 function renderGrid(grid) {
   if (!grid || !grid.length) return;
   currentGrid = grid;  // ui.js-specific side effect

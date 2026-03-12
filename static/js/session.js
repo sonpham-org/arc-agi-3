@@ -19,8 +19,7 @@
 // Load order is critical. See templates/index.html for script tag sequence.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Global auth state
-let currentUser = null;
+// Global auth state — currentUser is declared in state.js (loaded before this script)
 
 function resetGlobalsToBlank() {
   sessionId = null;
