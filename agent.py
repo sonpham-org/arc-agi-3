@@ -32,6 +32,7 @@ load_dotenv(Path(__file__).parent / ".env")
 ROOT = Path(__file__).parent
 
 from constants import COLOR_NAMES, ACTION_NAMES, ARC_AGI3_DESCRIPTION, SYSTEM_MSG
+from models import MODELS, compute_cost, DEFAULT_MODEL
 
 # Thread-safety locks for shared file writes
 _memory_lock = threading.Lock()
@@ -53,108 +54,7 @@ class LLMResult:
     cost: float = 0.0
 
 
-# ── Model registry ─────────────────────────────────────────────────────────
 
-MODELS = {
-    # Groq (free tier, OpenAI-compatible)
-    # Pricing: per 1M tokens — [input, output, thinking] in USD
-    "groq/llama-3.3-70b-versatile": {
-        "provider": "groq",
-        "api_model": "llama-3.3-70b-versatile",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    "groq/gemma2-9b-it": {
-        "provider": "groq",
-        "api_model": "gemma2-9b-it",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    "groq/mixtral-8x7b-32768": {
-        "provider": "groq",
-        "api_model": "mixtral-8x7b-32768",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    # Mistral (free tier, OpenAI-compatible)
-    "mistral/mistral-small-latest": {
-        "provider": "mistral",
-        "api_model": "mistral-small-latest",
-        "env_key": "MISTRAL_API_KEY",
-        "url": "https://api.mistral.ai/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    "mistral/open-mistral-nemo": {
-        "provider": "mistral",
-        "api_model": "open-mistral-nemo",
-        "env_key": "MISTRAL_API_KEY",
-        "url": "https://api.mistral.ai/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    # Gemini (google-genai SDK)
-    # Pricing: [input $/1M, output $/1M, thinking $/1M]
-    "gemini-2.0-flash":      {"provider": "gemini", "api_model": "gemini-2.0-flash",      "env_key": "GEMINI_API_KEY", "pricing": [0.10, 0.40, 0.0]},
-    "gemini-2.5-flash-lite": {"provider": "gemini", "api_model": "gemini-2.5-flash-lite",  "env_key": "GEMINI_API_KEY", "pricing": [0.075, 0.30, 0.30]},
-    "gemini-2.5-flash":      {"provider": "gemini", "api_model": "gemini-2.5-flash",       "env_key": "GEMINI_API_KEY", "pricing": [0.15, 0.60, 0.60]},
-    "gemini-2.5-pro":        {"provider": "gemini", "api_model": "gemini-2.5-pro",         "env_key": "GEMINI_API_KEY", "pricing": [1.25, 10.0, 10.0]},
-    "gemini-3-flash":        {"provider": "gemini", "api_model": "gemini-3-flash-preview",        "env_key": "GEMINI_API_KEY", "pricing": [0.15, 0.60, 0.60]},
-    "gemini-3.1-flash-lite": {"provider": "gemini", "api_model": "gemini-3.1-flash-lite-preview", "env_key": "GEMINI_API_KEY", "pricing": [0.075, 0.30, 0.30]},
-    "gemini-3-pro":          {"provider": "gemini", "api_model": "gemini-3-pro-preview",    "env_key": "GEMINI_API_KEY", "pricing": [1.25, 10.0, 10.0]},
-    "gemini-3.1-pro":        {"provider": "gemini", "api_model": "gemini-3.1-pro-preview",  "env_key": "GEMINI_API_KEY", "pricing": [1.25, 10.0, 10.0]},
-    # Anthropic (direct API via httpx)
-    "claude-haiku-4-5":      {"provider": "anthropic", "api_model": "claude-haiku-4-5-20251001", "env_key": "ANTHROPIC_API_KEY", "pricing": [0.80, 4.0, 4.0]},
-    "claude-sonnet-4-5":     {"provider": "anthropic", "api_model": "claude-sonnet-4-5",         "env_key": "ANTHROPIC_API_KEY", "pricing": [3.0, 15.0, 15.0]},
-    "claude-sonnet-4-6":     {"provider": "anthropic", "api_model": "claude-sonnet-4-6",         "env_key": "ANTHROPIC_API_KEY", "pricing": [3.0, 15.0, 15.0]},
-    # Cloudflare Workers AI (OpenAI-compatible)
-    "cloudflare/llama-3.3-70b": {
-        "provider": "cloudflare",
-        "api_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        "env_key": "CLOUDFLARE_API_KEY",
-        "env_account": "CLOUDFLARE_ACCOUNT_ID",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    # HuggingFace (OpenAI-compatible)
-    "hf/meta-llama-3.3-70b": {
-        "provider": "huggingface",
-        "api_model": "meta-llama/Llama-3.3-70B-Instruct",
-        "env_key": "HUGGINGFACE_API_KEY",
-        "url": "https://router.huggingface.co/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    # Ollama (local)
-    "ollama/qwen3.5": {
-        "provider": "ollama",
-        "api_model": "qwen3.5:35b-a3b",
-        "url": "http://localhost:11434/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    "ollama/llama3.3": {
-        "provider": "ollama",
-        "api_model": "llama3.3",
-        "url": "http://localhost:11434/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-    "ollama/llama3.1": {
-        "provider": "ollama",
-        "api_model": "llama3.1",
-        "url": "http://localhost:11434/v1/chat/completions",
-        "pricing": [0.0, 0.0, 0.0],
-    },
-}
-
-
-def compute_cost(model_key: str, input_tokens: int, output_tokens: int,
-                 thinking_tokens: int = 0) -> float:
-    """Compute USD cost for an LLM call based on model pricing."""
-    info = MODELS.get(model_key, {})
-    pricing = info.get("pricing", [0.0, 0.0, 0.0])
-    cost_in, cost_out, cost_think = pricing[0], pricing[1], pricing[2] if len(pricing) > 2 else pricing[1]
-    return (input_tokens * cost_in + output_tokens * cost_out + thinking_tokens * cost_think) / 1_000_000
-
-DEFAULT_MODEL = "groq/llama-3.3-70b-versatile"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIG

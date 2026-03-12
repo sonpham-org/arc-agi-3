@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from agent import MODELS, call_model, load_config, _parse_json
+from agent import call_model, load_config, _parse_json
+from models import MODELS
 
 # One cheap model per provider to test the call path
 PROVIDER_TEST_MODELS = {

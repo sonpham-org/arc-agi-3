@@ -18,9 +18,10 @@ load_dotenv(Path(__file__).parent / ".env")
 import arc_agi
 
 from agent import (
-    MODELS, DEFAULT_MODEL, call_model_with_retry,
+    call_model_with_retry,
     load_config, effective_model, play_game,
 )
+from models import MODELS, DEFAULT_MODEL
 from db import (
     _get_db, _db_insert_session, _db_insert_action, _db_update_session,
     _compress_grid,

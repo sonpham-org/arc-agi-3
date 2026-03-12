@@ -2430,7 +2430,7 @@ def batch_start():
         return auth_err
 
     from batch_runner import run_batch, load_config as br_load_config
-    from agent import MODELS
+    from models import MODELS
 
     data = request.get_json(force=True)
     games = data.get("games", [])
