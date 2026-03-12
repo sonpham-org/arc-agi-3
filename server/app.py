@@ -537,34 +537,22 @@ def game_source(game_id):
 @turnstile_required
 def start_game():
     data = request.get_json(force=True)
-    game_id = data.get("game_id")
-    if not game_id:
-        return jsonify({"error": "game_id required"}), 400
-    bare_id = game_id.split("-")[0]
-    arc = get_arcade()
-    try:
-        env = arc.make(bare_id)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-    session_id = env._guid if hasattr(env, "_guid") else str(id(env))
-    state = env_state_dict(env)
-    with session_lock:
-        game_sessions[session_id] = env
-        session_grids[session_id] = state.get("grid", [])
-        session_snapshots[session_id] = []  # reset undo stack
-        session_step_counts[session_id] = 0
-    _cleanup_tool_session(session_id)
-    state["session_id"] = session_id
-    state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(initial)"}
-
-    # Persist to SQLite (tag with user_id if authenticated)
-    if feature_enabled("session_db"):
-        user = get_current_user()
-        _db_insert_session(session_id, game_id, get_mode(),
-                           user_id=user["id"] if user else None)
-
-    return jsonify(state)
+    result, status = game_service.start(
+        data,
+        get_arcade_fn=get_arcade,
+        env_state_dict_fn=env_state_dict,
+        session_lock=session_lock,
+        game_sessions=game_sessions,
+        session_grids=session_grids,
+        session_snapshots=session_snapshots,
+        session_step_counts=session_step_counts,
+        feature_enabled_fn=feature_enabled,
+        _db_insert_session_fn=_db_insert_session,
+        get_current_user_fn=get_current_user,
+        get_mode_fn=get_mode,
+        _cleanup_tool_session_fn=_cleanup_tool_session,
+    )
+    return jsonify(result), status
 
 
 @app.route("/api/step", methods=["POST"])
@@ -572,76 +560,24 @@ def start_game():
 @turnstile_required
 def step_game():
     payload = request.get_json(force=True)
-    session_id = payload.get("session_id")
-    action_id = payload.get("action")
-    action_data = payload.get("data", {})
-    reasoning = payload.get("reasoning")
-    if not session_id or action_id is None:
-        return jsonify({"error": "session_id and action required"}), 400
-
-    with session_lock:
-        env = game_sessions.get(session_id)
-    if env is None:
-        # Try to recover from DB
-        env, recovered_state = _try_recover_session(session_id, get_arcade_fn=get_arcade, env_state_dict_fn=env_state_dict)
-        if env is None:
-            return jsonify({"error": "Session not found"}), 404
-
-    try:
-        action = GameAction.from_id(int(action_id))
-    except ValueError:
-        return jsonify({"error": f"Invalid action: {action_id}"}), 400
-
-    with session_lock:
-        prev_grid = session_grids.get(session_id, [])
-        # Save snapshot for undo before executing the step
-        snapshot = {
-            "grid": copy.deepcopy(prev_grid),
-            "observation_space": copy.deepcopy(env.observation_space) if hasattr(env, "observation_space") else None,
-        }
-        session_snapshots.setdefault(session_id, []).append(snapshot)
-
-    frame_data = env.step(action, data=action_data or None, reasoning=reasoning)
-    if frame_data is None:
-        return jsonify({"error": "Step failed"}), 500
-
-    state = env_state_dict(env, frame_data)
-    state["session_id"] = session_id
-    curr_grid = state.get("grid", [])
-    change_map = compute_change_map(prev_grid, curr_grid)
-    state["change_map"] = change_map
-    state["undo_depth"] = len(session_snapshots.get(session_id, []))
-    # Accept client-side LLM response (online mode sends it with the step)
-    client_llm_response = payload.get("llm_response")
-
-    with session_lock:
-        session_grids[session_id] = curr_grid
-        session_step_counts[session_id] = session_step_counts.get(session_id, 0) + 1
-        step_num = session_step_counts[session_id]
-        # Pop any stashed LLM response, or use client-provided one
-        llm_resp = session_last_llm.pop(session_id, None) or client_llm_response
-
-    # Persist action to SQLite
-    if feature_enabled("session_db"):
-        # Build states_json: array of state dicts with compressed grid
-        states = [{"grid": _compress_grid(curr_grid)}] if curr_grid else None
-        # Extract row/col for click actions
-        act_row = action_data.get("y") if action_data else None
-        act_col = action_data.get("x") if action_data else None
-        _db_insert_action(
-            session_id, step_num, int(action_id), states,
-            row=act_row, col=act_col,
-        )
-        update_kwargs = dict(
-            result=state.get("state", "NOT_FINISHED"),
-            levels=state.get("levels_completed", 0),
-        )
-        session_cost = payload.get("session_cost")
-        if session_cost is not None:
-            update_kwargs["total_cost"] = float(session_cost)
-        _db_update_session(session_id, **update_kwargs)
-
-    return jsonify(state)
+    result, status = game_service.step(
+        payload,
+        get_arcade_fn=get_arcade,
+        env_state_dict_fn=env_state_dict,
+        session_lock=session_lock,
+        game_sessions=game_sessions,
+        session_grids=session_grids,
+        session_snapshots=session_snapshots,
+        session_step_counts=session_step_counts,
+        session_last_llm=session_last_llm,
+        _try_recover_session_fn=_try_recover_session,
+        compute_change_map_fn=compute_change_map,
+        feature_enabled_fn=feature_enabled,
+        _db_insert_action_fn=_db_insert_action,
+        _db_update_session_fn=_db_update_session,
+        _compress_grid_fn=_compress_grid,
+    )
+    return jsonify(result), status
 
 
 @app.route("/api/reset", methods=["POST"])
@@ -649,20 +585,16 @@ def step_game():
 @turnstile_required
 def reset_game():
     payload = request.get_json(force=True)
-    session_id = payload.get("session_id")
-    with session_lock:
-        env = game_sessions.get(session_id)
-    if env is None:
-        env, _ = _try_recover_session(session_id, get_arcade_fn=get_arcade, env_state_dict_fn=env_state_dict)
-        if env is None:
-            return jsonify({"error": "Session not found"}), 404
-    frame_data = env.reset()
-    state = env_state_dict(env, frame_data)
-    state["session_id"] = session_id
-    state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(reset)"}
-    with session_lock:
-        session_grids[session_id] = state.get("grid", [])
-    return jsonify(state)
+    result, status = game_service.reset(
+        payload,
+        env_state_dict_fn=env_state_dict,
+        session_lock=session_lock,
+        game_sessions=game_sessions,
+        session_grids=session_grids,
+        _try_recover_session_fn=_try_recover_session,
+        get_arcade_fn=get_arcade,
+    )
+    return jsonify(result), status
 
 
 @app.route("/api/dev/jump-level", methods=["POST"])
@@ -894,74 +826,19 @@ def llm_models():
 @turnstile_required
 def undo_step():
     payload = request.get_json(force=True)
-    session_id = payload.get("session_id")
-    if not session_id:
-        return jsonify({"error": "session_id required"}), 400
-
-    with session_lock:
-        env = game_sessions.get(session_id)
-        snapshots = session_snapshots.get(session_id, [])
-
-    if env is None:
-        env, _ = _try_recover_session(session_id, get_arcade_fn=get_arcade, env_state_dict_fn=env_state_dict)
-        if env is None:
-            return jsonify({"error": "Session not found"}), 404
-        snapshots = session_snapshots.get(session_id, [])
-    if not snapshots:
-        return jsonify({"error": "Nothing to undo"}), 400
-
-    count = min(int(payload.get("count", 1)), 50)
-
-    with session_lock:
-        snapshot = None
-        for _ in range(count):
-            if not snapshots:
-                break
-            snapshot = snapshots.pop()
-
-    if snapshot is None:
-        return jsonify({"error": "Nothing to undo"}), 400
-
-    restored_grid = snapshot["grid"]
-    # We restore the grid and return the previous state to the UI.
-    # The env itself may not support true rollback, so we restore our cached grid.
-    with session_lock:
-        session_grids[session_id] = restored_grid
-
-    # Persist undo to DB (make it durable)
-    if feature_enabled("session_db"):
-        try:
-            with db_conn() as conn:
-                # Delete the undone actions from session_actions
-                # Find the max step_num to keep (original max - count)
-                result = conn.execute(
-                    "SELECT MAX(step_num) as max_step FROM session_actions WHERE session_id = ?",
-                    (session_id,),
-                ).fetchone()
-                current_max = result["max_step"] if result["max_step"] is not None else 0
-                cutoff_step = max(0, current_max - count)
-                
-                # Delete all actions after the cutoff
-                conn.execute(
-                    "DELETE FROM session_actions WHERE session_id = ? AND step_num > ?",
-                    (session_id, cutoff_step),
-                )
-                # Update the session steps count
-                conn.execute(
-                    "UPDATE sessions SET steps = ? WHERE id = ?",
-                    (cutoff_step, session_id),
-                )
-        except Exception as e:
-            app.logger.warning(f"Undo DB write failed for {session_id}: {e}")
-            # Graceful degradation: undo visible in-memory, DB catches up on restart
-
-    # Build a state dict from the snapshot
-    state = env_state_dict(env)
-    state["grid"] = restored_grid
-    state["session_id"] = session_id
-    state["change_map"] = {"changes": [], "change_count": 0, "change_map_text": "(undo)"}
-    state["undo_depth"] = len(snapshots)
-    return jsonify(state)
+    result, status = game_service.undo(
+        payload,
+        env_state_dict_fn=env_state_dict,
+        session_lock=session_lock,
+        game_sessions=game_sessions,
+        session_grids=session_grids,
+        session_snapshots=session_snapshots,
+        _try_recover_session_fn=_try_recover_session,
+        get_arcade_fn=get_arcade,
+        feature_enabled_fn=feature_enabled,
+        db_conn_fn=db_conn,
+    )
+    return jsonify(result), status
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1462,86 +1339,17 @@ def list_sessions():
 @app.route("/api/leaderboard")
 @bot_protection
 def leaderboard():
-    """Return best AI and human sessions per game for leaderboard display.
-
-    Uses ROW_NUMBER() window function to pick the single best session per
-    (game, player_type) in one pass each — no full table scan + Python grouping.
-    Covered by idx_sessions_leaderboard index.
-    """
-    try:
-        conn = _get_db()
-        # Best AI session per game (most levels, fewest steps)
-        ai_rows = conn.execute("""
-            SELECT * FROM (
-                SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
-                       s.created_at, s.duration_seconds,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
-                           ORDER BY s.levels DESC, s.steps ASC
-                       ) AS rn
-                FROM sessions s
-                WHERE COALESCE(s.player_type, 'agent') = 'agent' AND s.steps > 0
-            ) WHERE rn = 1
-        """).fetchall()
-        # Best human session per game (include author)
-        human_rows = conn.execute("""
-            SELECT * FROM (
-                SELECT s.id, s.game_id, s.result, s.steps, s.levels,
-                       s.created_at, s.duration_seconds,
-                       COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1)) AS author,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY SUBSTR(s.game_id, 1, INSTR(s.game_id || '-', '-') - 1)
-                           ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
-                       ) AS rn
-                FROM sessions s
-                LEFT JOIN users u ON s.user_id = u.id
-                WHERE s.player_type = 'human' AND s.steps > 0
-            ) WHERE rn = 1
-        """).fetchall()
-        conn.close()
-        ai_best = {dict(r)["game_id"].split("-")[0]: dict(r) for r in ai_rows}
-        human_best = {dict(r)["game_id"].split("-")[0]: dict(r) for r in human_rows}
-        all_games = sorted(set(list(ai_best.keys()) + list(human_best.keys())))
-        rows = [{"game_id": gid, "ai": ai_best.get(gid), "human": human_best.get(gid)} for gid in all_games]
-        return jsonify({"leaderboard": rows})
-    except Exception as e:
-        return jsonify({"leaderboard": [], "error": str(e)})
+    """Return best AI and human sessions per game for leaderboard display."""
+    result, status = social_service.get_leaderboard(get_db_fn=_get_db)
+    return jsonify(result), status
 
 
 @app.route("/api/leaderboard/<game_id>")
 @bot_protection
 def leaderboard_detail(game_id):
     """Return top AI and human attempts for a specific game."""
-    try:
-        conn = _get_db()
-        ai_rows = conn.execute("""
-            SELECT s.id, s.game_id, s.result, s.steps, s.levels, s.model,
-                   s.created_at, s.duration_seconds
-            FROM sessions s
-            WHERE COALESCE(s.player_type, 'agent') = 'agent'
-              AND s.steps > 0 AND s.game_id LIKE ? || '%'
-            ORDER BY s.levels DESC, s.steps ASC
-            LIMIT 20
-        """, (game_id,)).fetchall()
-        human_rows = conn.execute("""
-            SELECT s.id, s.game_id, s.result, s.steps, s.levels,
-                   s.created_at, s.duration_seconds,
-                   COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1)) AS author
-            FROM sessions s
-            LEFT JOIN users u ON s.user_id = u.id
-            WHERE s.player_type = 'human'
-              AND s.steps > 0 AND s.game_id LIKE ? || '%'
-            ORDER BY s.levels DESC, s.duration_seconds ASC, s.steps ASC
-            LIMIT 20
-        """, (game_id,)).fetchall()
-        conn.close()
-        return jsonify({
-            "game_id": game_id,
-            "ai": [dict(r) for r in ai_rows],
-            "human": [dict(r) for r in human_rows],
-        })
-    except Exception as e:
-        return jsonify({"game_id": game_id, "ai": [], "human": [], "error": str(e)})
+    result, status = social_service.get_leaderboard_detail(game_id, get_db_fn=_get_db)
+    return jsonify(result), status
 
 
 # ── Comments API ─────────────────────────────────────────────────────────
@@ -1550,57 +1358,16 @@ def leaderboard_detail(game_id):
 def get_comments(game_id):
     """Get comments for a game."""
     voter_id = request.args.get("voter_id", "")
-    try:
-        conn = _get_db()
-        rows = conn.execute(
-            "SELECT * FROM comments WHERE location=? ORDER BY created_at DESC LIMIT 200",
-            (game_id,),
-        ).fetchall()
-        # Get voter's votes for these comments
-        my_votes = {}
-        if voter_id and rows:
-            cids = [r["id"] for r in rows]
-            ph = ",".join("?" * len(cids))
-            vote_rows = conn.execute(
-                f"SELECT comment_id, vote FROM comment_votes WHERE voter_id=? AND comment_id IN ({ph})",
-                [voter_id] + cids,
-            ).fetchall()
-            my_votes = {r["comment_id"]: r["vote"] for r in vote_rows}
-        conn.close()
-        return jsonify([
-            {**dict(r), "my_vote": my_votes.get(r["id"], 0)} for r in rows
-        ])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    result, status = social_service.get_comments(game_id, voter_id=voter_id, get_db_fn=_get_db)
+    return jsonify(result), status
 
 
 @app.route("/api/comments", methods=["POST"])
 def post_comment():
     """Post a new comment on a game."""
     data = request.json or {}
-    game_id = data.get("game_id", "").strip()
-    body = data.get("body", "").strip()
-    author_id = data.get("author_id", "").strip()
-    author_name = data.get("author_name", "").strip()
-    if not game_id or not body or not author_id:
-        return jsonify({"error": "Missing fields"}), 400
-    if len(body) > 2000:
-        return jsonify({"error": "Comment too long"}), 400
-    if not author_name:
-        author_name = f"anon-{author_id[:6]}"
-    try:
-        conn = _get_db()
-        cur = conn.execute(
-            "INSERT INTO comments (location, user_id, author_name, body, created_at) VALUES (?,?,?,?,?)",
-            (game_id, author_id, author_name, body, time.time()),
-        )
-        cid = cur.lastrowid
-        conn.commit()
-        row = conn.execute("SELECT * FROM comments WHERE id=?", (cid,)).fetchone()
-        conn.close()
-        return jsonify({**dict(row), "my_vote": 0})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    result, status = social_service.post_comment(data, get_db_fn=_get_db)
+    return jsonify(result), status
 
 
 @app.route("/api/comments/<int:comment_id>/vote", methods=["POST"])
@@ -1609,85 +1376,15 @@ def vote_comment(comment_id):
     data = request.json or {}
     voter_id = data.get("voter_id", "").strip()
     vote = data.get("vote", 0)
-    if not voter_id or vote not in (1, -1, 0):
-        return jsonify({"error": "Invalid vote"}), 400
-    try:
-        conn = _get_db()
-        # Get existing vote
-        existing = conn.execute(
-            "SELECT vote FROM comment_votes WHERE comment_id=? AND voter_id=?",
-            (comment_id, voter_id),
-        ).fetchone()
-        old_vote = existing["vote"] if existing else 0
-        if old_vote == vote:
-            conn.close()
-            return jsonify({"ok": True})
-        # Remove old vote effect
-        if old_vote == 1:
-            conn.execute("UPDATE comments SET upvotes = upvotes - 1 WHERE id=?", (comment_id,))
-        elif old_vote == -1:
-            conn.execute("UPDATE comments SET downvotes = downvotes - 1 WHERE id=?", (comment_id,))
-        # Apply new vote
-        if vote == 0:
-            conn.execute("DELETE FROM comment_votes WHERE comment_id=? AND voter_id=?", (comment_id, voter_id))
-        else:
-            conn.execute(
-                "INSERT OR REPLACE INTO comment_votes (comment_id, voter_id, vote) VALUES (?,?,?)",
-                (comment_id, voter_id, vote),
-            )
-            if vote == 1:
-                conn.execute("UPDATE comments SET upvotes = upvotes + 1 WHERE id=?", (comment_id,))
-            else:
-                conn.execute("UPDATE comments SET downvotes = downvotes + 1 WHERE id=?", (comment_id,))
-        conn.commit()
-        row = conn.execute("SELECT upvotes, downvotes FROM comments WHERE id=?", (comment_id,)).fetchone()
-        conn.close()
-        return jsonify({"ok": True, "upvotes": row["upvotes"], "downvotes": row["downvotes"]})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    result, status = social_service.vote_comment(comment_id, voter_id, vote, get_db_fn=_get_db)
+    return jsonify(result), status
 
 
 @app.route("/api/contributors")
 def contributors():
     """Top contributors: most comments, most human sessions, most AI sessions."""
-    try:
-        conn = _get_db()
-        # Top commenters
-        commenters = conn.execute("""
-            SELECT user_id, author_name, COUNT(*) as comment_count,
-                   SUM(upvotes) as total_upvotes
-            FROM comments GROUP BY user_id
-            ORDER BY comment_count DESC LIMIT 20
-        """).fetchall()
-        # Top human players (by number of sessions with >5 steps)
-        human_players = conn.execute("""
-            SELECT COALESCE(user_id, 'anon') as uid,
-                   COUNT(*) as session_count,
-                   SUM(duration_seconds) as total_time,
-                   SUM(steps) as total_steps,
-                   COUNT(DISTINCT SUBSTR(game_id, 1, INSTR(game_id || '-', '-') - 1)) as games_played
-            FROM sessions
-            WHERE player_type = 'human' AND steps > 5
-            GROUP BY uid ORDER BY session_count DESC LIMIT 20
-        """).fetchall()
-        # Top AI contributors (by number of agent sessions with >5 steps)
-        ai_contributors = conn.execute("""
-            SELECT COALESCE(user_id, 'anon') as uid, model,
-                   COUNT(*) as session_count,
-                   SUM(steps) as total_steps,
-                   COUNT(DISTINCT SUBSTR(game_id, 1, INSTR(game_id || '-', '-') - 1)) as games_played
-            FROM sessions
-            WHERE COALESCE(player_type, 'agent') = 'agent' AND steps > 5
-            GROUP BY uid ORDER BY session_count DESC LIMIT 20
-        """).fetchall()
-        conn.close()
-        return jsonify({
-            "commenters": [dict(r) for r in commenters],
-            "human_players": [dict(r) for r in human_players],
-            "ai_contributors": [dict(r) for r in ai_contributors],
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    result, status = social_service.get_contributors(get_db_fn=_get_db)
+    return jsonify(result), status
 
 
 @app.route("/api/game-results")
