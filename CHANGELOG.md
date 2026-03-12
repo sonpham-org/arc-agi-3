@@ -5,6 +5,38 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.2.0] — refactor/phase-1-modularization (phases 6-30)
+*Author: VoynichLabs AI Team | 2026-03-12*
+
+### Changed
+- `server.py` (2566 lines) **deleted** — replaced by `server/app.py` (thin route handlers) + `server/services/` (business logic). Procfile updated to `gunicorn server.app:app`.
+- `server/services/` — service layer fully populated: `auth_service.py`, `session_service.py`, `game_service.py`, `social_service.py`, `llm_admin_service.py`
+- `db.py` — refactored to connection facade; domain functions extracted to `db_sessions.py`, `db_auth.py`, `db_llm.py`, `db_tools.py`, `db_exports.py`
+- `llm_providers.py` — refactored to router; per-provider implementations extracted to `llm_providers_openai.py`, `llm_providers_anthropic.py`, `llm_providers_google.py`, `llm_providers_copilot.py`
+- `agent.py` — `play_game()` (245 lines) decomposed into 6 focused helper functions; extracted `agent_llm.py`, `agent_response_parsing.py`, `agent_history.py`
+- `static/js/llm.js` — split: `llm-executor.js` (plan execution), `llm-config.js`, `llm-timeline.js`, `llm-reasoning.js`, `llm-controls.js`
+- `static/js/ui.js` — split: `ui-models.js`, `ui-tokens.js`, `ui-tabs.js`, `ui-grid.js`
+- `static/js/state.js` — split: `state-scaffolding.js` (635L), `state-session.js` (350L)
+- `static/js/session.js` — split: `session-storage.js`, `session-replay.js`, `session-persistence.js`, `session-views.js`, and further into `session-views-grid.js`, `session-views-history.js`
+- `static/js/human.js` — split: `human-social.js`, `human-render.js`, `human-input.js`, `human-session.js`, `human-game.js`
+- `static/js/obs-page.js` — split: `obs-swimlane.js`, `obs-scrubber.js`, `obs-session-loader.js`
+- `static/js/ab01-page.js` — split: `ab01-constants.js`, `ab01-entities.js`, `ab01-render.js`, `ab01-input.js`, `ab01-physics.js`, `ab01-session.js`
+
+### Added
+- `models.py` — canonical `MODEL_REGISTRY` (39 models, single source of truth); `server/app.py` and frontend fetch from here
+- `exceptions.py` — structured error handling: `AppError`, `DBError`, `LLMError`, `handle_db_error`, `handle_errors` decorator; 18 bare `except` patterns replaced
+- `server/state.py`, `server/helpers.py` — shared request/session state extracted from app
+- `tests/test_prompt_builder.py`, `tests/test_llm_providers.py`, `tests/test_db.py`, `tests/test_exceptions.py`, `tests/test_bot_protection.py`, `tests/test_services.py` — 283 passing unit tests (0 failures)
+- `docs/modularization/module-map.md` — complete module reference for all Python and JS modules
+- `AGENTS.md` — codebase structure guide for AI agents
+
+### Fixed
+- Session persistence bugs 1, 2, 4 (undo durability, atomic DB writes, dedup via `_action_dict_from_row`)
+- LM Studio timeout: `scaffolding.js` 1500ms→15000ms, `llm_providers.py` 90s→180s; `LOCAL_MODEL_TIMEOUT` env var added
+- `get_current_user()` gap: was in `server.py` but missing from `server/helpers.py` — would have caused `NameError` at runtime
+
+---
+
 ## [1.1.0] — refactor/phase-1-modularization
 *Author: Mark Barney + Cascade (Claude Opus 4.6 thinking) | 2026-03-11*
 

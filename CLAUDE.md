@@ -60,7 +60,7 @@ All games must be **fully deterministic** — no random elements of any kind:
 
 ## LLM Providers
 
-There are two model registries — `agent.py:MODELS` (CLI agent) and `server.py:MODEL_REGISTRY` (web UI). The batch runner uses `agent.py:MODELS`.
+There are two model registries — `agent.py:MODELS` (CLI agent) and `models.py:MODEL_REGISTRY` (web UI, via server/app.py). The batch runner uses `agent.py:MODELS`.
 
 ### Provider Reference
 
@@ -235,7 +235,7 @@ After completing any fix or feature, **always**:
 1. Push to `staging`
 2. Run all non-LLM tests (import check + any unit/integration tests that don't require API keys)
 3. After any refactor, clean up dead code: remove old functions, aliases, unused HTML IDs, and dangling references that are no longer called
-4. Restart the local server: `pkill -f "python server.py"; python server.py &`
+4. Restart the local server: `pkill -f "gunicorn"; gunicorn server.app:app &`
 
 ## Pre-Push QC
 
@@ -243,6 +243,6 @@ Before every push to staging, run:
 
 ```bash
 python tests/test_providers.py          # all provider API paths work
-python -c "import db; import server; import agent; import batch_runner; print('OK')"  # import check
+python -c "from server.app import app; import db; import agent; import batch_runner; print('OK')"  # import check
 python batch_runner.py --games ls20 --concurrency 1 --max-steps 5  # smoke test
 ```
