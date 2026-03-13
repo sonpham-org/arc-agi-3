@@ -194,6 +194,15 @@ async function askLLM(ss) {
           resp = { error: e.message, model };
         }
         if (resp) resp._clientSide = true;
+      } else if (_scaffType === 'world_model') {
+        // World Model harness: Agent REPL + World Model agent
+        try {
+          resp = await askLLMWorldModel(_cur, model, modelInfo, _waitEl, isActive, historyForLLM, compactBlock, _snap);
+        } catch (e) {
+          console.error('[askLLM] World Model client-side error:', e);
+          resp = { error: e.message, model };
+        }
+        if (resp) resp._clientSide = true;
       } else {
       const prompt = buildClientPrompt(_cur.currentState, historyForLLM, _cur.currentChangeMap, inputSettings, _snap?.tools_mode || getToolsMode(), compactBlock, _snap?.planning_mode || getPlanningMode());
       window._lastLLMGrid = _cur.currentState.grid;
@@ -339,7 +348,7 @@ async function askLLM(ss) {
       const _tlActions = _tlPlan.map(p => p.action);
       _callSession.timelineEvents.push({
         type: 'reasoning', agent_type: resp.agent_type || 'executor',
-        duration: resp.call_duration_ms,
+        duration: resp.call_duration_ms, timestamp: Date.now(),
         turn: _cur.llmCallCount, model: resp.model || model,
         stepStart: _cur.stepCount + 1, actions: _tlActions,
         call_id: resp.call_id, input_tokens: resp.usage?.prompt_tokens || 0,
@@ -879,7 +888,6 @@ async function toggleAutoPlay() {
 
   const mySessionId = sessionId; // capture for guard
   autoPlaying = true;
-  lockHumanControls();
   lockSettings();
   updateAutoBtn();
   if (ss) {

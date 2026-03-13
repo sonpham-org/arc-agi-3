@@ -1,0 +1,9 @@
+Continue using the REPL environment. Review what happened since your last action — did it match the world model's prediction?
+
+The variable `world_model_code` may have been updated with improved predictions. You can reload it:
+```repl
+exec(world_model_code)
+```
+
+Reassess your plan. {plan_instruction} Then output via FINAL():
+  FINAL({"plan": [{"action": <int>, "observation": "..."}, ...], "reasoning": "..."})

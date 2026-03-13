@@ -108,6 +108,24 @@ function getScaffoldingSettings() {
     s.orchestrator_max_turns = parseInt(document.getElementById('sf_as_orchestratorMaxTurns')?.value) || 5;
     s.orchestrator_history_length = parseInt(document.getElementById('sf_as_orchestratorHistoryLength')?.value) || 15;
     s.model = s.orchestrator_model;
+  } else if (type === 'world_model') {
+    s.input = {
+      diff: document.getElementById('sf_wm_inputDiff')?.checked ?? true,
+      full_grid: document.getElementById('sf_wm_inputGrid')?.checked ?? true,
+      image: document.getElementById('sf_wm_inputImage')?.checked ?? false,
+      color_histogram: document.getElementById('sf_wm_inputHistogram')?.checked ?? false,
+    };
+    s.model = document.getElementById('sf_wm_agentModelSelect')?.value || '';
+    s.thinking_level = document.querySelector('input[name="sf_wm_agentThinking"]:checked')?.value || 'low';
+    s.max_tokens = parseInt(document.getElementById('sf_wm_agentMaxTokens')?.value) || 16384;
+    s.planning_mode = document.querySelector('input[name="sf_wm_planMode"]:checked')?.value || 'off';
+    s.max_iterations = parseInt(document.getElementById('sf_wm_maxIter')?.value) || 10;
+    s.output_truncation = parseInt(document.getElementById('sf_wm_outputTrunc')?.value) || 5000;
+    s.wm_model = document.getElementById('sf_wm_wmModelSelect')?.value || '';
+    s.wm_thinking_level = document.querySelector('input[name="sf_wm_wmThinking"]:checked')?.value || 'low';
+    s.wm_max_tokens = parseInt(document.getElementById('sf_wm_wmMaxTokens')?.value) || 16384;
+    s.wm_update_every = parseInt(document.getElementById('sf_wm_wmUpdateEvery')?.value) || 3;
+    s.wm_max_iterations = parseInt(document.getElementById('sf_wm_wmMaxIter')?.value) || 5;
   }
 
   return s;

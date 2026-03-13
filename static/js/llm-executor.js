@@ -50,7 +50,7 @@ async function executePlan(plan, resp, entry, expected, ss) {
       }
     }
     // For linear/default in step-once mode (not autoplay), only execute 1 step
-    const isScaffoldPlan = resp?.scaffolding === 'three_system' || resp?.scaffolding === 'two_system' || resp?.scaffolding === 'rlm' || resp?.scaffolding === 'agent_spawn';
+    const isScaffoldPlan = resp?.scaffolding === 'three_system' || resp?.scaffolding === 'two_system' || resp?.scaffolding === 'rlm' || resp?.scaffolding === 'agent_spawn' || resp?.scaffolding === 'world_model';
     if (!isScaffoldPlan && !_cur.autoPlaying && completed > 0) break;
 
     // Mark step as executing
@@ -333,7 +333,6 @@ async function executeOneAction(resp) {
 async function stepOnce() {
   if (!sessionId) { alert('Start a game first'); return; }
   if (currentState.state !== 'NOT_FINISHED') return;
-  lockHumanControls();
   // Stop blink guide
   const _ab = document.getElementById('autoPlayBtn');
   if (_ab) _ab.classList.remove('btn-blink');

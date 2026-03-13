@@ -507,5 +507,86 @@ const SCAFFOLDING_SCHEMAS = {
         customHtml: function() { return '<div id="byokKeysContainer"></div>'; }
       }
     ]
+  },
+
+  world_model: {
+    id: 'world_model',
+    name: 'World Model',
+    description: 'Agent REPL loop + separate World Model agent that reverse-engineers game code from observations.',
+    pipeline: [
+      { id: 'agent', label: 'Agent', color: 'var(--accent)', settingsRef: 'agent_model' },
+      { id: 'repl', label: 'REPL Environment', color: 'var(--green)', settingsRef: null },
+      { id: 'world_model', label: 'World Model', color: 'var(--purple)', settingsRef: 'wm_model' },
+      { id: 'simulator', label: 'Simulator Code', color: 'var(--yellow)', settingsRef: null },
+    ],
+    edges: [
+      { from: 'agent', to: 'repl', label: 'code output' },
+      { from: 'repl', to: 'agent', label: 'REPL result' },
+      { from: 'world_model', to: 'simulator', label: 'generates' },
+      { from: 'simulator', to: 'repl', label: 'simulate()' },
+      { from: 'repl', to: 'world_model', label: 'observations' },
+    ],
+    sections: [
+      {
+        id: 'sf_wm_secInput', label: 'Input', open: true, bodyClass: 'settings-grid',
+        fields: [
+          { type: 'toggle', id: 'sf_wm_inputGrid', label: 'Full grid (RLE)', default: true },
+          { type: 'toggle', id: 'sf_wm_inputImage', label: 'Image', default: false },
+          { type: 'toggle', id: 'sf_wm_inputDiff', label: 'Diff (change map)', default: true },
+          { type: 'toggle', id: 'sf_wm_inputHistogram', label: 'Color histogram', default: false },
+        ]
+      },
+      {
+        id: 'sf_wm_secAgent', label: 'Agent Model', open: true,
+        groups: [{
+          subHeader: 'Agent',
+          fields: [
+            { type: 'model-select', id: 'sf_wm_agentModelSelect', capsId: 'sf_wm_agentModelCaps' },
+            { type: 'grid-2col', marginBottom: '8px', children: [
+              { type: 'quadswitch', id: 'sf_wm_agentThinking', name: 'sf_wm_agentThinking', label: 'Thinking',
+                options: [{v:'off',l:'Off'},{v:'low',l:'Low',checked:true},{v:'med',l:'Med'},{v:'high',l:'High'}],
+                hint: 'Thinking token budget' },
+              { type: 'number-spin', id: 'sf_wm_agentMaxTokens', label: 'Max tokens',
+                default: 16384, min: 1024, max: 65536, step: 1024, spinFn: null, inline: true },
+            ]},
+            { type: 'multiswitch', id: 'sf_wm_planningMode', name: 'sf_wm_planMode', label: 'Planning horizon',
+              options: [{v:'off',l:'Off'},{v:'5',l:'5'},{v:'10',l:'10',checked:true},{v:'15',l:'15'},{v:'20',l:'20'},{v:'unlimited',l:'\u221E'}],
+              hint: 'LLM returns a multi-step plan instead of one action.' },
+          ]
+        }]
+      },
+      {
+        id: 'sf_wm_secWM', label: 'World Model', open: true,
+        groups: [{
+          subHeader: 'World Model Agent',
+          fields: [
+            { type: 'model-select', id: 'sf_wm_wmModelSelect', capsId: 'sf_wm_wmModelCaps' },
+            { type: 'grid-2col', marginBottom: '8px', children: [
+              { type: 'quadswitch', id: 'sf_wm_wmThinking', name: 'sf_wm_wmThinking', label: 'Thinking',
+                options: [{v:'off',l:'Off'},{v:'low',l:'Low',checked:true},{v:'med',l:'Med'},{v:'high',l:'High'}],
+                hint: 'Thinking token budget' },
+              { type: 'number-spin', id: 'sf_wm_wmMaxTokens', label: 'Max tokens',
+                default: 16384, min: 1024, max: 65536, step: 1024, spinFn: null, inline: true },
+            ]},
+            { type: 'number-input', id: 'sf_wm_wmUpdateEvery', label: 'Update every N steps', default: 3, min: 1, max: 20, width: '55px' },
+            { type: 'number-input', id: 'sf_wm_wmMaxIter', label: 'Max REPL iterations', default: 5, min: 1, max: 20, width: '55px' },
+          ]
+        }]
+      },
+      {
+        id: 'sf_wm_secRepl', label: 'REPL', open: true,
+        groups: [{
+          subHeader: 'Agent REPL Limits',
+          fields: [
+            { type: 'number-input', id: 'sf_wm_maxIter', label: 'Max iterations', default: 10, min: 1, max: 100, width: '55px' },
+            { type: 'number-input', id: 'sf_wm_outputTrunc', label: 'Output truncation (chars)', default: 5000, min: 100, max: 50000, width: '75px' },
+          ]
+        }]
+      },
+      {
+        id: 'secKeys', label: 'Model Keys', open: true,
+        customHtml: function() { return '<div id="byokKeysContainer"></div>'; }
+      }
+    ]
   }
 };

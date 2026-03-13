@@ -413,7 +413,6 @@ async function resumeFromPuterKv(kvKey) {
       renderGrid(lastStep.grid);
       document.getElementById('emptyState').style.display = 'none';
       canvas.style.display = 'block';
-      document.getElementById('controls').style.display = 'flex';
       document.getElementById('transportBar').style.display = 'block';
       updateUI(currentState);
     }

@@ -435,30 +435,6 @@
           </div>
           <div class="transport-desc" id="transportDesc"></div>
         </div>
-        <div class="controls controls-lockable locked" id="controls" style="display:none;">
-          <button class="intervene-toggle" id="interveneBtn" onclick="toggleHumanLock()">&#128274; Intervene as Human</button>
-          <div class="controls-inner">
-          <button class="btn btn-danger" onclick="doAction(0)">Reset <span class="kbd">R</span></button>
-          <div class="dpad">
-            <span class="dpad-empty"></span>
-            <button class="btn" onclick="doAction(1)">&uarr; <span class="kbd">W</span></button>
-            <span class="dpad-empty"></span>
-            <button class="btn" onclick="doAction(3)">&larr; <span class="kbd">A</span></button>
-            <span class="dpad-empty"></span>
-            <button class="btn" onclick="doAction(4)">&rarr; <span class="kbd">D</span></button>
-            <span class="dpad-empty"></span>
-            <button class="btn" onclick="doAction(2)">&darr; <span class="kbd">S</span></button>
-            <span class="dpad-empty"></span>
-          </div>
-          <button class="btn" onclick="doAction(5)">ACT5 <span class="kbd">Z</span></button>
-          <button class="btn" onclick="doAction(7)">ACT7 <span class="kbd">X</span></button>
-          <button class="btn btn-primary" onclick="doAction(6,true)">Click grid <span class="kbd">Click</span></button>
-          <label style="font-size:10px;color:var(--dim);margin-left:8px;cursor:pointer;user-select:none;">
-            <input type="checkbox" id="coordToggle" checked> Coords
-          </label>
-          <div id="noChangeMsg" style="display:none;"></div>
-          </div>
-        </div>
         <!-- Replay scrubber (shown during session replay) -->
         <div class="replay-bar" id="replayBar" style="display:none;">
           <div class="replay-info" id="replayInfo">Step 0 / 0</div>
@@ -540,6 +516,7 @@
           </div>
           <!-- Buy Me a Coffee -->
           <div class="bmc-bottom">
+            <div class="bmc-text">Thank you for using ARC Observatory! If you enjoy it, consider buying me a coffee to support the development.</div>
             <a href="https://buymeacoffee.com/sonphamnet" target="_blank" rel="noopener" class="bmc-link">
               <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="bmc-img">
             </a>
@@ -623,8 +600,14 @@
           </div>
         </div>
         <div class="obs-reasoning-wrap">
-          <h3>Reasoning Log</h3>
-          <div id="obsReasoningContent"></div>
+          <div class="obs-reasoning-log">
+            <h3>Reasoning Log</h3>
+            <div id="obsReasoningContent"></div>
+          </div>
+          <div class="obs-memory-panel">
+            <h3>Agent Memory</h3>
+            <div id="obsMemoryContent"></div>
+          </div>
         </div>
         <div class="obs-transport">
           <button class="btn" id="obsPauseBtn" onclick="toggleAutoPlay()">&#187; Resume</button>
@@ -683,6 +666,7 @@ window.PROMPTS = {{ prompts | tojson }};
 <script src="/static/js/scaffolding-rlm.js?v={{ static_v }}"></script>
 <script src="/static/js/scaffolding-three-system.js?v={{ static_v }}"></script>
 <script src="/static/js/scaffolding-agent-spawn.js?v={{ static_v }}"></script>
+<script src="/static/js/scaffolding-world-model.js?v={{ static_v }}"></script>
 <script src="/static/js/scaffolding-linear.js?v={{ static_v }}"></script>
 <script src="/static/js/session-storage.js?v={{ static_v }}"></script>
 <script src="/static/js/session-replay.js?v={{ static_v }}"></script>
@@ -694,6 +678,7 @@ window.PROMPTS = {{ prompts | tojson }};
 <script src="/static/js/observatory/obs-log-renderer.js?v={{ static_v }}"></script>
 <script src="/static/js/observatory/obs-scrubber.js?v={{ static_v }}"></script>
 <script src="/static/js/observatory/obs-swimlane-renderer.js?v={{ static_v }}"></script>
+<script src="/static/js/observatory/obs-memory.js?v={{ static_v }}"></script>
 <script src="/static/js/observatory/obs-lifecycle.js?v={{ static_v }}"></script>
 <script src="/static/js/observatory.js?v={{ static_v }}"></script>
 <script src="/static/js/human-social.js?v={{ static_v }}"></script>

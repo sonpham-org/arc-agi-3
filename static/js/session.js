@@ -70,7 +70,6 @@ function createNewSession() {
   // Reset UI on the fresh DOM
   canvas.style.display = 'none';
   document.getElementById('emptyState').style.display = '';
-  document.getElementById('controls').style.display = 'none';
   document.getElementById('transportBar').style.display = 'none';
   document.getElementById('gameTitle').textContent = 'No game selected';
   const statusEl = document.getElementById('gameStatus');
@@ -104,6 +103,8 @@ function switchSession(targetId) {
   // If returning from menu to the same session, just re-show — don't re-attach
   if (wasMenu && targetId === activeSessionId) {
     renderSessionTabs();
+    // Re-enter obs mode if session is still in autoplay
+    if (target.autoPlaying) enterObsMode(target);
     return;
   }
 
@@ -560,5 +561,11 @@ async function claimLocalSessions() {
   }
 }
 
-// If no Turnstile gate (not configured), init immediately
-if (turnstileVerified) initApp();
+// If no Turnstile gate (not configured), init after all scripts are loaded
+if (turnstileVerified) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initApp());
+  } else {
+    initApp();
+  }
+}

@@ -1,0 +1,18 @@
+Your game context is stored in the `context` variable (dict). It contains:
+- context['grid']: 2D list of color values (the current game board)
+- context['available_actions']: list of valid action integers
+- context['history']: recent move history
+- context['change_map']: cells that changed since last action
+- context['levels_completed']: current progress
+- context['win_levels']: target levels to win
+- context['compact_context']: summarized game knowledge (if available)
+
+The variable `world_model_code` contains Python code for a game simulator built from past observations. You can load and use it:
+```repl
+exec(world_model_code)
+# Now simulate(grid, action) is available — returns predicted next grid
+predicted = simulate(context['grid'], 1)  # predict outcome of action 1
+```
+
+Think step-by-step. Use the REPL to analyze the grid and optionally simulate moves via the world model. {plan_instruction} Then output via FINAL():
+  FINAL({"plan": [{"action": <int>, "observation": "..."}, ...], "reasoning": "..."})

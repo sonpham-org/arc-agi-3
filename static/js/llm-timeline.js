@@ -452,9 +452,10 @@ function renderTimeline(ss) {
       const costStr = _tlFormatCost(ev.cost || 0);
       const costHtml = costStr ? `<span class="tl-cost" style="margin-left:6px;font-size:10px;">${costStr}</span>` : '';
       const arrowHtml = hasDetail ? '<span class="tl-expand-arrow">&#9654;</span>' : '';
+      const timeStr = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
       const clickAttr = hasDetail ? `onclick="_tlToggleDetail(${evIdx})" class="timeline-block ${cssClass} clickable"` : `class="timeline-block ${cssClass}"`;
       html += `<div ${clickAttr} style="height:${h}px">
-        <span class="tl-label">${_tlEsc(label)}${stepsHtml}${costHtml}${arrowHtml}</span><span class="tl-dur">${dur}</span>
+        <span class="tl-label">${timeStr ? `<span class="tl-time">${timeStr}</span> ` : ''}${_tlEsc(label)}${stepsHtml}${costHtml}${arrowHtml}</span><span class="tl-dur">${dur}</span>
       </div>`;
       if (hasDetail) {
         html += _tlBuildDetail(ev, evIdx);

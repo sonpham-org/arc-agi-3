@@ -4,6 +4,26 @@
 // Extracted from human.js (Phase 16 refactor)
 // Provides: grid rendering, UI updates, visual feedback
 
+// ── Processing Lock & Cursor State ───────────────────────────────────────────
+
+function _humanSetProcessing(on) {
+  _humanProcessing = on;
+  // In live mode, never gray out buttons — actions are registered at interval
+  if (_humanLiveMode) return;
+  const ctrl = document.getElementById('humanControls');
+  const canvas = _humanCanvas();
+  if (on) {
+    if (ctrl) ctrl.classList.add('controls-locked');
+    if (canvas) canvas.style.cursor = 'wait';
+    document.body.style.cursor = 'wait';
+  } else {
+    // Only unlock if not paused
+    if (ctrl && !_humanPaused) ctrl.classList.remove('controls-locked');
+    if (canvas) canvas.style.cursor = _humanAction6Mode ? 'crosshair' : 'default';
+    document.body.style.cursor = '';
+  }
+}
+
 // ── Thumbnail & Grid Rendering ─────────────────────────────────────────────
 
 function _renderThumbnail(thumbCanvas, grid) {

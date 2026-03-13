@@ -50,6 +50,31 @@ Some games support **live mode** — the game world advances in real-time via AC
 - Keyboard shortcuts: **Enter** = Start Session, **Shift+Enter** = Start Live Mode.
 - Currently enabled for: **Feeding Frenzy** (`fr01` v2) and **Pirate Ship** (`pi01` v2).
 
+## ARC3 Color Palette (MANDATORY)
+
+All games MUST use the **ARC3 16-color palette**. Do NOT use ARC1 or ARC2 palettes — the index-to-color mapping is different.
+
+| Index | Color | Hex |
+|-------|-------|-----|
+| 0 | White | `#FFFFFF` |
+| 1 | LightGray | `#CCCCCC` |
+| 2 | Gray | `#999999` |
+| 3 | DarkGray | `#666666` |
+| 4 | VeryDarkGray | `#333333` |
+| 5 | Black | `#000000` |
+| 6 | Magenta | `#E53AA3` |
+| 7 | LightMagenta | `#FF7BCC` |
+| 8 | Red | `#F93C31` |
+| 9 | Blue | `#1E93FF` |
+| 10 | LightBlue | `#88D8F1` |
+| 11 | Yellow | `#FFDC00` |
+| 12 | Orange | `#FF851B` |
+| 13 | Maroon | `#921231` |
+| 14 | Green | `#4FCC30` |
+| 15 | Purple | `#A356D6` |
+
+**Common mistakes**: Index 12 is **Orange** (not Red). Index 8 is **Red**. Index 0 is **White** (not Black). Index 5 is **Black** (not Gray).
+
 ## Game Design Rules
 
 All games must be **fully deterministic** — no random elements of any kind:

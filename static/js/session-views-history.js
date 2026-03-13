@@ -180,7 +180,6 @@ async function resumeSession(sid) {
     // Show controls
     document.getElementById('emptyState').style.display = 'none';
     canvas.style.display = 'block';
-    document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
     initLiveScrubber();
     liveScrubUpdate();
@@ -540,7 +539,6 @@ async function branchHere() {
     // Hide replay bar, show controls
     document.getElementById('replayBar').style.display = 'none';
     document.getElementById('replayReasoningPanel').style.display = 'none';
-    document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
     initLiveScrubber();
 

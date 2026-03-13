@@ -29,7 +29,6 @@ let autoPlaying = false;
 let action6Mode = false;
 let modelsData = [];  // {name, provider, capabilities, available}
 let undoStack = [];   // local undo snapshots (grid + state for each step)
-let humanLocked = true;  // human controls locked by default
 let turnCounter = 0;     // monotonic turn counter for undo grouping
 let apiMode = 'local';
 const clientId = 'client_' + Math.random().toString(36).slice(2, 10);
@@ -51,7 +50,7 @@ function renderScaffoldingSettings(schemaId) {
   // ── Scaffolding selector + pipeline visualizer ──
   html += '<div style="padding:8px 14px 0;border-bottom:1px solid var(--border);">';
   html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-  html += '<span style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;">Scaffolding</span>';
+  html += '<span style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;">Harness</span>';
   html += '<select id="scaffoldingSelect" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-family:inherit;font-size:12px;" onchange="switchScaffolding(this.value)">';
   for (const key of Object.keys(SCAFFOLDING_SCHEMAS)) {
     const s = SCAFFOLDING_SCHEMAS[key];
@@ -480,7 +479,8 @@ function attachSettingsListeners() {
     'sf_rlm_modelSelect', 'sf_rlm_subModelSelect',
     'sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect',
     'sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect',
-    'sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect'
+    'sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect',
+    'sf_wm_agentModelSelect', 'sf_wm_wmModelSelect'
   ]) {
     const el = document.getElementById(selId);
     if (el) el.addEventListener('change', updateAllByokKeys);
@@ -872,13 +872,11 @@ function restoreSessionFromState(s) {
   if (currentGrid) {
     canvas.style.display = 'block';
     document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
     renderGrid(currentGrid);
   } else {
     canvas.style.display = 'none';
     document.getElementById('emptyState').style.display = '';
-    document.getElementById('controls').style.display = 'none';
     document.getElementById('transportBar').style.display = 'none';
   }
 

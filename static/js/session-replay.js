@@ -115,7 +115,6 @@ async function loadReplay(sid) {
     // Show the replay bar in the canvas area
     const bar = document.getElementById('replayBar');
     bar.style.display = 'block';
-    document.getElementById('controls').style.display = 'none';
     document.getElementById('transportBar').style.display = 'none';
     hideLiveScrubber();
 
@@ -212,7 +211,6 @@ function closeReplay() {
   document.getElementById('replayReasoningPanel').style.display = 'none';
   // Restore game controls if a session is active
   if (sessionId) {
-    document.getElementById('controls').style.display = 'flex';
     document.getElementById('transportBar').style.display = 'block';
     if (currentGrid) renderGrid(currentGrid);
     initLiveScrubber();

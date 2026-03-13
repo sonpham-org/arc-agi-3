@@ -8,16 +8,17 @@
 const PROVIDER_LABELS = {
   gemini: 'Google Gemini', anthropic: 'Anthropic', openai: 'OpenAI',
   cloudflare: 'Cloudflare', groq: 'Groq', mistral: 'Mistral', huggingface: 'Huggingface',
-  local: 'Local Model', ollama: 'Ollama',
+  local: 'Local Model', ollama: 'Ollama', lmstudio: 'LM Studio',
 };
 
 // ── Centralized BYOK Key Management ──
 // Scans ALL model selects, collects unique providers, renders key inputs dynamically.
 // Called on any model select change. Future-proof: no per-scaffold wiring needed.
 
-const _BYOK_FREE_PROVIDERS = new Set(['puter', 'copilot', 'ollama', 'local']);
+const _BYOK_FREE_PROVIDERS = new Set(['puter', 'copilot', 'ollama', 'local', 'lmstudio']);
 const _BYOK_PROVIDER_EXTRA_FIELDS = {
   cloudflare: [{ key: 'byok_cf_account_id', label: 'Cloudflare Account ID', placeholder: 'Paste Account ID here...', hint: 'Found in Cloudflare dashboard → Workers & Pages.', type: 'password' }],
+  lmstudio: [{ key: 'byok_lmstudio_base_url', label: 'LM Studio Base URL', placeholder: 'http://localhost:1234', hint: 'LM Studio local server. Enable CORS in LM Studio → Settings. Use a tunnel URL (e.g. Cloudflare Tunnel) for remote access.', type: 'text' }],
 };
 
 function getSelectedModel() {
@@ -32,6 +33,9 @@ function getSelectedModel() {
   }
   if (activeScaffoldingType === 'agent_spawn') {
     return document.getElementById('sf_as_orchestratorModelSelect')?.value || '';
+  }
+  if (activeScaffoldingType === 'world_model') {
+    return document.getElementById('sf_wm_agentModelSelect')?.value || '';
   }
   return document.getElementById('modelSelect')?.value || '';
 }
@@ -49,7 +53,8 @@ function updateAllByokKeys() {
     'sf_rlm_modelSelect', 'sf_rlm_subModelSelect',
     'sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect',
     'sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect',
-    'sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect'];
+    'sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect',
+    'sf_wm_agentModelSelect', 'sf_wm_wmModelSelect'];
 
   // 2. Collect unique providers that need keys
   const neededProviders = new Set();
@@ -103,15 +108,16 @@ function updateAllByokKeys() {
   }
   container.innerHTML = html;
 
-  // Persist BYOK keys and extra fields to localStorage on input
+  // Attach save-to-localStorage listeners on the new inputs
   container.querySelectorAll('input[data-byok-provider]').forEach(inp => {
-    inp.addEventListener('input', e => {
-      localStorage.setItem(`byok_key_${e.target.dataset.byokProvider}`, e.target.value);
+    inp.addEventListener('input', () => {
+      localStorage.setItem(`byok_key_${inp.dataset.byokProvider}`, inp.value.trim());
     });
   });
   container.querySelectorAll('input[data-byok-extra]').forEach(inp => {
-    inp.addEventListener('input', e => {
-      localStorage.setItem(e.target.dataset.byokExtra, e.target.value);
+    inp.addEventListener('input', () => {
+      localStorage.setItem(inp.dataset.byokExtra, inp.value.trim());
+
     });
   });
 
