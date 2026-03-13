@@ -49,6 +49,7 @@ def get_models(args: dict) -> dict:
             "api_model": info.get("api_model", key),
             "provider": provider,
             "price": info.get("price", "?"),
+            "pricing": info.get("pricing"),
             "context_window": info.get("context_window", 128000),
             "capabilities": info.get("capabilities", {}),
             "available": available,
