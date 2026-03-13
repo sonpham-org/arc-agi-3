@@ -638,6 +638,37 @@ def lmstudio_proxy():
         return jsonify({"error": str(e)}), 502
 
 
+@app.route("/api/llm/anthropic-proxy", methods=["POST"])
+@bot_protection
+@turnstile_required
+def anthropic_proxy():
+    """CORS proxy for Anthropic OAuth tokens — browser can't send Authorization: Bearer
+    to api.anthropic.com directly because the preflight OPTIONS fails (Anthropic only
+    allows direct browser access via x-api-key + anthropic-dangerous-direct-browser-access).
+    OAuth tokens (sk-ant-oat*) require Bearer auth, so we proxy server-to-server."""
+    import httpx as _hx
+    body = request.get_json(force=True) or {}
+    api_key = body.pop("api_key", "")
+    if not api_key or not api_key.startswith("sk-ant-oat"):
+        return jsonify({"error": "This proxy is for OAuth tokens (sk-ant-oat*) only"}), 400
+    if not body.get("model"):
+        return jsonify({"error": "model is required"}), 400
+    try:
+        resp = _hx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=body,
+            timeout=120.0,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/llm/cf-proxy", methods=["POST"])
 @bot_protection
 @turnstile_required

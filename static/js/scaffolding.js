@@ -482,14 +482,22 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     const body = { model: apiModel, max_tokens: maxTokens, messages: chatMsgs.map(m => ({ role: m.role, content: m.content })) };
     if (systemMsg) body.system = systemMsg.content;
     const isOAuth = key.startsWith('sk-ant-oat');
-    const authHeaders = isOAuth
-      ? { 'Authorization': `Bearer ${key}` }
-      : { 'x-api-key': key, 'anthropic-dangerous-direct-browser-access': 'true' };
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', ...authHeaders },
-      body: JSON.stringify(body),
-    });
+    let resp;
+    if (isOAuth) {
+      // OAuth tokens can't go direct (CORS preflight fails) — proxy through server
+      body.api_key = key;
+      resp = await fetch('/api/llm/anthropic-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify(body),
+      });
+    }
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);
     callLLM._lastUsage = data.usage ? { input_tokens: data.usage.input_tokens || 0, output_tokens: data.usage.output_tokens || 0 } : null;
