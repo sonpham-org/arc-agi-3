@@ -481,9 +481,13 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
     const chatMsgs = messages.filter(m => m.role !== 'system');
     const body = { model: apiModel, max_tokens: maxTokens, messages: chatMsgs.map(m => ({ role: m.role, content: m.content })) };
     if (systemMsg) body.system = systemMsg.content;
+    const isOAuth = key.startsWith('sk-ant-oat');
+    const authHeaders = isOAuth
+      ? { 'Authorization': `Bearer ${key}` }
+      : { 'x-api-key': key, 'anthropic-dangerous-direct-browser-access': 'true' };
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', ...authHeaders },
       body: JSON.stringify(body),
     });
     const data = await resp.json();

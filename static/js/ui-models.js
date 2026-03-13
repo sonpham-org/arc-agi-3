@@ -96,6 +96,18 @@ function updateAllByokKeys() {
   }
   container.innerHTML = html;
 
+  // Persist BYOK keys and extra fields to localStorage on input
+  container.querySelectorAll('input[data-byok-provider]').forEach(inp => {
+    inp.addEventListener('input', e => {
+      localStorage.setItem(`byok_key_${e.target.dataset.byokProvider}`, e.target.value);
+    });
+  });
+  container.querySelectorAll('input[data-byok-extra]').forEach(inp => {
+    inp.addEventListener('input', e => {
+      localStorage.setItem(e.target.dataset.byokExtra, e.target.value);
+    });
+  });
+
   // Auto-open Model Keys section
   const sec = document.getElementById('secKeys');
   if (sec && !sec.classList.contains('open')) sec.classList.add('open');

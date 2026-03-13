@@ -5,6 +5,21 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.2.7] — feat: support Claude Code OAuth tokens + fix BYOK key persistence
+*Author: Claude Opus 4.6 | 2026-03-12*
+
+### Added
+- **Claude Code OAuth token support** — The app now accepts `sk-ant-oat*` OAuth tokens (from `claude setup-token`) in addition to standard `sk-ant-api*` API keys. OAuth tokens are sent as `Authorization: Bearer` instead of `x-api-key`, matching the Anthropic OAuth spec.
+  - **`server/services/auth_service.py`** — Relaxed prefix validation from `sk-ant-` to accept both `sk-ant-api*` and `sk-ant-oat*`.
+  - **`llm_providers_anthropic.py`** — Added `_is_oauth_token()` helper and `_anthropic_auth_headers()` to route Bearer vs x-api-key based on token type.
+  - **`static/js/scaffolding.js`** — Client-side Anthropic calls detect `sk-ant-oat` prefix and switch to Bearer auth headers.
+  - **`agent_llm.py`** — CLI/batch runner path updated with the same OAuth token detection.
+
+### Fixed
+- **BYOK key persistence** — API keys entered in the Model Keys UI were lost on page refresh because the dynamically-rendered `<input>` elements had no event listeners to save to `localStorage`. Added `input` listeners in `static/js/ui-models.js` for both `data-byok-provider` and `data-byok-extra` fields.
+
+---
+
 ## [1.2.6] — Fix: restore dropped _humanCanvasClick function
 *Author: Claude Opus 4.6 | 2026-03-12*
 

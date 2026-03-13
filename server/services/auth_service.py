@@ -202,10 +202,14 @@ def claude_auth_status() -> tuple[dict, str]:
 
 
 def claude_set_key(api_key: str) -> tuple[dict, str]:
-    """Set Anthropic API key for this session. Returns (response_dict, error_msg)."""
+    """Set Anthropic API key or OAuth token for this session. Returns (response_dict, error_msg).
+
+    Accepts both standard API keys (sk-ant-api03-*) and Claude Code OAuth
+    tokens (sk-ant-oat01-*) generated via ``claude setup-token``.
+    """
     key = (api_key or "").strip()
-    if not key.startswith("sk-ant-"):
-        return {"error": "Invalid Anthropic API key format (expected sk-ant-...)"}, "Invalid key"
+    if not (key.startswith("sk-ant-api") or key.startswith("sk-ant-oat")):
+        return {"error": "Invalid Anthropic credential (expected sk-ant-api... or sk-ant-oat...)"}, "Invalid key"
     llm_providers.claude_api_key = key
     return {"status": "ok"}, ""
 
