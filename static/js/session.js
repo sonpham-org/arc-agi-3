@@ -103,6 +103,8 @@ function switchSession(targetId) {
   // If returning from menu to the same session, just re-show — don't re-attach
   if (wasMenu && targetId === activeSessionId) {
     renderSessionTabs();
+    // Re-enter obs mode if session is still in autoplay
+    if (target.autoPlaying) enterObsMode(target);
     return;
   }
 
