@@ -152,9 +152,12 @@ async function askLLM(ss) {
     const postCompactHistory = (compactBlock && _cur._compactSummaryAtStep > 0)
       ? _cur.moveHistory.filter(h => h.step > _cur._compactSummaryAtStep)
       : _cur.moveHistory;
+    // Safety valve: even if compact is disabled, trim history to fit context window
+    // Use 70% of context window as hard cap (leaving room for system prompt + response)
+    const hardCapTokens = Math.floor(contextWindow * 0.70);
     const historyForLLM = compact.enabled
       ? trimHistoryForTokens(postCompactHistory, maxHistTokens)
-      : postCompactHistory;
+      : trimHistoryForTokens(postCompactHistory, hardCapTokens);
 
     const modelInfo = getModelInfo(model);
     const isPuterModel = modelInfo?.provider === 'puter';

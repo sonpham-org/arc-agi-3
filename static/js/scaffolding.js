@@ -482,6 +482,13 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
   if (provider === 'anthropic') {
     const systemMsg = messages.find(m => m.role === 'system');
     const chatMsgs = messages.filter(m => m.role !== 'system');
+    // Pre-flight: estimate tokens and warn if likely to exceed context window
+    const modelCtx = getModelInfo(model)?.context_window || 200000;
+    const allText = messages.map(m => m.content).join('');
+    const estTokens = estimateTokens(allText);
+    if (estTokens > modelCtx * 0.95) {
+      throw new Error(`Prompt too long (~${Math.round(estTokens/1000)}K tokens) for ${model} (${Math.round(modelCtx/1000)}K limit). Enable Compact Context or reduce history.`);
+    }
     const body = { model: apiModel, max_tokens: maxTokens, messages: chatMsgs.map(m => ({ role: m.role, content: m.content })) };
     if (systemMsg) body.system = systemMsg.content;
     const isOAuth = key.startsWith('sk-ant-oat');
@@ -502,7 +509,13 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
       });
     }
     const data = await resp.json();
-    if (!resp.ok || data.error) throw new Error(`${resp.status} ${data.error?.message || JSON.stringify(data.error || resp.statusText)}`);
+    if (!resp.ok || data.error) {
+      const errMsg = data.error?.message || JSON.stringify(data.error || resp.statusText);
+      if (resp.status === 400 && errMsg.includes('too long')) {
+        throw new Error(`Prompt too long for ${model}. Enable Compact Context in settings or reduce history length.`);
+      }
+      throw new Error(`${resp.status} ${errMsg}`);
+    }
     callLLM._lastUsage = data.usage ? { input_tokens: data.usage.input_tokens || 0, output_tokens: data.usage.output_tokens || 0 } : null;
     return data.content?.map(c => c.text).filter(Boolean).join('') || '';
   }

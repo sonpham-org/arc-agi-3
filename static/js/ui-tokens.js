@@ -62,25 +62,30 @@ function estimateTokens(text) {
 
 function trimHistoryForTokens(history, maxTokens) {
   // If history fits within budget, return as-is.
-  // Otherwise drop grid snapshots from older steps, keeping last 5 with grids.
+  // Otherwise: 1) drop grid snapshots from older steps, 2) if still too large, drop oldest entries.
   const KEEP_GRIDS = 5;
   if (!history || history.length <= KEEP_GRIDS) return history;
 
-  // Estimate token cost of full history with grids
-  let totalChars = 0;
-  for (const h of history) {
-    totalChars += 60; // step line overhead
-    if (h.grid) totalChars += h.grid.length * 30; // rough RLE per row
-  }
-  const est = Math.ceil(totalChars / 4);
+  // Estimate token cost of full history
+  const _estHistTokens = (h) => Math.ceil(JSON.stringify(h).length / 4);
+  let est = _estHistTokens(history);
   if (est <= maxTokens) return history; // fits, keep all
 
-  // Strip grids from older entries, keep last KEEP_GRIDS with grids
-  return history.map((h, i) => {
+  // Phase 1: Strip grids from older entries, keep last KEEP_GRIDS with grids
+  let trimmed = history.map((h, i) => {
     if (i >= history.length - KEEP_GRIDS) return h;
     const { grid, ...rest } = h;
     return rest;
   });
+  est = _estHistTokens(trimmed);
+  if (est <= maxTokens) return trimmed;
+
+  // Phase 2: Still too large — drop oldest entries until it fits (keep at least last 10)
+  const MIN_KEEP = 10;
+  while (trimmed.length > MIN_KEEP && _estHistTokens(trimmed) > maxTokens) {
+    trimmed = trimmed.slice(Math.ceil(trimmed.length * 0.25)); // drop oldest 25%
+  }
+  return trimmed;
 }
 
 function collectObservation(resp, ss) {
