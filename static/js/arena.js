@@ -1,9 +1,11 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-14 09:30
+// Date: 2026-03-14 16:00
 // PURPOSE: ARC Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
-//   Currently implements Snake Battle as the first AI vs AI game.
+//   Implements 8 games: Snake Battle, Tron, Connect Four, Fischer Random Chess,
+//   Othello, Go 9x9, Gomoku, Artillery. Each has engine, AI, rendering, match runner.
+//   Dispatcher pattern: ARENA_GAMES entries have run/render/preview functions.
 // SRP/DRY check: Pass — self-contained arena module, no overlap with main app JS
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -759,26 +761,2417 @@ function runChessMatch(config, strategyA, strategyB) {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Snake Rendering (extracted for dispatcher)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function renderSnakeFrame(ctx, frame, size) {
+  const grid = frame.grid;
+  const gridH = grid.length, gridW = grid[0].length;
+  const cellW = size / gridW, cellH = size / gridH;
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++) {
+      ctx.fillStyle = ARC3[grid[y][x]];
+      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+    }
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= gridW; x++) {
+    ctx.beginPath(); ctx.moveTo(x*cellW, 0); ctx.lineTo(x*cellW, size); ctx.stroke();
+  }
+  for (let y = 0; y <= gridH; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y*cellH); ctx.lineTo(size, y*cellH); ctx.stroke();
+  }
+}
+
+function renderSnakePreview(canvas, config) {
+  const g = new SnakeGame(config);
+  const grid = g.getGrid();
+  const size = 120;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cellW = size / g.W, cellH = size / g.H;
+  for (let y = 0; y < g.H; y++)
+    for (let x = 0; x < g.W; x++) {
+      ctx.fillStyle = ARC3[grid[y][x]];
+      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+    }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Connect Four Game Engine
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const C4_ROWS = 6, C4_COLS = 7;
+
+class ConnectFourGame {
+  constructor(config = {}) {
+    this.board = Array.from({length: C4_ROWS}, () => Array(C4_COLS).fill(0));
+    this.turn = 1; // 1 = Agent A, -1 = Agent B
+    this.ply = 0;
+    this.over = false;
+    this.winner = null;
+    this.lastMove = null;
+  }
+
+  getLegalMoves() {
+    const moves = [];
+    for (let c = 0; c < C4_COLS; c++) if (this.board[0][c] === 0) moves.push(c);
+    return moves;
+  }
+
+  dropRow(col) {
+    for (let r = C4_ROWS - 1; r >= 0; r--) if (this.board[r][col] === 0) return r;
+    return -1;
+  }
+
+  makeMove(col) {
+    const r = this.dropRow(col);
+    if (r < 0) return false;
+    this.board[r][col] = this.turn;
+    this.lastMove = [r, col];
+    this.ply++;
+    if (this._checkWin(r, col, this.turn)) {
+      this.over = true;
+      this.winner = this.turn === 1 ? 'A' : 'B';
+    } else if (this.getLegalMoves().length === 0) {
+      this.over = true;
+      this.winner = 'draw';
+    }
+    this.turn *= -1;
+    return true;
+  }
+
+  unmakeMove(col) {
+    for (let r = 0; r < C4_ROWS; r++) {
+      if (this.board[r][col] !== 0) {
+        this.board[r][col] = 0;
+        this.ply--;
+        this.turn *= -1;
+        this.over = false;
+        this.winner = null;
+        return;
+      }
+    }
+  }
+
+  _checkWin(r, c, player) {
+    const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+    for (const [dr, dc] of dirs) {
+      let count = 1;
+      for (let i = 1; i < 4; i++) {
+        const nr = r+dr*i, nc = c+dc*i;
+        if (nr<0||nr>=C4_ROWS||nc<0||nc>=C4_COLS||this.board[nr][nc]!==player) break;
+        count++;
+      }
+      for (let i = 1; i < 4; i++) {
+        const nr = r-dr*i, nc = c-dc*i;
+        if (nr<0||nr>=C4_ROWS||nc<0||nc>=C4_COLS||this.board[nr][nc]!==player) break;
+        count++;
+      }
+      if (count >= 4) return true;
+    }
+    return false;
+  }
+
+  getBoard() { return this.board.map(r => [...r]); }
+}
+
+
+/* ── Connect Four AI ────────────────────────────────────────────────────── */
+
+function c4Eval(game) {
+  let score = 0;
+  const b = game.board, dirs = [[0,1],[1,0],[1,1],[1,-1]];
+  const weights = [0, 1, 10, 100, 10000];
+  for (let r = 0; r < C4_ROWS; r++) for (let c = 0; c < C4_COLS; c++) {
+    for (const [dr, dc] of dirs) {
+      let a1 = 0, a2 = 0;
+      let valid = true;
+      for (let i = 0; i < 4; i++) {
+        const nr = r+dr*i, nc = c+dc*i;
+        if (nr<0||nr>=C4_ROWS||nc<0||nc>=C4_COLS) { valid = false; break; }
+        if (b[nr][nc] === 1) a1++; else if (b[nr][nc] === -1) a2++;
+      }
+      if (!valid) continue;
+      if (a1 > 0 && a2 === 0) score += weights[a1];
+      if (a2 > 0 && a1 === 0) score -= weights[a2];
+    }
+  }
+  for (let r = 0; r < C4_ROWS; r++) {
+    if (b[r][3] === 1) score += 3;
+    if (b[r][3] === -1) score -= 3;
+  }
+  return score;
+}
+
+function c4Minimax(game, depth, alpha, beta, maximizing) {
+  if (game.over) {
+    if (game.winner === 'A') return 100000;
+    if (game.winner === 'B') return -100000;
+    return 0;
+  }
+  if (depth === 0) return c4Eval(game);
+  const moves = game.getLegalMoves();
+  moves.sort((a, b) => Math.abs(3-a) - Math.abs(3-b));
+  if (maximizing) {
+    let best = -Infinity;
+    for (const col of moves) {
+      game.makeMove(col);
+      best = Math.max(best, c4Minimax(game, depth-1, alpha, beta, false));
+      game.unmakeMove(col);
+      alpha = Math.max(alpha, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const col of moves) {
+      game.makeMove(col);
+      best = Math.min(best, c4Minimax(game, depth-1, alpha, beta, true));
+      game.unmakeMove(col);
+      beta = Math.min(beta, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  }
+}
+
+function c4DropperAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  let bestCol = moves[0], bestScore = -Infinity;
+  const lines = [];
+  for (const col of moves) {
+    game.makeMove(col);
+    const score = game.turn === -1 ? c4Eval(game) : -c4Eval(game);
+    game.unmakeMove(col);
+    lines.push(`  Col ${col}: ${score > 0 ? '+' : ''}${score}`);
+    if (score > bestScore) { bestScore = score; bestCol = col; }
+  }
+  return { col: bestCol, reasoning: `GREEDY\n${lines.join('\n')}\n=> Column ${bestCol}` };
+}
+
+function c4BlockerAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  for (const col of moves) {
+    const r = game.dropRow(col);
+    game.board[r][col] = game.turn;
+    if (game._checkWin(r, col, game.turn)) { game.board[r][col] = 0; return { col, reasoning: `WIN at column ${col}!` }; }
+    game.board[r][col] = 0;
+  }
+  const opp = -game.turn;
+  for (const col of moves) {
+    const r = game.dropRow(col);
+    game.board[r][col] = opp;
+    if (game._checkWin(r, col, opp)) { game.board[r][col] = 0; return { col, reasoning: `BLOCK opponent at column ${col}` }; }
+    game.board[r][col] = 0;
+  }
+  const sorted = [...moves].sort((a, b) => Math.abs(3-a) - Math.abs(3-b));
+  return { col: sorted[0], reasoning: `No threats, center-ish: column ${sorted[0]}` };
+}
+
+function c4BalancedAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  const maximizing = game.turn === 1;
+  const candidates = [];
+  for (const col of moves) {
+    game.makeMove(col);
+    const score = c4Minimax(game, 4, -Infinity, Infinity, !maximizing);
+    game.unmakeMove(col);
+    candidates.push({ col, score });
+  }
+  candidates.sort((a, b) => maximizing ? b.score-a.score : a.score-b.score);
+  const best = candidates[0];
+  const top = candidates.slice(0, 4);
+  const lines = top.map((c, i) => `  ${i+1}. Col ${c.col}: ${c.score>0?'+':''}${c.score}`);
+  return { col: best.col, reasoning: `Depth 5\n${lines.join('\n')}\n=> Column ${best.col}` };
+}
+
+const C4_STRATEGIES = {
+  dropper:  { name: 'Dropper',  fn: c4DropperAI,  desc: 'Greedy — maximizes own line potential',
+              personality: { aggression: 60, caution: 20, greed: 90 } },
+  blocker:  { name: 'Blocker',  fn: c4BlockerAI,  desc: 'Defensive — blocks threats, then builds',
+              personality: { aggression: 20, caution: 90, greed: 30 } },
+  balanced: { name: 'Balanced', fn: c4BalancedAI,  desc: 'Minimax depth 5, strong all-round play',
+              personality: { aggression: 50, caution: 60, greed: 50 } },
+};
+
+
+/* ── Connect Four Rendering ─────────────────────────────────────────────── */
+
+function renderC4Frame(ctx, frame, size) {
+  const board = frame.board;
+  const cellW = size / C4_COLS, cellH = size / (C4_ROWS + 0.5);
+  const radius = Math.min(cellW, cellH) * 0.4;
+  ctx.fillStyle = '#1565C0';
+  ctx.fillRect(0, 0, size, cellH * C4_ROWS);
+  ctx.fillStyle = ARC3[5];
+  ctx.fillRect(0, cellH * C4_ROWS, size, size - cellH * C4_ROWS);
+  for (let r = 0; r < C4_ROWS; r++) for (let c = 0; c < C4_COLS; c++) {
+    const cx = c*cellW + cellW/2, cy = r*cellH + cellH/2;
+    const isLast = frame.lastMove && frame.lastMove[0]===r && frame.lastMove[1]===c;
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2);
+    if (board[r][c]===1) ctx.fillStyle = isLast ? '#FF4444' : ARC3[8];
+    else if (board[r][c]===-1) ctx.fillStyle = isLast ? '#FFB84D' : ARC3[12];
+    else ctx.fillStyle = ARC3[3];
+    ctx.fill();
+    if (isLast && board[r][c]!==0) { ctx.strokeStyle='#FFF'; ctx.lineWidth=2; ctx.stroke(); }
+  }
+  ctx.font = `bold ${cellW*0.28}px monospace`;
+  ctx.fillStyle = ARC3[2]; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let c = 0; c < C4_COLS; c++) ctx.fillText(String(c), c*cellW+cellW/2, C4_ROWS*cellH+cellH*0.25);
+}
+
+function renderC4Preview(canvas) {
+  const size = 120;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cellW = size/C4_COLS, cellH = size/C4_ROWS, radius = Math.min(cellW,cellH)*0.38;
+  ctx.fillStyle = '#1565C0'; ctx.fillRect(0,0,size,size);
+  const preview = [[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,1,0,0,0],[0,0,-1,1,0,0,0],[0,-1,1,-1,1,0,0]];
+  for (let r=0;r<C4_ROWS;r++) for (let c=0;c<C4_COLS;c++) {
+    ctx.beginPath(); ctx.arc(c*cellW+cellW/2, r*cellH+cellH/2, radius, 0, Math.PI*2);
+    ctx.fillStyle = preview[r][c]===1 ? ARC3[8] : preview[r][c]===-1 ? ARC3[12] : ARC3[3];
+    ctx.fill();
+  }
+}
+
+
+/* ── Connect Four Match Runner ──────────────────────────────────────────── */
+
+function runC4Match(config, strategyA, strategyB) {
+  const game = new ConnectFourGame(config);
+  const fnA = C4_STRATEGIES[strategyA].fn, fnB = C4_STRATEGIES[strategyB].fn;
+  const history = [];
+  history.push({ turn:0, board:game.getBoard(), lastMove:null, agentA:null, agentB:null, winner:null, scoreA:0, scoreB:0 });
+  while (!game.over) {
+    const isA = game.turn === 1;
+    const result = (isA ? fnA : fnB)(game);
+    if (!result) break;
+    game.makeMove(result.col);
+    history.push({
+      turn: game.ply, board: game.getBoard(), lastMove: game.lastMove ? [...game.lastMove] : null,
+      agentA: isA ? { move: `Column ${result.col}`, reasoning: result.reasoning } : null,
+      agentB: !isA ? { move: `Column ${result.col}`, reasoning: result.reasoning } : null,
+      winner: game.winner, scoreA: 0, scoreB: 0,
+    });
+  }
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Tron (Light Cycles) Game Engine
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const TRON = { EMPTY: 0, A_TRAIL: 1, B_TRAIL: 2, A_HEAD: 3, B_HEAD: 4 };
+const TRON_ARC = { 0: 5, 1: 10, 2: 12, 3: 9, 4: 8 };
+
+class TronGame {
+  constructor(config = {}) {
+    this.W = config.width || 25;
+    this.H = config.height || 25;
+    this.maxTurns = config.maxTurns || 200;
+    this.turn = 0;
+    this.over = false;
+    this.winner = null;
+    this.grid = Array.from({length: this.H}, () => Array(this.W).fill(0));
+    const midY = this.H >> 1;
+    this.posA = [4, midY]; this.posB = [this.W-5, midY];
+    this.dirA = DIR.RIGHT; this.dirB = DIR.LEFT;
+    this.aliveA = true; this.aliveB = true;
+    this.grid[midY][4] = TRON.A_HEAD;
+    this.grid[midY][this.W-5] = TRON.B_HEAD;
+  }
+
+  getGrid() { return this.grid.map(r => [...r]); }
+
+  getAIState() {
+    return {
+      width: this.W, height: this.H, turn: this.turn,
+      posA: [...this.posA], posB: [...this.posB],
+      dirA: this.dirA, dirB: this.dirB,
+      aliveA: this.aliveA, aliveB: this.aliveB,
+      grid: this.grid.map(r => [...r]),
+    };
+  }
+
+  step(moveA, moveB) {
+    if (this.over) return;
+    this.turn++;
+    if (moveA === OPPOSITE[this.dirA]) moveA = this.dirA;
+    if (moveB === OPPOSITE[this.dirB]) moveB = this.dirB;
+    this.dirA = moveA; this.dirB = moveB;
+
+    if (this.aliveA) this.grid[this.posA[1]][this.posA[0]] = TRON.A_TRAIL;
+    if (this.aliveB) this.grid[this.posB[1]][this.posB[0]] = TRON.B_TRAIL;
+
+    const nax = this.posA[0]+DX[moveA], nay = this.posA[1]+DY[moveA];
+    const nbx = this.posB[0]+DX[moveB], nby = this.posB[1]+DY[moveB];
+    let aDead = !this.aliveA, bDead = !this.aliveB;
+
+    if (this.aliveA && (nax<0||nax>=this.W||nay<0||nay>=this.H)) aDead = true;
+    if (this.aliveB && (nbx<0||nbx>=this.W||nby<0||nby>=this.H)) bDead = true;
+    if (this.aliveA && !aDead && this.grid[nay][nax]!==0) aDead = true;
+    if (this.aliveB && !bDead && this.grid[nby][nbx]!==0) bDead = true;
+    if (this.aliveA && this.aliveB && nax===nbx && nay===nby) { aDead = true; bDead = true; }
+
+    if (aDead) this.aliveA = false;
+    if (bDead) this.aliveB = false;
+    if (this.aliveA) { this.posA = [nax, nay]; this.grid[nay][nax] = TRON.A_HEAD; }
+    if (this.aliveB) { this.posB = [nbx, nby]; this.grid[nby][nbx] = TRON.B_HEAD; }
+
+    if (!this.aliveA && !this.aliveB) { this.over = true; this.winner = 'draw'; }
+    else if (!this.aliveA) { this.over = true; this.winner = 'B'; }
+    else if (!this.aliveB) { this.over = true; this.winner = 'A'; }
+    else if (this.turn >= this.maxTurns) { this.over = true; this.winner = 'draw'; }
+  }
+}
+
+
+/* ── Tron AI ────────────────────────────────────────────────────────────── */
+
+function tronSafe(x, y, state) {
+  return x>=0 && x<state.width && y>=0 && y<state.height && state.grid[y][x]===0;
+}
+
+function tronFlood(sx, sy, state, limit) {
+  if (!tronSafe(sx, sy, state)) return 0;
+  let count = 0;
+  const visited = new Set([`${sx},${sy}`]);
+  const queue = [[sx, sy]];
+  while (queue.length && count < limit) {
+    const [cx, cy] = queue.shift(); count++;
+    for (let d = 0; d < 4; d++) {
+      const nx = cx+DX[d], ny = cy+DY[d], key = `${nx},${ny}`;
+      if (!visited.has(key) && tronSafe(nx, ny, state)) { visited.add(key); queue.push([nx, ny]); }
+    }
+  }
+  return count;
+}
+
+function tronMoves(state, player) {
+  const pos = player==='A' ? state.posA : state.posB;
+  const dir = player==='A' ? state.dirA : state.dirB;
+  const opp = player==='A' ? state.posB : state.posA;
+  const moves = [];
+  for (let d = 0; d < 4; d++) {
+    if (d === OPPOSITE[dir]) continue;
+    const nx = pos[0]+DX[d], ny = pos[1]+DY[d];
+    const safe = tronSafe(nx, ny, state);
+    moves.push({ dir: d, safe, space: safe ? tronFlood(nx, ny, state, 400) : 0,
+                 oppDist: Math.abs(nx-opp[0])+Math.abs(ny-opp[1]), nx, ny });
+  }
+  return moves;
+}
+
+function tronSpaceMaxAI(state, player) {
+  const moves = tronMoves(state, player);
+  const safe = moves.filter(m => m.safe);
+  const lines = moves.map(m => `  ${DIR_NAME[m.dir]}: ${m.safe ? `space ${m.space}` : 'BLOCKED'}`);
+  if (!safe.length) return { move: player==='A'?state.dirA:state.dirB, reasoning: lines.join('\n')+'\nTrapped!' };
+  // When space is tied (common early game), prefer away from opponent
+  safe.sort((a, b) => {
+    if (b.space !== a.space) return b.space - a.space;
+    return b.oppDist - a.oppDist;
+  });
+  return { move: safe[0].dir, reasoning: `SPACE-MAX\n${lines.join('\n')}\n=> ${DIR_NAME[safe[0].dir]} (space ${safe[0].space})` };
+}
+
+function tronAggressiveAI(state, player) {
+  const moves = tronMoves(state, player);
+  const safe = moves.filter(m => m.safe);
+  const lines = moves.map(m => `  ${DIR_NAME[m.dir]}: ${m.safe ? `space ${m.space}, opp ${m.oppDist}` : 'BLOCKED'}`);
+  if (!safe.length) return { move: player==='A'?state.dirA:state.dirB, reasoning: lines.join('\n')+'\nTrapped!' };
+  // Only chase if we have enough space (>= 85% of best); otherwise play safe
+  const maxSp = Math.max(...safe.map(m => m.space));
+  const viable = safe.filter(m => m.space >= maxSp * 0.85);
+  // Among safe-enough moves, prefer cutting off opponent
+  viable.sort((a, b) => {
+    if (Math.abs(b.space - a.space) > 20) return b.space - a.space; // big space difference? prefer space
+    return a.oppDist - b.oppDist; // similar space? go toward opponent
+  });
+  return { move: viable[0].dir, reasoning: `AGGRESSIVE\n${lines.join('\n')}\n=> ${DIR_NAME[viable[0].dir]} (cut off)` };
+}
+
+function tronCautiousAI(state, player) {
+  const moves = tronMoves(state, player);
+  const safe = moves.filter(m => m.safe);
+  const lines = moves.map(m => `  ${DIR_NAME[m.dir]}: ${m.safe ? `space ${m.space}` : 'BLOCKED'}`);
+  if (!safe.length) return { move: player==='A'?state.dirA:state.dirB, reasoning: lines.join('\n')+'\nTrapped!' };
+  // Strongly prefer space; among equal-space moves, stay away from opponent
+  safe.sort((a,b) => {
+    if (b.space !== a.space) return b.space - a.space;
+    return b.oppDist - a.oppDist; // farther from opponent is safer
+  });
+  return { move: safe[0].dir, reasoning: `CAUTIOUS\n${lines.join('\n')}\n=> ${DIR_NAME[safe[0].dir]} (max space)` };
+}
+
+const TRON_STRATEGIES = {
+  spacemax:   { name: 'Space Max',  fn: tronSpaceMaxAI,   desc: 'Maximizes accessible space via flood fill',
+                personality: { aggression: 30, caution: 70, greed: 80 } },
+  aggressive: { name: 'Aggressive', fn: tronAggressiveAI, desc: 'Cuts off opponent while staying safe',
+                personality: { aggression: 90, caution: 20, greed: 40 } },
+  cautious:   { name: 'Cautious',   fn: tronCautiousAI,   desc: 'Maximum space, stays central',
+                personality: { aggression: 10, caution: 95, greed: 30 } },
+};
+
+
+/* ── Tron Rendering ─────────────────────────────────────────────────────── */
+
+function renderTronFrame(ctx, frame, size) {
+  const grid = frame.grid, H = grid.length, W = grid[0].length;
+  const cellW = size/W, cellH = size/H;
+  for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+    ctx.fillStyle = ARC3[TRON_ARC[grid[y][x]] || 5];
+    ctx.fillRect(x*cellW, y*cellH, cellW+0.5, cellH+0.5);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 0.5;
+  for (let x=0;x<=W;x++) { ctx.beginPath(); ctx.moveTo(x*cellW,0); ctx.lineTo(x*cellW,size); ctx.stroke(); }
+  for (let y=0;y<=H;y++) { ctx.beginPath(); ctx.moveTo(0,y*cellH); ctx.lineTo(size,y*cellH); ctx.stroke(); }
+}
+
+function renderTronPreview(canvas) {
+  const size = 120; canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const W = 25, H = 25, cellW = size/W, cellH = size/H;
+  ctx.fillStyle = ARC3[5]; ctx.fillRect(0,0,size,size);
+  const tA = [[4,12],[5,12],[6,12],[7,12],[8,12],[8,11],[8,10],[8,9],[9,9],[10,9],[11,9]];
+  const tB = [[20,12],[19,12],[18,12],[17,12],[16,12],[16,13],[16,14],[15,14],[14,14]];
+  for (const [x,y] of tA) { ctx.fillStyle=ARC3[10]; ctx.fillRect(x*cellW,y*cellH,cellW+.5,cellH+.5); }
+  ctx.fillStyle=ARC3[9]; ctx.fillRect(12*cellW,9*cellH,cellW+.5,cellH+.5);
+  for (const [x,y] of tB) { ctx.fillStyle=ARC3[12]; ctx.fillRect(x*cellW,y*cellH,cellW+.5,cellH+.5); }
+  ctx.fillStyle=ARC3[8]; ctx.fillRect(13*cellW,14*cellH,cellW+.5,cellH+.5);
+}
+
+
+/* ── Tron Match Runner ──────────────────────────────────────────────────── */
+
+function runTronMatch(config, strategyA, strategyB) {
+  const game = new TronGame(config);
+  const fnA = TRON_STRATEGIES[strategyA].fn, fnB = TRON_STRATEGIES[strategyB].fn;
+  const history = [];
+  history.push({ turn:0, grid:game.getGrid(), agentA:null, agentB:null, winner:null, scoreA:0, scoreB:0 });
+  while (!game.over) {
+    const st = game.getAIState();
+    const rA = fnA(st, 'A'), rB = fnB(st, 'B');
+    game.step(rA.move, rB.move);
+    let tA=0, tB=0;
+    for (let y=0;y<game.H;y++) for (let x=0;x<game.W;x++) {
+      const v = game.grid[y][x];
+      if (v===1||v===3) tA++; if (v===2||v===4) tB++;
+    }
+    history.push({
+      turn: game.turn, grid: game.getGrid(),
+      agentA: { move: DIR_NAME[rA.move], reasoning: rA.reasoning },
+      agentB: { move: DIR_NAME[rB.move], reasoning: rB.reasoning },
+      winner: game.winner, scoreA: tA, scoreB: tB,
+    });
+  }
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Othello (Reversi) Game Engine
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const OTH_DIRS = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+
+class OthelloGame {
+  constructor() {
+    this.board = Array.from({length: 8}, () => Array(8).fill(0));
+    this.board[3][3] = -1; this.board[3][4] = 1;
+    this.board[4][3] = 1;  this.board[4][4] = -1;
+    this.turn = 1; // 1 = Agent A (dark first)
+    this.ply = 0;
+    this.over = false;
+    this.winner = null;
+    this.lastMove = null;
+    this.passes = 0;
+  }
+
+  _flips(r, c, player) {
+    if (this.board[r][c] !== 0) return [];
+    const all = [];
+    for (const [dr, dc] of OTH_DIRS) {
+      const line = [];
+      let nr = r+dr, nc = c+dc;
+      while (nr>=0&&nr<8&&nc>=0&&nc<8&&this.board[nr][nc]===-player) {
+        line.push([nr, nc]); nr += dr; nc += dc;
+      }
+      if (line.length > 0 && nr>=0&&nr<8&&nc>=0&&nc<8&&this.board[nr][nc]===player) all.push(...line);
+    }
+    return all;
+  }
+
+  getLegalMoves() {
+    const moves = [];
+    for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+      const fl = this._flips(r, c, this.turn);
+      if (fl.length > 0) moves.push({ r, c, flips: fl });
+    }
+    return moves;
+  }
+
+  makeMove(r, c) {
+    const flips = this._flips(r, c, this.turn);
+    if (!flips.length) return false;
+    this.board[r][c] = this.turn;
+    for (const [fr, fc] of flips) this.board[fr][fc] = this.turn;
+    this.lastMove = [r, c]; this.ply++; this.passes = 0;
+    this.turn *= -1;
+    this._checkEnd();
+    return true;
+  }
+
+  _checkEnd() {
+    if (this.getLegalMoves().length === 0) {
+      this.passes++;
+      this.turn *= -1;
+      if (this.getLegalMoves().length === 0) this._endGame();
+    }
+  }
+
+  _endGame() {
+    this.over = true;
+    let a=0, b=0;
+    for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+      if (this.board[r][c]===1) a++; else if (this.board[r][c]===-1) b++;
+    }
+    this.winner = a>b ? 'A' : b>a ? 'B' : 'draw';
+  }
+
+  countPieces() {
+    let a=0, b=0;
+    for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+      if (this.board[r][c]===1) a++; else if (this.board[r][c]===-1) b++;
+    }
+    return { a, b };
+  }
+
+  getBoard() { return this.board.map(r => [...r]); }
+}
+
+
+/* ── Othello AI ─────────────────────────────────────────────────────────── */
+
+const OTH_WEIGHTS = [
+  [120,-20,20, 5, 5,20,-20,120],
+  [-20,-40,-5,-5,-5,-5,-40,-20],
+  [ 20, -5,15, 3, 3,15, -5, 20],
+  [  5, -5, 3, 3, 3, 3, -5,  5],
+  [  5, -5, 3, 3, 3, 3, -5,  5],
+  [ 20, -5,15, 3, 3,15, -5, 20],
+  [-20,-40,-5,-5,-5,-5,-40,-20],
+  [120,-20,20, 5, 5,20,-20,120],
+];
+
+function othSqName(r, c) { return String.fromCharCode(97+c) + (8-r); }
+
+function othCornerGrabberAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  const scored = moves.map(m => ({ ...m, score: OTH_WEIGHTS[m.r][m.c], name: othSqName(m.r,m.c) }));
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0,4);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: wt ${m.score}, ${m.flips.length} flips`);
+  return { r: scored[0].r, c: scored[0].c, reasoning: `CORNER-GRAB\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+function othMaximizerAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  const scored = moves.map(m => ({ ...m, score: m.flips.length, name: othSqName(m.r,m.c) }));
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0,4);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: ${m.score} flips`);
+  return { r: scored[0].r, c: scored[0].c, reasoning: `MAXIMIZER\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+function othPositionalAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  const scored = moves.map(m => ({ ...m, score: OTH_WEIGHTS[m.r][m.c] + m.flips.length*2, name: othSqName(m.r,m.c) }));
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0,4);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: ${m.score} (wt ${OTH_WEIGHTS[m.r][m.c]}+${m.flips.length} flips)`);
+  return { r: scored[0].r, c: scored[0].c, reasoning: `POSITIONAL\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+const OTHELLO_STRATEGIES = {
+  corner_grabber: { name: 'Corner Grabber', fn: othCornerGrabberAI, desc: 'Prioritizes corners and edges',
+                    personality: { aggression: 40, caution: 80, greed: 70 } },
+  maximizer:      { name: 'Maximizer',      fn: othMaximizerAI,    desc: 'Flips as many pieces as possible',
+                    personality: { aggression: 70, caution: 20, greed: 95 } },
+  positional:     { name: 'Positional',     fn: othPositionalAI,   desc: 'Balances position value with captures',
+                    personality: { aggression: 50, caution: 60, greed: 50 } },
+};
+
+
+/* ── Othello Rendering ──────────────────────────────────────────────────── */
+
+function renderOthelloFrame(ctx, frame, size) {
+  const board = frame.board, sq = size/8, radius = sq*0.42;
+  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+    ctx.fillStyle = '#2E7D32'; ctx.fillRect(c*sq, r*sq, sq, sq);
+    ctx.strokeStyle = '#1B5E20'; ctx.lineWidth = 1; ctx.strokeRect(c*sq, r*sq, sq, sq);
+    if (board[r][c] !== 0) {
+      const cx = c*sq+sq/2, cy = r*sq+sq/2;
+      const isLast = frame.lastMove && frame.lastMove[0]===r && frame.lastMove[1]===c;
+      ctx.beginPath(); ctx.arc(cx+1, cy+1, radius, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2);
+      ctx.fillStyle = board[r][c]===1 ? ARC3[9] : ARC3[8]; ctx.fill();
+      if (isLast) { ctx.strokeStyle=ARC3[11]; ctx.lineWidth=2; ctx.stroke(); }
+    }
+  }
+}
+
+function renderOthelloPreview(canvas) {
+  const size=120; canvas.width=size; canvas.height=size;
+  const ctx=canvas.getContext('2d'), sq=size/8, radius=sq*0.38;
+  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+    ctx.fillStyle='#2E7D32'; ctx.fillRect(c*sq,r*sq,sq,sq);
+    ctx.strokeStyle='#1B5E20'; ctx.lineWidth=0.5; ctx.strokeRect(c*sq,r*sq,sq,sq);
+  }
+  for (const [r,c,p] of [[3,3,-1],[3,4,1],[4,3,1],[4,4,-1]]) {
+    ctx.beginPath(); ctx.arc(c*sq+sq/2,r*sq+sq/2,radius,0,Math.PI*2);
+    ctx.fillStyle = p===1 ? ARC3[9] : ARC3[8]; ctx.fill();
+  }
+}
+
+
+/* ── Othello Match Runner ───────────────────────────────────────────────── */
+
+function runOthelloMatch(config, strategyA, strategyB) {
+  const game = new OthelloGame();
+  const fnA = OTHELLO_STRATEGIES[strategyA].fn, fnB = OTHELLO_STRATEGIES[strategyB].fn;
+  const history = [];
+  const cnt0 = game.countPieces();
+  history.push({ turn:0, board:game.getBoard(), lastMove:null, agentA:null, agentB:null, winner:null, scoreA:cnt0.a, scoreB:cnt0.b });
+  while (!game.over) {
+    const isA = game.turn === 1;
+    const moves = game.getLegalMoves();
+    if (!moves.length) { game.passes++; game.turn*=-1; if (game.getLegalMoves().length===0) game._endGame(); continue; }
+    const result = (isA ? fnA : fnB)(game);
+    if (!result) { game.passes++; game.turn*=-1; continue; }
+    const moveName = othSqName(result.r, result.c);
+    game.makeMove(result.r, result.c);
+    const cnt = game.countPieces();
+    history.push({
+      turn: game.ply, board: game.getBoard(), lastMove: game.lastMove ? [...game.lastMove] : null,
+      agentA: isA ? { move: moveName, reasoning: result.reasoning } : null,
+      agentB: !isA ? { move: moveName, reasoning: result.reasoning } : null,
+      winner: game.winner, scoreA: cnt.a, scoreB: cnt.b,
+    });
+  }
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Go 9x9 Game Engine
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const GO_SIZE = 9, GO_KOMI = 6.5;
+const GO_LETTERS = 'ABCDEFGHJ';
+const GO_STAR = [[2,2],[2,6],[4,4],[6,2],[6,6]];
+
+class GoGame {
+  constructor(config = {}) {
+    this.size = GO_SIZE;
+    this.board = Array.from({length: this.size}, () => Array(this.size).fill(0));
+    this.turn = 1;  // 1 = Black (Agent A), -1 = White (Agent B)
+    this.ply = 0;
+    this.over = false;
+    this.winner = null;
+    this.lastMove = null;
+    this.prevBoard = null;
+    this.passes = 0;
+    this.capturedByA = 0;
+    this.capturedByB = 0;
+    this.maxPly = config.maxMoves || 120;
+  }
+
+  _getGroup(r, c) {
+    const color = this.board[r][c];
+    if (color === 0) return { stones: [], liberties: new Set() };
+    const stones = [], liberties = new Set(), visited = new Set([`${r},${c}`]);
+    const queue = [[r, c]];
+    while (queue.length) {
+      const [cr, cc] = queue.shift();
+      stones.push([cr, cc]);
+      for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nr = cr+dr, nc = cc+dc;
+        if (nr<0||nr>=this.size||nc<0||nc>=this.size) continue;
+        const key = `${nr},${nc}`;
+        if (visited.has(key)) continue;
+        if (this.board[nr][nc]===0) liberties.add(key);
+        else if (this.board[nr][nc]===color) { visited.add(key); queue.push([nr, nc]); }
+      }
+    }
+    return { stones, liberties };
+  }
+
+  _boardKey() { return this.board.map(r => r.join('')).join('/'); }
+
+  isLegalMove(r, c) {
+    if (r<0||r>=this.size||c<0||c>=this.size||this.board[r][c]!==0) return false;
+    this.board[r][c] = this.turn;
+
+    // Check captures
+    let captures = 0;
+    for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+      const nr = r+dr, nc = c+dc;
+      if (nr>=0&&nr<this.size&&nc>=0&&nc<this.size&&this.board[nr][nc]===-this.turn) {
+        if (this._getGroup(nr,nc).liberties.size===0) captures++;
+      }
+    }
+    const isSuicide = this._getGroup(r,c).liberties.size===0 && captures===0;
+
+    // Ko check
+    let isKo = false;
+    if (captures > 0 && !isSuicide) {
+      const saved = this.board.map(row => [...row]);
+      for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nr=r+dr, nc=c+dc;
+        if (nr>=0&&nr<this.size&&nc>=0&&nc<this.size&&this.board[nr][nc]===-this.turn) {
+          const g = this._getGroup(nr,nc);
+          if (g.liberties.size===0) for (const [sr,sc] of g.stones) this.board[sr][sc]=0;
+        }
+      }
+      if (this.prevBoard && this._boardKey()===this.prevBoard) isKo = true;
+      for (let i=0;i<this.size;i++) for (let j=0;j<this.size;j++) this.board[i][j]=saved[i][j];
+    }
+
+    this.board[r][c] = 0;
+    return !isSuicide && !isKo;
+  }
+
+  getLegalMoves() {
+    const moves = [];
+    for (let r=0;r<this.size;r++) for (let c=0;c<this.size;c++)
+      if (this.isLegalMove(r,c)) moves.push([r,c]);
+    return moves;
+  }
+
+  makeMove(r, c) {
+    if (!this.isLegalMove(r,c)) return false;
+    this.prevBoard = this._boardKey();
+    this.board[r][c] = this.turn;
+    this.lastMove = [r,c];
+    for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+      const nr=r+dr, nc=c+dc;
+      if (nr>=0&&nr<this.size&&nc>=0&&nc<this.size&&this.board[nr][nc]===-this.turn) {
+        const g = this._getGroup(nr,nc);
+        if (g.liberties.size===0) {
+          for (const [sr,sc] of g.stones) this.board[sr][sc]=0;
+          if (this.turn===1) this.capturedByA += g.stones.length;
+          else this.capturedByB += g.stones.length;
+        }
+      }
+    }
+    this.passes = 0; this.turn *= -1; this.ply++;
+    if (this.ply >= this.maxPly) this._endGame();
+    return true;
+  }
+
+  pass() {
+    this.prevBoard = this._boardKey();
+    this.passes++; this.lastMove = null; this.turn *= -1; this.ply++;
+    if (this.passes >= 2) this._endGame();
+  }
+
+  scoreTerritory() {
+    const visited = new Set();
+    let black = 0, white = 0;
+    for (let r=0;r<this.size;r++) for (let c=0;c<this.size;c++) {
+      if (this.board[r][c]===1) { black++; continue; }
+      if (this.board[r][c]===-1) { white++; continue; }
+      if (visited.has(`${r},${c}`)) continue;
+      const region = [], borders = new Set(), queue = [[r,c]];
+      visited.add(`${r},${c}`);
+      while (queue.length) {
+        const [cr,cc] = queue.shift(); region.push([cr,cc]);
+        for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          const nr=cr+dr, nc=cc+dc;
+          if (nr<0||nr>=this.size||nc<0||nc>=this.size) continue;
+          if (this.board[nr][nc]!==0) { borders.add(this.board[nr][nc]); continue; }
+          const key = `${nr},${nc}`;
+          if (!visited.has(key)) { visited.add(key); queue.push([nr,nc]); }
+        }
+      }
+      if (borders.size===1) {
+        const owner = borders.values().next().value;
+        if (owner===1) black += region.length; else white += region.length;
+      }
+    }
+    return { black, white: white + GO_KOMI };
+  }
+
+  _endGame() {
+    this.over = true;
+    const s = this.scoreTerritory();
+    this.winner = s.black > s.white ? 'A' : s.white > s.black ? 'B' : 'draw';
+  }
+
+  getBoard() { return this.board.map(r => [...r]); }
+}
+
+
+/* ── Go AI ──────────────────────────────────────────────────────────────── */
+
+const GO_POS_W = (() => {
+  const w = Array.from({length:9}, () => Array(9).fill(0));
+  for (let r=0;r<9;r++) for (let c=0;c<9;c++) {
+    const edge = Math.min(Math.min(r,8-r), Math.min(c,8-c));
+    w[r][c] = [0,2,5,4,3][Math.min(edge,4)];
+  }
+  for (const [r,c] of GO_STAR) w[r][c] += 2;
+  return w;
+})();
+
+function goMoveName(r, c) { return `${GO_LETTERS[c]}${GO_SIZE-r}`; }
+
+function goTerritorialAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  // Only pass if board is very full (>60 stones placed)
+  let stoneCount = 0;
+  for (let r=0;r<9;r++) for (let c=0;c<9;c++) if (game.board[r][c]!==0) stoneCount++;
+  if (stoneCount > 60 && game.ply > 50) return null;
+
+  const scored = moves.map(([r,c]) => {
+    let score = GO_POS_W[r][c];
+    // Connection bonus
+    for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+      const nr=r+dr, nc=c+dc;
+      if (nr>=0&&nr<9&&nc>=0&&nc<9) {
+        if (game.board[nr][nc]===game.turn) score += 3;
+        // Defend own groups in atari (urgent!)
+        if (game.board[nr][nc]===game.turn) {
+          const g = game._getGroup(nr,nc);
+          if (g.liberties.size===1) score += 20; // Save group
+          else if (g.liberties.size===2) score += 5;
+        }
+      }
+    }
+    game.board[r][c] = game.turn;
+    const g = game._getGroup(r,c);
+    if (g.liberties.size <= 1) score -= 15;
+    else score += Math.min(g.liberties.size, 4);
+    // Check if this move captures
+    let captures = 0;
+    for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+      const nr=r+dr, nc=c+dc;
+      if (nr>=0&&nr<9&&nc>=0&&nc<9&&game.board[nr][nc]===-game.turn) {
+        if (game._getGroup(nr,nc).liberties.size===0) captures++;
+      }
+    }
+    score += captures * 10;
+    game.board[r][c] = 0;
+    return { r, c, score, name: goMoveName(r,c) };
+  });
+  scored.sort((a,b) => b.score - a.score);
+  if (scored[0].score < -5) return null;
+  const top = scored.slice(0,3);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: ${m.score}`);
+  return { r:scored[0].r, c:scored[0].c, reasoning: `TERRITORIAL\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+function goAggressiveAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  let stoneCount = 0;
+  for (let r=0;r<9;r++) for (let c=0;c<9;c++) if (game.board[r][c]!==0) stoneCount++;
+  if (stoneCount > 60 && game.ply > 50) return null;
+  const opp = -game.turn;
+  const scored = moves.map(([r,c]) => {
+    let score = GO_POS_W[r][c];
+    game.board[r][c] = game.turn;
+    let captures = 0;
+    for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+      const nr=r+dr, nc=c+dc;
+      if (nr>=0&&nr<9&&nc>=0&&nc<9) {
+        if (game.board[nr][nc]===opp) {
+          const g = game._getGroup(nr,nc);
+          if (g.liberties.size===0) captures += g.stones.length;
+          else if (g.liberties.size===1) score += 8;
+          else if (g.liberties.size===2) score += 3;
+        }
+        if (game.board[nr][nc]===opp) score += 2;
+      }
+    }
+    score += captures * 15;
+    const own = game._getGroup(r,c);
+    if (own.liberties.size<=1 && captures===0) score -= 10;
+    game.board[r][c] = 0;
+    return { r, c, score, captures, name: goMoveName(r,c) };
+  });
+  scored.sort((a,b) => b.score - a.score);
+  if (scored[0].score < 0) return null;
+  const top = scored.slice(0,3);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: ${m.score}${m.captures?` (cap ${m.captures})`:''}`);
+  return { r:scored[0].r, c:scored[0].c, reasoning: `AGGRESSIVE\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+function goBalancedAI(game) {
+  const moves = game.getLegalMoves();
+  if (!moves.length) return null;
+  let stoneCount = 0;
+  for (let r=0;r<9;r++) for (let c=0;c<9;c++) if (game.board[r][c]!==0) stoneCount++;
+  if (stoneCount > 60 && game.ply > 50) return null;
+  const opp = -game.turn;
+  const scored = moves.map(([r,c]) => {
+    let score = GO_POS_W[r][c] * 2;
+    game.board[r][c] = game.turn;
+    let captures = 0;
+    for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+      const nr=r+dr, nc=c+dc;
+      if (nr>=0&&nr<9&&nc>=0&&nc<9&&game.board[nr][nc]===opp) {
+        const g = game._getGroup(nr,nc);
+        if (g.liberties.size===0) captures += g.stones.length;
+      }
+    }
+    score += captures * 12;
+    const own = game._getGroup(r,c);
+    score += Math.min(own.liberties.size, 4) * 2;
+    if (own.liberties.size<=1 && captures===0) score -= 15;
+    if (own.stones.length > 1) score += 3;
+    game.board[r][c] = 0;
+    return { r, c, score, name: goMoveName(r,c) };
+  });
+  scored.sort((a,b) => b.score - a.score);
+  if (scored[0].score < -5) return null;
+  const top = scored.slice(0,3);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: ${m.score}`);
+  return { r:scored[0].r, c:scored[0].c, reasoning: `BALANCED\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+const GO_STRATEGIES = {
+  territorial: { name: 'Territorial', fn: goTerritorialAI, desc: 'Claims corners and edges, builds territory',
+                 personality: { aggression: 20, caution: 80, greed: 70 } },
+  aggressive:  { name: 'Aggressive',  fn: goAggressiveAI,  desc: 'Invades, cuts, and captures opponent stones',
+                 personality: { aggression: 90, caution: 20, greed: 50 } },
+  balanced:    { name: 'Balanced',    fn: goBalancedAI,    desc: 'Balances territory, captures, and connection',
+                 personality: { aggression: 50, caution: 50, greed: 50 } },
+};
+
+
+/* ── Go Rendering ───────────────────────────────────────────────────────── */
+
+function renderGoFrame(ctx, frame, size) {
+  const board = frame.board, margin = size*0.06, inner = size-margin*2, step = inner/(GO_SIZE-1);
+  ctx.fillStyle = '#DEB887'; ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = '#8B7355'; ctx.lineWidth = 1;
+  for (let i=0;i<GO_SIZE;i++) {
+    const p = margin+i*step;
+    ctx.beginPath(); ctx.moveTo(margin,p); ctx.lineTo(size-margin,p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p,margin); ctx.lineTo(p,size-margin); ctx.stroke();
+  }
+  for (const [r,c] of GO_STAR) {
+    ctx.beginPath(); ctx.arc(margin+c*step, margin+r*step, 3, 0, Math.PI*2);
+    ctx.fillStyle='#8B7355'; ctx.fill();
+  }
+  const stoneR = step*0.45;
+  for (let r=0;r<GO_SIZE;r++) for (let c=0;c<GO_SIZE;c++) {
+    if (board[r][c]===0) continue;
+    const x=margin+c*step, y=margin+r*step;
+    const isLast = frame.lastMove && frame.lastMove[0]===r && frame.lastMove[1]===c;
+    ctx.beginPath(); ctx.arc(x+1.5,y+1.5,stoneR,0,Math.PI*2);
+    ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,stoneR,0,Math.PI*2);
+    ctx.fillStyle = board[r][c]===1 ? '#111' : '#EEE'; ctx.fill();
+    ctx.strokeStyle = board[r][c]===1 ? '#000' : '#CCC'; ctx.lineWidth=1; ctx.stroke();
+    if (isLast) {
+      ctx.beginPath(); ctx.arc(x,y,stoneR*0.35,0,Math.PI*2);
+      ctx.fillStyle = board[r][c]===1 ? '#FFF' : '#F00'; ctx.fill();
+    }
+  }
+  ctx.font = `bold ${margin*0.55}px monospace`; ctx.fillStyle='#8B7355';
+  for (let c=0;c<GO_SIZE;c++) { ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(GO_LETTERS[c], margin+c*step, size-margin+4); }
+  for (let r=0;r<GO_SIZE;r++) { ctx.textAlign='right'; ctx.textBaseline='middle'; ctx.fillText(String(GO_SIZE-r), margin-5, margin+r*step); }
+}
+
+function renderGoPreview(canvas) {
+  const size=120; canvas.width=size; canvas.height=size;
+  const ctx=canvas.getContext('2d'), margin=size*0.08, inner=size-margin*2, step=inner/8;
+  ctx.fillStyle='#DEB887'; ctx.fillRect(0,0,size,size);
+  ctx.strokeStyle='#8B7355'; ctx.lineWidth=0.5;
+  for (let i=0;i<9;i++) {
+    const p=margin+i*step;
+    ctx.beginPath(); ctx.moveTo(margin,p); ctx.lineTo(size-margin,p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p,margin); ctx.lineTo(p,size-margin); ctx.stroke();
+  }
+  for (const [r,c] of GO_STAR) {
+    ctx.beginPath(); ctx.arc(margin+c*step,margin+r*step,2,0,Math.PI*2);
+    ctx.fillStyle='#8B7355'; ctx.fill();
+  }
+  const sr = step*0.4;
+  for (const [r,c,p] of [[2,2,1],[2,6,-1],[3,3,1],[3,5,-1],[4,4,1],[5,3,-1],[6,6,1]]) {
+    ctx.beginPath(); ctx.arc(margin+c*step,margin+r*step,sr,0,Math.PI*2);
+    ctx.fillStyle = p===1 ? '#111' : '#EEE'; ctx.fill();
+    ctx.strokeStyle = p===1 ? '#000' : '#CCC'; ctx.lineWidth=0.5; ctx.stroke();
+  }
+}
+
+
+/* ── Go Match Runner ────────────────────────────────────────────────────── */
+
+function runGoMatch(config, strategyA, strategyB) {
+  const game = new GoGame(config);
+  const fnA = GO_STRATEGIES[strategyA].fn, fnB = GO_STRATEGIES[strategyB].fn;
+  const history = [];
+  history.push({ turn:0, board:game.getBoard(), lastMove:null, agentA:null, agentB:null, winner:null, scoreA:0, scoreB:GO_KOMI });
+  while (!game.over) {
+    const isA = game.turn === 1;
+    const result = (isA ? fnA : fnB)(game);
+    if (!result) {
+      game.pass();
+      const s = game.scoreTerritory();
+      history.push({
+        turn: game.ply, board: game.getBoard(), lastMove: null,
+        agentA: isA ? { move:'PASS', reasoning:'No good moves' } : null,
+        agentB: !isA ? { move:'PASS', reasoning:'No good moves' } : null,
+        winner: game.winner, scoreA: s.black, scoreB: s.white,
+      });
+    } else {
+      const moveName = goMoveName(result.r, result.c);
+      game.makeMove(result.r, result.c);
+      const s = game.scoreTerritory();
+      history.push({
+        turn: game.ply, board: game.getBoard(), lastMove: game.lastMove ? [...game.lastMove] : null,
+        agentA: isA ? { move:moveName, reasoning:result.reasoning } : null,
+        agentB: !isA ? { move:moveName, reasoning:result.reasoning } : null,
+        winner: game.winner, scoreA: s.black, scoreB: s.white,
+      });
+    }
+  }
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Gomoku (5-in-a-Row) Game Engine — 15x15 board
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const GMK_SIZE = 15;
+
+class GomokuGame {
+  constructor() {
+    this.size = GMK_SIZE;
+    this.board = Array.from({length: this.size}, () => Array(this.size).fill(0));
+    this.turn = 1; // 1 = Black (A), -1 = White (B)
+    this.ply = 0;
+    this.over = false;
+    this.winner = null;
+    this.lastMove = null;
+  }
+
+  getLegalMoves() {
+    const moves = [];
+    for (let r=0;r<this.size;r++) for (let c=0;c<this.size;c++)
+      if (this.board[r][c]===0) moves.push([r,c]);
+    return moves;
+  }
+
+  makeMove(r, c) {
+    if (this.board[r][c]!==0) return false;
+    this.board[r][c] = this.turn;
+    this.lastMove = [r, c];
+    this.ply++;
+    if (this._checkWin(r, c, this.turn)) {
+      this.over = true;
+      this.winner = this.turn===1 ? 'A' : 'B';
+    } else if (this.ply >= this.size*this.size) {
+      this.over = true;
+      this.winner = 'draw';
+    }
+    this.turn *= -1;
+    return true;
+  }
+
+  _checkWin(r, c, p) {
+    const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+    for (const [dr,dc] of dirs) {
+      let count = 1;
+      for (let i=1;i<5;i++) { const nr=r+dr*i,nc=c+dc*i; if (nr<0||nr>=this.size||nc<0||nc>=this.size||this.board[nr][nc]!==p) break; count++; }
+      for (let i=1;i<5;i++) { const nr=r-dr*i,nc=c-dc*i; if (nr<0||nr>=this.size||nc<0||nc>=this.size||this.board[nr][nc]!==p) break; count++; }
+      if (count >= 5) return true;
+    }
+    return false;
+  }
+
+  getBoard() { return this.board.map(r => [...r]); }
+}
+
+
+/* ── Gomoku AI ──────────────────────────────────────────────────────────── */
+
+function gmkLineScore(board, r, c, player, size) {
+  // Score a position by counting lines through it in all directions
+  const opp = -player;
+  const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+  let total = 0;
+  for (const [dr,dc] of dirs) {
+    let mine = 1, open = 0;
+    // Forward
+    let blocked = false;
+    for (let i=1;i<5;i++) {
+      const nr=r+dr*i, nc=c+dc*i;
+      if (nr<0||nr>=size||nc<0||nc>=size||board[nr][nc]===opp) { blocked=true; break; }
+      if (board[nr][nc]===player) mine++; else { open++; break; }
+    }
+    if (!blocked) open++;
+    // Backward
+    blocked = false;
+    for (let i=1;i<5;i++) {
+      const nr=r-dr*i, nc=c-dc*i;
+      if (nr<0||nr>=size||nc<0||nc>=size||board[nr][nc]===opp) { blocked=true; break; }
+      if (board[nr][nc]===player) mine++; else { open++; break; }
+    }
+    if (!blocked) open++;
+    // Score based on line length and openness
+    if (mine >= 5) total += 100000;
+    else if (mine === 4 && open >= 1) total += 10000;
+    else if (mine === 3 && open >= 2) total += 1000;
+    else if (mine === 3 && open === 1) total += 100;
+    else if (mine === 2 && open >= 2) total += 50;
+    else if (mine === 2 && open === 1) total += 10;
+  }
+  return total;
+}
+
+function gmkNearbyMoves(game, radius) {
+  // Only consider moves near existing stones (much faster than all 225 moves)
+  const moves = new Set();
+  for (let r=0;r<game.size;r++) for (let c=0;c<game.size;c++) {
+    if (game.board[r][c] === 0) continue;
+    for (let dr=-radius;dr<=radius;dr++) for (let dc=-radius;dc<=radius;dc++) {
+      const nr=r+dr, nc=c+dc;
+      if (nr>=0&&nr<game.size&&nc>=0&&nc<game.size&&game.board[nr][nc]===0) moves.add(nr*game.size+nc);
+    }
+  }
+  if (moves.size === 0) return [[7, 7]]; // First move: center
+  return [...moves].map(v => [Math.floor(v/game.size), v%game.size]);
+}
+
+function gmkOffensiveAI(game) {
+  const moves = gmkNearbyMoves(game, 2);
+  const scored = moves.map(([r,c]) => {
+    const attack = gmkLineScore(game.board, r, c, game.turn, game.size);
+    const defend = gmkLineScore(game.board, r, c, -game.turn, game.size);
+    return { r, c, score: attack * 1.2 + defend, attack, defend,
+             name: `${String.fromCharCode(65+c)}${game.size-r}` };
+  });
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0,3);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: atk ${m.attack} def ${m.defend}`);
+  return { r:scored[0].r, c:scored[0].c, reasoning: `OFFENSIVE\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+function gmkDefensiveAI(game) {
+  const moves = gmkNearbyMoves(game, 2);
+  const scored = moves.map(([r,c]) => {
+    const attack = gmkLineScore(game.board, r, c, game.turn, game.size);
+    const defend = gmkLineScore(game.board, r, c, -game.turn, game.size);
+    return { r, c, score: attack + defend * 1.5, attack, defend,
+             name: `${String.fromCharCode(65+c)}${game.size-r}` };
+  });
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0,3);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: atk ${m.attack} def ${m.defend}`);
+  return { r:scored[0].r, c:scored[0].c, reasoning: `DEFENSIVE\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+function gmkBalancedAI(game) {
+  const moves = gmkNearbyMoves(game, 2);
+  const scored = moves.map(([r,c]) => {
+    const attack = gmkLineScore(game.board, r, c, game.turn, game.size);
+    const defend = gmkLineScore(game.board, r, c, -game.turn, game.size);
+    // Center bonus
+    const cx = Math.abs(c - 7), cy = Math.abs(r - 7);
+    const center = Math.max(0, 7 - cx - cy) * 2;
+    return { r, c, score: attack + defend + center, attack, defend,
+             name: `${String.fromCharCode(65+c)}${game.size-r}` };
+  });
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0,3);
+  const lines = top.map((m,i) => `  ${i+1}. ${m.name}: ${m.score} (atk ${m.attack} def ${m.defend})`);
+  return { r:scored[0].r, c:scored[0].c, reasoning: `BALANCED\n${lines.join('\n')}\n=> ${scored[0].name}` };
+}
+
+const GMK_STRATEGIES = {
+  offensive: { name: 'Offensive', fn: gmkOffensiveAI, desc: 'Builds attacking lines, aims for 5-in-a-row fast',
+               personality: { aggression: 85, caution: 20, greed: 70 } },
+  defensive: { name: 'Defensive', fn: gmkDefensiveAI, desc: 'Blocks opponent threats, then builds own lines',
+               personality: { aggression: 25, caution: 90, greed: 40 } },
+  balanced:  { name: 'Balanced',  fn: gmkBalancedAI,  desc: 'Equal weight on attack, defense, and center control',
+               personality: { aggression: 50, caution: 55, greed: 55 } },
+};
+
+
+/* ── Gomoku Rendering ───────────────────────────────────────────────────── */
+
+function renderGomokuFrame(ctx, frame, size) {
+  const board = frame.board, bsz = board.length;
+  const margin = size*0.05, inner = size-margin*2, step = inner/(bsz-1);
+  ctx.fillStyle = '#DEB887'; ctx.fillRect(0,0,size,size);
+  ctx.strokeStyle = '#8B7355'; ctx.lineWidth = 0.8;
+  for (let i=0;i<bsz;i++) {
+    const p = margin+i*step;
+    ctx.beginPath(); ctx.moveTo(margin,p); ctx.lineTo(size-margin,p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p,margin); ctx.lineTo(p,size-margin); ctx.stroke();
+  }
+  // Star points (3-3, 3-11, 7-7, 11-3, 11-11)
+  for (const [r,c] of [[3,3],[3,11],[7,7],[11,3],[11,11]]) {
+    ctx.beginPath(); ctx.arc(margin+c*step, margin+r*step, 2.5, 0, Math.PI*2);
+    ctx.fillStyle='#8B7355'; ctx.fill();
+  }
+  const stoneR = step*0.44;
+  for (let r=0;r<bsz;r++) for (let c=0;c<bsz;c++) {
+    if (board[r][c]===0) continue;
+    const x=margin+c*step, y=margin+r*step;
+    const isLast = frame.lastMove && frame.lastMove[0]===r && frame.lastMove[1]===c;
+    ctx.beginPath(); ctx.arc(x+1,y+1,stoneR,0,Math.PI*2);
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,stoneR,0,Math.PI*2);
+    ctx.fillStyle = board[r][c]===1 ? '#111' : '#EEE'; ctx.fill();
+    ctx.strokeStyle = board[r][c]===1 ? '#000' : '#BBB'; ctx.lineWidth=0.8; ctx.stroke();
+    if (isLast) {
+      ctx.beginPath(); ctx.arc(x,y,stoneR*0.3,0,Math.PI*2);
+      ctx.fillStyle = board[r][c]===1 ? '#F00' : '#F00'; ctx.fill();
+    }
+  }
+}
+
+function renderGomokuPreview(canvas) {
+  const size=120; canvas.width=size; canvas.height=size;
+  const ctx=canvas.getContext('2d'), margin=size*0.06, inner=size-margin*2, step=inner/14;
+  ctx.fillStyle='#DEB887'; ctx.fillRect(0,0,size,size);
+  ctx.strokeStyle='#8B7355'; ctx.lineWidth=0.4;
+  for (let i=0;i<15;i++) {
+    const p=margin+i*step;
+    ctx.beginPath(); ctx.moveTo(margin,p); ctx.lineTo(size-margin,p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p,margin); ctx.lineTo(p,size-margin); ctx.stroke();
+  }
+  const sr=step*0.4;
+  // Sample game position
+  for (const [r,c,p] of [[7,7,1],[6,8,-1],[8,6,1],[5,9,-1],[6,6,1],[8,8,-1],[7,5,1]]) {
+    ctx.beginPath(); ctx.arc(margin+c*step,margin+r*step,sr,0,Math.PI*2);
+    ctx.fillStyle=p===1?'#111':'#EEE'; ctx.fill();
+    ctx.strokeStyle=p===1?'#000':'#BBB'; ctx.lineWidth=0.4; ctx.stroke();
+  }
+}
+
+
+/* ── Gomoku Match Runner ────────────────────────────────────────────────── */
+
+function runGomokuMatch(config, strategyA, strategyB) {
+  const game = new GomokuGame();
+  const fnA = GMK_STRATEGIES[strategyA].fn, fnB = GMK_STRATEGIES[strategyB].fn;
+  const history = [];
+  history.push({ turn:0, board:game.getBoard(), lastMove:null, agentA:null, agentB:null, winner:null, scoreA:0, scoreB:0 });
+  while (!game.over) {
+    const isA = game.turn === 1;
+    const result = (isA ? fnA : fnB)(game);
+    if (!result) break;
+    const name = `${String.fromCharCode(65+result.c)}${game.size-result.r}`;
+    game.makeMove(result.r, result.c);
+    // Score = number of stones placed
+    let sA=0, sB=0;
+    for (let r=0;r<game.size;r++) for (let c=0;c<game.size;c++) {
+      if (game.board[r][c]===1) sA++; if (game.board[r][c]===-1) sB++;
+    }
+    history.push({
+      turn: game.ply, board: game.getBoard(), lastMove: game.lastMove ? [...game.lastMove] : null,
+      agentA: isA ? { move:name, reasoning:result.reasoning } : null,
+      agentB: !isA ? { move:name, reasoning:result.reasoning } : null,
+      winner: game.winner, scoreA: sA, scoreB: sB,
+    });
+  }
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Artillery Game Engine — 2 tanks on terrain, move or shoot each turn
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const ART_W = 120, ART_H = 80;
+const ART_GRAVITY = 0.15;
+const ART_MAX_HP = 5;
+const ART_MOVE_DIST = 3;
+const ART_ANIM_FRAMES = 10;
+
+function artGenerateTerrain(seed) {
+  const rng = mulberry32(seed);
+  const terrain = new Array(ART_W);
+  terrain[0] = 30 + rng() * 15;
+  terrain[ART_W-1] = 30 + rng() * 15;
+  function subdivide(l, r, roughness) {
+    if (r - l < 2) return;
+    const mid = (l+r) >> 1;
+    terrain[mid] = (terrain[l]+terrain[r])/2 + (rng()-0.5)*roughness;
+    terrain[mid] = Math.max(10, Math.min(ART_H-10, terrain[mid]));
+    subdivide(l, mid, roughness*0.6);
+    subdivide(mid, r, roughness*0.6);
+  }
+  subdivide(0, ART_W-1, 20);
+  for (let i=0;i<ART_W;i++) if (terrain[i]===undefined) terrain[i] = 35;
+  return terrain.map(v => Math.round(v));
+}
+
+class ArtilleryGame {
+  constructor(config = {}) {
+    this.seed = config.seed || 42;
+    this.terrain = artGenerateTerrain(this.seed);
+    this.maxTurns = config.maxTurns || 20;
+    this.turn = 1;
+    this.ply = 0;
+    this.over = false;
+    this.winner = null;
+    this.lastShot = null;
+    this.lastMove = null;
+    this.tankA = { x: 10, hp: ART_MAX_HP };
+    this.tankB = { x: ART_W - 11, hp: ART_MAX_HP };
+    this.tankA.y = ART_H - this.terrain[this.tankA.x];
+    this.tankB.y = ART_H - this.terrain[this.tankB.x];
+    this.windRng = mulberry32(this.seed * 7 + 13);
+    this.wind = (this.windRng() - 0.5) * 0.4;
+  }
+
+  move(direction) {
+    if (this.over) return;
+    const isA = this.turn === 1;
+    const tank = isA ? this.tankA : this.tankB;
+    const delta = direction === 'left' ? -ART_MOVE_DIST : ART_MOVE_DIST;
+    tank.x = Math.max(2, Math.min(ART_W - 3, tank.x + delta));
+    tank.y = ART_H - this.terrain[tank.x];
+    this.lastMove = { tank: isA ? 'A' : 'B', direction };
+    this.lastShot = null;
+    this._endTurn();
+  }
+
+  shoot(angle, power) {
+    if (this.over) return;
+    const isA = this.turn === 1;
+    const tank = isA ? this.tankA : this.tankB;
+    const target = isA ? this.tankB : this.tankA;
+    const rad = angle * Math.PI / 180;
+    const vx = Math.cos(rad) * power * 0.5;
+    let vy = -Math.sin(rad) * power * 0.5;
+    let px = tank.x, py = tank.y - 2;
+    const trajectory = [[px, py]];
+    let hit = false, hitTarget = false;
+
+    for (let t = 0; t < 300; t++) {
+      px += vx + this.wind;
+      vy += ART_GRAVITY;
+      py += vy;
+      trajectory.push([px, py]);
+      const ix = Math.round(px);
+      if (ix < 0 || ix >= ART_W || py > ART_H) break;
+      if (py >= ART_H - this.terrain[Math.max(0, Math.min(ART_W-1, ix))]) {
+        hit = true;
+        if (Math.abs(ix - target.x) <= 4 && py >= target.y - 3) {
+          hitTarget = true;
+          target.hp--;
+          if (target.hp <= 0) { this.over = true; this.winner = isA ? 'A' : 'B'; }
+        }
+        break;
+      }
+    }
+
+    this.lastShot = { trajectory, hit, hitTarget, shooter: isA ? 'A' : 'B',
+                      angle, power, landX: trajectory[trajectory.length-1][0] };
+    this.lastMove = null;
+    this._endTurn();
+  }
+
+  _endTurn() {
+    this.ply++;
+    this.turn *= -1;
+    this.wind = (this.windRng() - 0.5) * 0.4;
+    if (!this.over && this.ply >= this.maxTurns * 2) {
+      this.over = true;
+      if (this.tankA.hp > this.tankB.hp) this.winner = 'A';
+      else if (this.tankB.hp > this.tankA.hp) this.winner = 'B';
+      else this.winner = 'draw';
+    }
+  }
+
+  getState() {
+    return {
+      terrain: [...this.terrain], turn: this.turn, ply: this.ply, wind: this.wind,
+      tankA: { ...this.tankA }, tankB: { ...this.tankB },
+      lastShot: this.lastShot, lastMove: this.lastMove,
+      over: this.over, winner: this.winner,
+    };
+  }
+}
+
+
+/* ── Artillery AI ───────────────────────────────────────────────────────── */
+
+function artSimulateShot(me, game, angle, power) {
+  const rad = angle * Math.PI / 180;
+  const vx = Math.cos(rad) * power * 0.5;
+  let px = me.x, py = me.y - 2, vy = -Math.sin(rad) * power * 0.5;
+  let landX = px;
+  for (let t = 0; t < 300; t++) {
+    px += vx + game.wind;
+    vy += ART_GRAVITY;
+    py += vy;
+    const ix = Math.round(px);
+    if (ix < 0 || ix >= ART_W || py > ART_H) { landX = px; break; }
+    if (py >= ART_H - game.terrain[Math.max(0, Math.min(ART_W-1, ix))]) { landX = px; break; }
+  }
+  return landX;
+}
+
+function artSniperAI(game) {
+  const isA = game.turn === 1;
+  const me = isA ? game.tankA : game.tankB;
+  const target = isA ? game.tankB : game.tankA;
+  const dx = target.x - me.x;
+  const direction = dx > 0 ? 1 : -1;
+
+  // Dodge if opponent's last shot landed close
+  if (game.lastShot && game.lastShot.shooter !== (isA ? 'A' : 'B') && game.lastShot.hit) {
+    const landDist = Math.abs(game.lastShot.landX - me.x);
+    if (landDist < 6) {
+      const dodgeDir = game.lastShot.landX > me.x ? 'left' : 'right';
+      return { type: 'move', direction: dodgeDir,
+        reasoning: `SNIPER\n  Incoming ${landDist.toFixed(1)} away\n  Dodging ${dodgeDir}` };
+    }
+  }
+
+  // Precision shot with wind compensation
+  let bestAngle = 0, bestPower = 5, bestDist = Infinity;
+  for (let ang = 30; ang <= 80; ang += 2) {
+    for (let pow = 3; pow <= 10; pow += 0.5) {
+      const realAngle = direction > 0 ? ang : 180 - ang;
+      const landX = artSimulateShot(me, game, realAngle, pow);
+      const d = Math.abs(landX - target.x);
+      if (d < bestDist) { bestDist = d; bestAngle = realAngle; bestPower = pow; }
+    }
+  }
+  const lines = [`  Target: x=${target.x}  Wind: ${game.wind.toFixed(2)}`,
+    `  Aim: ${bestAngle.toFixed(0)}\u00b0 P${bestPower.toFixed(1)}  Miss: ${bestDist.toFixed(1)}`];
+  return { type: 'shoot', angle: bestAngle, power: bestPower,
+    reasoning: `SNIPER\n${lines.join('\n')}` };
+}
+
+function artLobberAI(game) {
+  const isA = game.turn === 1;
+  const me = isA ? game.tankA : game.tankB;
+  const target = isA ? game.tankB : game.tankA;
+  const dx = target.x - me.x;
+  const direction = dx > 0 ? 1 : -1;
+
+  // Occasionally reposition forward
+  const moveRng = mulberry32(game.ply * 37 + game.seed);
+  if (moveRng() < 0.2 && Math.abs(dx) > 20) {
+    const moveDir = direction > 0 ? 'right' : 'left';
+    return { type: 'move', direction: moveDir,
+      reasoning: `LOBBER\n  Closing distance\n  Moving ${moveDir}` };
+  }
+
+  // High arc shots with wind compensation
+  let bestAngle = 0, bestPower = 5, bestDist = Infinity;
+  for (let ang = 55; ang <= 82; ang += 2) {
+    for (let pow = 4; pow <= 10; pow += 0.5) {
+      const realAngle = direction > 0 ? ang : 180 - ang;
+      const landX = artSimulateShot(me, game, realAngle, pow);
+      const d = Math.abs(landX - target.x);
+      if (d < bestDist) { bestDist = d; bestAngle = realAngle; bestPower = pow; }
+    }
+  }
+  const lines = [`  High arc to x=${target.x}`, `  Aim: ${bestAngle.toFixed(0)}\u00b0 P${bestPower.toFixed(1)}`];
+  return { type: 'shoot', angle: bestAngle, power: bestPower,
+    reasoning: `LOBBER\n${lines.join('\n')}` };
+}
+
+function artRandomizerAI(game) {
+  const isA = game.turn === 1;
+  const me = isA ? game.tankA : game.tankB;
+  const target = isA ? game.tankB : game.tankA;
+  const dx = target.x - me.x;
+  const direction = dx > 0 ? 1 : -1;
+
+  // Move ~33% of turns
+  const moveRng = mulberry32(game.ply * 53 + game.seed);
+  if (moveRng() < 0.33) {
+    const dirRng = mulberry32(game.ply * 71 + game.seed);
+    const moveDir = dirRng() < 0.5 ? 'left' : 'right';
+    return { type: 'move', direction: moveDir,
+      reasoning: `WILDCARD\n  Chaos move ${moveDir}!` };
+  }
+
+  // Jittery shot
+  const jitterRng = mulberry32(game.ply * 137 + game.seed);
+  const jitter = (jitterRng() - 0.5) * 12;
+  let bestAngle = 0, bestPower = 5, bestDist = Infinity;
+  for (let ang = 35; ang <= 78; ang += 3) {
+    for (let pow = 3; pow <= 10; pow += 0.7) {
+      const realAngle = direction > 0 ? ang + jitter : 180 - ang - jitter;
+      const landX = artSimulateShot(me, game, realAngle, pow);
+      const d = Math.abs(landX - target.x);
+      if (d < bestDist) { bestDist = d; bestAngle = realAngle; bestPower = pow; }
+    }
+  }
+  const lines = [`  Jitter: ${jitter.toFixed(1)}\u00b0`, `  Aim: ${bestAngle.toFixed(0)}\u00b0 P${bestPower.toFixed(1)}`];
+  return { type: 'shoot', angle: bestAngle, power: bestPower,
+    reasoning: `WILDCARD\n${lines.join('\n')}` };
+}
+
+const ART_STRATEGIES = {
+  sniper:     { name: 'Sniper',   fn: artSniperAI,     desc: 'Precise targeting with wind compensation, dodges incoming fire',
+                personality: { aggression: 60, caution: 70, greed: 50 } },
+  lobber:     { name: 'Lobber',   fn: artLobberAI,     desc: 'High arc shots, repositions to close distance',
+                personality: { aggression: 40, caution: 50, greed: 60 } },
+  randomizer: { name: 'Wildcard', fn: artRandomizerAI, desc: 'Unpredictable movement and jittery aim',
+                personality: { aggression: 80, caution: 15, greed: 70 } },
+};
+
+
+/* ── Artillery Rendering ────────────────────────────────────────────────── */
+
+function renderArtilleryFrame(ctx, frame, size) {
+  const state = frame.state;
+  const scaleX = size / ART_W, scaleY = size / ART_H;
+
+  // Sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, size);
+  skyGrad.addColorStop(0, '#1a1a2e'); skyGrad.addColorStop(1, '#16213e');
+  ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, size, size);
+
+  // Terrain fill
+  ctx.beginPath(); ctx.moveTo(0, size);
+  for (let x = 0; x < ART_W; x++) ctx.lineTo(x * scaleX, (ART_H - state.terrain[x]) * scaleY);
+  ctx.lineTo(size, size); ctx.closePath();
+  ctx.fillStyle = '#2d5a27'; ctx.fill();
+  // Terrain outline
+  ctx.beginPath();
+  for (let x = 0; x < ART_W; x++) ctx[x === 0 ? 'moveTo' : 'lineTo'](x * scaleX, (ART_H - state.terrain[x]) * scaleY);
+  ctx.strokeStyle = '#4a8c3f'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Trajectory trail (partial during flight, full on impact)
+  if (frame.trail && frame.trail.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(frame.trail[0][0]*scaleX, frame.trail[0][1]*scaleY);
+    for (let i = 1; i < frame.trail.length; i++) ctx.lineTo(frame.trail[i][0]*scaleX, frame.trail[i][1]*scaleY);
+    ctx.strokeStyle = frame.shooter === 'A' ? 'rgba(249,60,49,0.5)' : 'rgba(255,133,27,0.5)';
+    ctx.lineWidth = 1.5; ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // Fallback: static trajectory from lastShot (non-animated frames)
+  else if (state.lastShot && state.lastShot.trajectory.length > 1) {
+    const traj = state.lastShot.trajectory;
+    ctx.beginPath();
+    ctx.moveTo(traj[0][0]*scaleX, traj[0][1]*scaleY);
+    for (let i = 1; i < traj.length; i++) ctx.lineTo(traj[i][0]*scaleX, traj[i][1]*scaleY);
+    ctx.strokeStyle = state.lastShot.shooter === 'A' ? 'rgba(249,60,49,0.5)' : 'rgba(255,133,27,0.5)';
+    ctx.lineWidth = 1.5; ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+    const end = traj[traj.length-1];
+    ctx.beginPath(); ctx.arc(end[0]*scaleX, end[1]*scaleY, state.lastShot.hitTarget ? 8 : 4, 0, Math.PI*2);
+    ctx.fillStyle = state.lastShot.hitTarget ? ARC3[11] : 'rgba(255,200,50,0.5)'; ctx.fill();
+  }
+
+  // Projectile in flight
+  if (frame.projectile) {
+    const px = frame.projectile.x * scaleX, py = frame.projectile.y * scaleY;
+    ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,220,0,0.25)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2);
+    ctx.fillStyle = ARC3[11]; ctx.fill();
+    ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // Impact explosion
+  if (frame.impact) {
+    const ix = frame.impact.x * scaleX, iy = frame.impact.y * scaleY;
+    const r = frame.impact.hitTarget ? 14 : 8;
+    ctx.beginPath(); ctx.arc(ix, iy, r, 0, Math.PI*2);
+    ctx.fillStyle = frame.impact.hitTarget ? 'rgba(249,60,49,0.5)' : 'rgba(255,200,50,0.35)';
+    ctx.fill();
+    ctx.beginPath(); ctx.arc(ix, iy, r * 0.5, 0, Math.PI*2);
+    ctx.fillStyle = ARC3[11]; ctx.fill();
+    ctx.beginPath(); ctx.arc(ix, iy, r * 0.2, 0, Math.PI*2);
+    ctx.fillStyle = '#FFF'; ctx.fill();
+  }
+
+  // Tanks
+  const drawTank = (tank, color, label) => {
+    const tx = tank.x * scaleX, ty = tank.y * scaleY;
+    ctx.fillStyle = color;
+    ctx.fillRect(tx - 6*scaleX, ty - 3*scaleY, 12*scaleX, 3*scaleY);
+    ctx.fillRect(tx - 2*scaleX, ty - 5*scaleY, 4*scaleX, 2*scaleY);
+    const hpW = 14 * scaleX, hpH = 2 * scaleY;
+    ctx.fillStyle = '#333'; ctx.fillRect(tx - hpW/2, ty - 8*scaleY, hpW, hpH);
+    ctx.fillStyle = tank.hp > 1 ? ARC3[14] : ARC3[8];
+    ctx.fillRect(tx - hpW/2, ty - 8*scaleY, hpW * (tank.hp / ART_MAX_HP), hpH);
+    ctx.font = `bold ${10*scaleX}px monospace`; ctx.fillStyle = '#FFF';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(label, tx, ty - 9*scaleY);
+  };
+  drawTank(state.tankA, ARC3[8], 'A');
+  drawTank(state.tankB, ARC3[12], 'B');
+
+  // HUD
+  ctx.font = `bold ${12}px monospace`; ctx.fillStyle = ARC3[2];
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  const windStr = state.wind > 0.01 ? 'Wind >>' : state.wind < -0.01 ? '<< Wind' : 'Calm';
+  ctx.fillText(`HP: A=${state.tankA.hp}  B=${state.tankB.hp}  ${windStr}`, 8, 8);
+}
+
+function renderArtilleryPreview(canvas) {
+  const size = 120; canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const scaleX = size/ART_W, scaleY = size/ART_H;
+  ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, 0, size, size);
+  const terrain = artGenerateTerrain(42);
+  ctx.beginPath(); ctx.moveTo(0, size);
+  for (let x=0;x<ART_W;x++) ctx.lineTo(x*scaleX, (ART_H-terrain[x])*scaleY);
+  ctx.lineTo(size, size); ctx.closePath();
+  ctx.fillStyle = '#2d5a27'; ctx.fill();
+  ctx.fillStyle = ARC3[8]; ctx.fillRect(10*scaleX-3, (ART_H-terrain[10])*scaleY-4, 6, 3);
+  ctx.fillStyle = ARC3[12]; ctx.fillRect((ART_W-11)*scaleX-3, (ART_H-terrain[ART_W-11])*scaleY-4, 6, 3);
+  ctx.beginPath(); ctx.moveTo(12*scaleX, (ART_H-terrain[10]-5)*scaleY);
+  ctx.quadraticCurveTo(size/2, size*0.15, (ART_W-11)*scaleX, (ART_H-terrain[ART_W-11]-3)*scaleY);
+  ctx.strokeStyle = 'rgba(249,60,49,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([2,2]); ctx.stroke(); ctx.setLineDash([]);
+}
+
+
+/* ── Artillery Match Runner ─────────────────────────────────────────────── */
+
+function runArtilleryMatch(config, strategyA, strategyB) {
+  const game = new ArtilleryGame(config);
+  const fnA = ART_STRATEGIES[strategyA].fn, fnB = ART_STRATEGIES[strategyB].fn;
+  const history = [];
+
+  // Initial frame
+  history.push({ turn: 0, state: game.getState(), agentA: null, agentB: null,
+    winner: null, scoreA: ART_MAX_HP, scoreB: ART_MAX_HP,
+    projectile: null, impact: null, trail: null, shooter: null });
+
+  while (!game.over) {
+    const isA = game.turn === 1;
+    const turnNum = game.ply + 1;
+    const result = (isA ? fnA : fnB)(game);
+
+    if (result.type === 'move') {
+      const tank = isA ? game.tankA : game.tankB;
+      const fromX = tank.x;
+      game.move(result.direction);
+      const postState = game.getState();
+      const toX = (isA ? postState.tankA : postState.tankB).x;
+
+      // 4 slide frames for tank movement animation
+      for (let f = 0; f <= 3; f++) {
+        const t = f / 3;
+        const interpX = Math.round(fromX + (toX - fromX) * t);
+        const clampX = Math.max(0, Math.min(ART_W - 1, interpX));
+        const frameState = JSON.parse(JSON.stringify(postState));
+        const movingTank = isA ? frameState.tankA : frameState.tankB;
+        movingTank.x = f === 3 ? toX : clampX;
+        movingTank.y = ART_H - frameState.terrain[Math.max(0, Math.min(ART_W-1, movingTank.x))];
+
+        const agent = f === 0 ? { move: `Move ${result.direction}`, reasoning: result.reasoning } : null;
+        history.push({
+          turn: turnNum, state: frameState,
+          agentA: isA ? agent : null, agentB: isA ? null : agent,
+          winner: f === 3 ? game.winner : null,
+          scoreA: frameState.tankA.hp, scoreB: frameState.tankB.hp,
+          projectile: null, impact: null, trail: null, shooter: null,
+        });
+      }
+
+    } else {
+      // Shoot — capture pre-shot state for in-flight frames
+      const preHpA = game.tankA.hp, preHpB = game.tankB.hp;
+      const preTankA = { ...game.tankA }, preTankB = { ...game.tankB };
+      const shooter = isA ? 'A' : 'B';
+
+      game.shoot(result.angle, result.power);
+      const postState = game.getState();
+      const trajectory = game.lastShot.trajectory;
+      const hitTarget = game.lastShot.hitTarget;
+
+      // Sample points along trajectory for projectile animation
+      const totalPts = trajectory.length;
+      const numSamples = Math.min(ART_ANIM_FRAMES, totalPts);
+      const indices = [];
+      for (let i = 0; i < numSamples; i++) indices.push(Math.floor(i * (totalPts - 1) / Math.max(1, numSamples - 1)));
+      if (indices[indices.length - 1] !== totalPts - 1) indices.push(totalPts - 1);
+
+      for (let fi = 0; fi < indices.length; fi++) {
+        const idx = indices[fi];
+        const isLast = fi === indices.length - 1;
+        const pt = trajectory[idx];
+
+        // In-flight frames use pre-shot HP, impact frame uses post-shot HP
+        const frameState = JSON.parse(JSON.stringify(postState));
+        if (!isLast) {
+          frameState.tankA = { ...preTankA };
+          frameState.tankB = { ...preTankB };
+          frameState.lastShot = null;
+        }
+
+        const agent = fi === 0
+          ? { move: `${result.angle.toFixed(0)}\u00b0 P${result.power.toFixed(1)}`, reasoning: result.reasoning }
+          : null;
+
+        history.push({
+          turn: turnNum, state: frameState,
+          agentA: isA ? agent : null, agentB: isA ? null : agent,
+          winner: isLast ? game.winner : null,
+          scoreA: isLast ? postState.tankA.hp : preHpA,
+          scoreB: isLast ? postState.tankB.hp : preHpB,
+          projectile: isLast ? null : { x: pt[0], y: pt[1] },
+          impact: isLast ? { x: pt[0], y: pt[1], hitTarget } : null,
+          trail: trajectory.slice(0, idx + 1),
+          shooter,
+        });
+      }
+    }
+  }
+
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Poker Game Engine — Texas Hold'em, 2 players, incomplete information
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const PKR_RANKS = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+const PKR_SUITS = ['\u2660','\u2665','\u2666','\u2663'];
+const PKR_SUIT_COLORS = ['#FFFFFF', '#F93C31', '#F93C31', '#FFFFFF'];
+const PKR_START_CHIPS = 100;
+const PKR_SMALL_BLIND = 1;
+const PKR_BIG_BLIND = 2;
+const PKR_HANDS = 10;
+
+function pkrMakeDeck(rng) {
+  const deck = [];
+  for (let s = 0; s < 4; s++)
+    for (let r = 0; r < 13; r++) deck.push({ rank: r, suit: s });
+  // Fisher-Yates shuffle with seeded RNG
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function pkrCardStr(card) {
+  return PKR_RANKS[card.rank] + PKR_SUITS[card.suit];
+}
+
+// Hand evaluation — returns [category, ...tiebreakers] (higher = better)
+// Categories: 0=high card, 1=pair, 2=two pair, 3=trips, 4=straight, 5=flush,
+//             6=full house, 7=quads, 8=straight flush
+function pkrEvalHand5(cards) {
+  const ranks = cards.map(c => c.rank).sort((a,b) => b-a);
+  const suits = cards.map(c => c.suit);
+  const isFlush = suits.every(s => s === suits[0]);
+
+  // Check straight
+  let isStraight = false;
+  let straightHigh = ranks[0];
+  if (ranks[0]-ranks[4] === 4 && new Set(ranks).size === 5) isStraight = true;
+  // Wheel (A-2-3-4-5)
+  if (ranks[0] === 12 && ranks[1] === 3 && ranks[2] === 2 && ranks[3] === 1 && ranks[4] === 0) {
+    isStraight = true; straightHigh = 3;
+  }
+
+  if (isFlush && isStraight) return [8, straightHigh];
+
+  // Count rank frequencies
+  const freq = {};
+  for (const r of ranks) freq[r] = (freq[r]||0) + 1;
+  const groups = Object.entries(freq).map(([r,c]) => [c, parseInt(r)]).sort((a,b) => b[0]-a[0] || b[1]-a[1]);
+
+  if (groups[0][0] === 4) return [7, groups[0][1], groups[1][1]];
+  if (groups[0][0] === 3 && groups[1] && groups[1][0] === 2) return [6, groups[0][1], groups[1][1]];
+  if (isFlush) return [5, ...ranks];
+  if (isStraight) return [4, straightHigh];
+  if (groups[0][0] === 3) return [3, groups[0][1], ...groups.slice(1).map(g=>g[1])];
+  if (groups[0][0] === 2 && groups[1] && groups[1][0] === 2) return [2, Math.max(groups[0][1],groups[1][1]), Math.min(groups[0][1],groups[1][1]), groups[2][1]];
+  if (groups[0][0] === 2) return [1, groups[0][1], ...groups.slice(1).map(g=>g[1])];
+  return [0, ...ranks];
+}
+
+// Best 5-card hand from 7 cards
+function pkrBestHand(cards) {
+  let best = null;
+  for (let i = 0; i < 7; i++) {
+    for (let j = i+1; j < 7; j++) {
+      const hand5 = cards.filter((_,k) => k!==i && k!==j);
+      const score = pkrEvalHand5(hand5);
+      if (!best || pkrCompareScores(score, best.score) > 0) {
+        best = { cards: hand5, score };
+      }
+    }
+  }
+  return best;
+}
+
+function pkrCompareScores(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i]||0) !== (b[i]||0)) return (a[i]||0) - (b[i]||0);
+  }
+  return 0;
+}
+
+const PKR_HAND_NAMES = ['High Card','Pair','Two Pair','Three of a Kind','Straight','Flush','Full House','Four of a Kind','Straight Flush'];
+
+function pkrHandName(score) {
+  return PKR_HAND_NAMES[score[0]] || 'Unknown';
+}
+
+// Simple hand strength estimator (0-1) for AI decision-making
+function pkrHandStrength(holeCards, communityCards) {
+  const r1 = holeCards[0].rank, r2 = holeCards[1].rank;
+  const suited = holeCards[0].suit === holeCards[1].suit;
+  const highR = Math.max(r1, r2), lowR = Math.min(r1, r2);
+
+  // Pre-flop: simplified Chen formula
+  if (communityCards.length === 0) {
+    let str = highR / 12;
+    if (r1 === r2) str = Math.min(1, str + 0.35);
+    if (suited) str = Math.min(1, str + 0.08);
+    if (highR - lowR <= 2 && highR - lowR > 0) str = Math.min(1, str + 0.06);
+    return str;
+  }
+
+  // Post-flop: evaluate actual hand strength
+  const all = [...holeCards, ...communityCards];
+  if (all.length >= 5) {
+    // Pad to 7 if needed (turn/flop has fewer)
+    const padded = all.length < 7
+      ? [...all, ...Array(7-all.length).fill(null)].filter(Boolean)
+      : all;
+    if (padded.length >= 7) {
+      const best = pkrBestHand(padded);
+      return Math.min(1, 0.15 + best.score[0] * 0.1 + highR * 0.02);
+    }
+    // 5 or 6 cards — evaluate directly
+    const best5 = padded.length === 5 ? pkrEvalHand5(padded)
+      : (() => { let b=null; for(let i=0;i<padded.length;i++){const h=padded.filter((_,j)=>j!==i);const s=pkrEvalHand5(h);if(!b||pkrCompareScores(s,b)>0)b=s;} return b; })();
+    return Math.min(1, 0.15 + best5[0] * 0.1 + highR * 0.02);
+  }
+  return 0.3;
+}
+
+
+/* ── Poker AI ──────────────────────────────────────────────────────────── */
+
+function pkrTightAI(myCards, community, pot, myChips, oppChips, toCall, canRaise, phase, ply, seed) {
+  const str = pkrHandStrength(myCards, community);
+
+  // Pre-flop: only play strong hands
+  if (phase === 'preflop') {
+    if (str < 0.35) {
+      if (toCall === 0) return { action: 'check', amount: 0, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 check` };
+      return { action: 'fold', amount: 0, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 too weak, fold` };
+    }
+    if (str > 0.7 && canRaise) {
+      const raise = Math.min(pot, myChips);
+      return { action: 'raise', amount: raise, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 premium, raise ${raise}` };
+    }
+  }
+
+  // Post-flop: play made hands
+  if (str > 0.6 && canRaise) {
+    const raise = Math.min(Math.ceil(pot * 0.6), myChips);
+    return { action: 'raise', amount: raise, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}%\n  Strong, raise ${raise}` };
+  }
+  if (str > 0.3 || (toCall > 0 && toCall <= myChips * 0.15)) {
+    if (toCall === 0) return { action: 'check', amount: 0, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 check` };
+    return { action: 'call', amount: toCall, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 call ${toCall}` };
+  }
+  if (toCall === 0) return { action: 'check', amount: 0, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 check` };
+  return { action: 'fold', amount: 0, reasoning: `TIGHT\n  Str: ${(str*100).toFixed(0)}% \u2014 fold` };
+}
+
+function pkrAggressiveAI(myCards, community, pot, myChips, oppChips, toCall, canRaise, phase, ply, seed) {
+  const str = pkrHandStrength(myCards, community);
+  const bluffRng = mulberry32(ply * 97 + seed);
+  const willBluff = bluffRng() < 0.25;
+
+  // Raise frequently
+  if (canRaise && (str > 0.4 || willBluff)) {
+    const raise = Math.min(Math.ceil(pot * 0.75), myChips);
+    const label = willBluff && str < 0.4 ? 'BLUFF' : 'Value';
+    return { action: 'raise', amount: raise, reasoning: `AGGRO\n  Str: ${(str*100).toFixed(0)}%\n  ${label} raise ${raise}` };
+  }
+
+  if (toCall === 0) return { action: 'check', amount: 0, reasoning: `AGGRO\n  Str: ${(str*100).toFixed(0)}% \u2014 check` };
+  if (str > 0.25 || toCall <= myChips * 0.2) {
+    return { action: 'call', amount: toCall, reasoning: `AGGRO\n  Str: ${(str*100).toFixed(0)}% \u2014 call ${toCall}` };
+  }
+  return { action: 'fold', amount: 0, reasoning: `AGGRO\n  Str: ${(str*100).toFixed(0)}% \u2014 fold` };
+}
+
+function pkrCalculatorAI(myCards, community, pot, myChips, oppChips, toCall, canRaise, phase, ply, seed) {
+  const str = pkrHandStrength(myCards, community);
+  const potOdds = toCall > 0 ? toCall / (pot + toCall) : 0;
+  const equity = str;
+
+  // Bet when equity beats pot odds
+  if (canRaise && equity > 0.55) {
+    const raise = Math.min(Math.ceil(pot * equity), myChips);
+    return { action: 'raise', amount: raise,
+      reasoning: `CALC\n  Equity: ${(equity*100).toFixed(0)}% > Odds: ${(potOdds*100).toFixed(0)}%\n  +EV raise ${raise}` };
+  }
+
+  if (toCall === 0) return { action: 'check', amount: 0,
+    reasoning: `CALC\n  Equity: ${(equity*100).toFixed(0)}% \u2014 check` };
+
+  if (equity > potOdds + 0.05) {
+    return { action: 'call', amount: toCall,
+      reasoning: `CALC\n  Equity: ${(equity*100).toFixed(0)}% > Odds: ${(potOdds*100).toFixed(0)}%\n  +EV call` };
+  }
+
+  return { action: 'fold', amount: 0,
+    reasoning: `CALC\n  Equity: ${(equity*100).toFixed(0)}% < Odds: ${(potOdds*100).toFixed(0)}%\n  -EV, fold` };
+}
+
+const PKR_STRATEGIES = {
+  tight:      { name: 'Tight',      fn: pkrTightAI,      desc: 'Only plays strong hands, patient and selective',
+                personality: { aggression: 30, caution: 85, greed: 40 } },
+  aggressive: { name: 'Aggressive', fn: pkrAggressiveAI,  desc: 'Raises often, bluffs ~25% of the time',
+                personality: { aggression: 85, caution: 20, greed: 70 } },
+  calculator: { name: 'Calculator', fn: pkrCalculatorAI, desc: 'Math-based: pot odds and equity calculations',
+                personality: { aggression: 50, caution: 60, greed: 55 } },
+};
+
+
+/* ── Poker Rendering ──────────────────────────────────────────────────── */
+
+function renderPokerCard(ctx, x, y, w, h, card, faceDown) {
+  const r = 3;
+  ctx.beginPath();
+  ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+  ctx.fillStyle = faceDown ? '#2a4a7f' : '#FFFFF0';
+  ctx.fill();
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.stroke();
+
+  if (faceDown) {
+    ctx.fillStyle = '#1a3a6f';
+    ctx.fillRect(x+3, y+3, w-6, h-6);
+    ctx.strokeStyle = '#4a7acf'; ctx.lineWidth = 0.5;
+    ctx.strokeRect(x+5, y+5, w-10, h-10);
+    return;
+  }
+
+  const color = PKR_SUIT_COLORS[card.suit];
+  ctx.fillStyle = color;
+  ctx.font = `bold ${Math.floor(h*0.35)}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText(PKR_RANKS[card.rank], x + w/2, y + 2);
+  ctx.font = `${Math.floor(h*0.3)}px serif`;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(PKR_SUITS[card.suit], x + w/2, y + h*0.65);
+}
+
+function renderPokerFrame(ctx, frame, size) {
+  const state = frame.state;
+  const cardW = size * 0.07, cardH = cardW * 1.4;
+
+  // Felt background
+  const feltGrad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size*0.7);
+  feltGrad.addColorStop(0, '#1a5c2a'); feltGrad.addColorStop(1, '#0d3318');
+  ctx.fillStyle = feltGrad; ctx.fillRect(0, 0, size, size);
+
+  // Table oval
+  ctx.beginPath(); ctx.ellipse(size/2, size/2, size*0.42, size*0.32, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#1e6b34'; ctx.fill();
+  ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 4; ctx.stroke();
+
+  // Phase label
+  ctx.font = `bold ${size*0.03}px monospace`; ctx.fillStyle = '#AAA';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const phaseLabel = state.phase === 'showdown' ? 'SHOWDOWN' : state.phase.toUpperCase();
+  ctx.fillText(`Hand ${state.handNum}/${PKR_HANDS}  \u2022  ${phaseLabel}`, size/2, size*0.03);
+
+  // Pot
+  ctx.font = `bold ${size*0.04}px monospace`; ctx.fillStyle = ARC3[11];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(`Pot: ${state.pot}`, size/2, size*0.38);
+
+  // Community cards (center)
+  const commX = size/2 - (5 * (cardW + 4)) / 2;
+  const commY = size * 0.43;
+  for (let i = 0; i < 5; i++) {
+    const card = state.community[i];
+    if (card) renderPokerCard(ctx, commX + i*(cardW+4), commY, cardW, cardH, card, false);
+    else {
+      ctx.strokeStyle = '#2a5a3a'; ctx.lineWidth = 1;
+      ctx.strokeRect(commX + i*(cardW+4), commY, cardW, cardH);
+    }
+  }
+
+  // Player A cards (bottom-left)
+  const aY = size * 0.78;
+  const aX = size * 0.25;
+  ctx.font = `bold ${size*0.03}px monospace`; ctx.fillStyle = ARC3[8];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText(`A: ${state.chipsA} chips`, aX + cardW, aY - 4);
+  if (state.holeA) {
+    renderPokerCard(ctx, aX, aY, cardW, cardH, state.holeA[0], false);
+    renderPokerCard(ctx, aX + cardW + 4, aY, cardW, cardH, state.holeA[1], false);
+  }
+  if (state.currentBetA > 0) {
+    ctx.font = `${size*0.025}px monospace`; ctx.fillStyle = ARC3[11];
+    ctx.textAlign = 'center';
+    ctx.fillText(`Bet: ${state.currentBetA}`, aX + cardW, aY + cardH + 14);
+  }
+
+  // Player B cards (top-right)
+  const bY = size * 0.1;
+  const bX = size * 0.58;
+  ctx.font = `bold ${size*0.03}px monospace`; ctx.fillStyle = ARC3[12];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText(`B: ${state.chipsB} chips`, bX + cardW, bY - 4);
+  if (state.holeB) {
+    renderPokerCard(ctx, bX, bY, cardW, cardH, state.holeB[0], false);
+    renderPokerCard(ctx, bX + cardW + 4, bY, cardW, cardH, state.holeB[1], false);
+  }
+  if (state.currentBetB > 0) {
+    ctx.font = `${size*0.025}px monospace`; ctx.fillStyle = ARC3[11];
+    ctx.textAlign = 'center';
+    ctx.fillText(`Bet: ${state.currentBetB}`, bX + cardW, bY + cardH + 14);
+  }
+
+  // Dealer button
+  const dealerX = state.dealer === 'A' ? aX - 14 : bX - 14;
+  const dealerY = state.dealer === 'A' ? aY + cardH/2 : bY + cardH/2;
+  ctx.beginPath(); ctx.arc(dealerX, dealerY, 8, 0, Math.PI*2);
+  ctx.fillStyle = '#FFD700'; ctx.fill();
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.font = `bold 8px monospace`; ctx.fillStyle = '#333';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('D', dealerX, dealerY);
+
+  // Action text
+  if (frame.actionText) {
+    ctx.font = `bold ${size*0.035}px monospace`;
+    ctx.fillStyle = '#FFF'; ctx.textAlign = 'center';
+    ctx.fillText(frame.actionText, size/2, size*0.62);
+  }
+
+  // Showdown result
+  if (state.phase === 'showdown' && state.handResult) {
+    ctx.font = `bold ${size*0.03}px monospace`;
+    ctx.fillStyle = ARC3[14]; ctx.textAlign = 'center';
+    ctx.fillText(state.handResult, size/2, size*0.68);
+  }
+}
+
+function renderPokerPreview(canvas) {
+  const size = 120; canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a5c2a'; ctx.fillRect(0, 0, size, size);
+  ctx.beginPath(); ctx.ellipse(60, 60, 45, 35, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#1e6b34'; ctx.fill();
+  ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 2; ctx.stroke();
+  const cw = 12, ch = 17;
+  ctx.fillStyle = '#2a4a7f';
+  ctx.fillRect(25, 75, cw, ch); ctx.fillRect(39, 75, cw, ch);
+  ctx.fillRect(68, 25, cw, ch); ctx.fillRect(82, 25, cw, ch);
+  for (let i = 0; i < 5; i++) {
+    ctx.fillStyle = '#FFFFF0'; ctx.fillRect(22 + i*16, 48, cw, ch);
+    ctx.strokeStyle = '#999'; ctx.lineWidth = 0.5; ctx.strokeRect(22 + i*16, 48, cw, ch);
+  }
+  ctx.beginPath(); ctx.arc(60, 43, 4, 0, Math.PI*2);
+  ctx.fillStyle = ARC3[11]; ctx.fill();
+}
+
+
+/* ── Poker Match Runner ────────────────────────────────────────────────── */
+
+function runPokerMatch(config, strategyA, strategyB) {
+  const fnA = PKR_STRATEGIES[strategyA].fn, fnB = PKR_STRATEGIES[strategyB].fn;
+  const seed = config.seed || 42;
+  const numHands = config.maxHands || PKR_HANDS;
+  let chipsA = PKR_START_CHIPS, chipsB = PKR_START_CHIPS;
+  let dealer = 'A';
+  const history = [];
+  const handRng = mulberry32(seed);
+
+  const mkState = (handNum, phase, comm, pot, betA, betB, holeA, holeB, result) => ({
+    handNum, phase,
+    community: [...comm, ...Array(Math.max(0, 5-comm.length)).fill(null)],
+    holeA: holeA ? [...holeA] : null,
+    holeB: holeB ? [...holeB] : null,
+    pot, chipsA, chipsB, dealer,
+    currentBetA: betA, currentBetB: betB,
+    handResult: result || null,
+  });
+
+  // Initial frame
+  history.push({
+    turn: 0, state: mkState(0, 'setup', [], 0, 0, 0, null, null, null),
+    agentA: null, agentB: null, winner: null, scoreA: chipsA, scoreB: chipsB,
+    actionText: 'Texas Hold\'em \u2014 10 hands',
+  });
+
+  for (let h = 0; h < numHands; h++) {
+    if (chipsA <= 0 || chipsB <= 0) break;
+
+    const deck = pkrMakeDeck(handRng);
+    const holeA = [deck[0], deck[1]];
+    const holeB = [deck[2], deck[3]];
+    const board = [deck[4], deck[5], deck[6], deck[7], deck[8]];
+    const handNum = h + 1;
+
+    // Post blinds (heads-up: dealer = SB, other = BB)
+    const sbPlayer = dealer;
+    const bbPlayer = dealer === 'A' ? 'B' : 'A';
+    const sb = Math.min(PKR_SMALL_BLIND, sbPlayer === 'A' ? chipsA : chipsB);
+    const bb = Math.min(PKR_BIG_BLIND, bbPlayer === 'A' ? chipsA : chipsB);
+    if (sbPlayer === 'A') chipsA -= sb; else chipsB -= sb;
+    if (bbPlayer === 'A') chipsA -= bb; else chipsB -= bb;
+    let pot = sb + bb;
+    let betA = sbPlayer === 'A' ? sb : bb;
+    let betB = sbPlayer === 'B' ? sb : bb;
+
+    // Deal frame
+    history.push({
+      turn: history.length, state: mkState(handNum, 'preflop', [], pot, betA, betB, holeA, holeB, null),
+      agentA: null, agentB: null, winner: null, scoreA: chipsA, scoreB: chipsB,
+      actionText: `Hand ${handNum} \u2014 Deal`,
+    });
+
+    let folded = null;
+
+    const phases = [
+      { name: 'preflop', comm: [] },
+      { name: 'flop', comm: board.slice(0,3) },
+      { name: 'turn', comm: board.slice(0,4) },
+      { name: 'river', comm: board.slice(0,5) },
+    ];
+
+    for (const phase of phases) {
+      if (folded) break;
+
+      // Reveal community cards
+      if (phase.name !== 'preflop') {
+        betA = 0; betB = 0;
+        history.push({
+          turn: history.length, state: mkState(handNum, phase.name, phase.comm, pot, betA, betB, holeA, holeB, null),
+          agentA: null, agentB: null, winner: null, scoreA: chipsA, scoreB: chipsB,
+          actionText: phase.name === 'flop' ? 'Flop' : phase.name === 'turn' ? 'Turn' : 'River',
+        });
+      }
+
+      // Heads-up: dealer/SB acts first preflop, BB acts first postflop
+      const firstActor = phase.name === 'preflop' ? sbPlayer : bbPlayer;
+      const order = firstActor === 'A' ? ['A','B'] : ['B','A'];
+      let raised = false;
+
+      for (const actor of order) {
+        if (folded) break;
+        const isA = actor === 'A';
+        const myCards = isA ? holeA : holeB;
+        const myChips = isA ? chipsA : chipsB;
+        const oppChips = isA ? chipsB : chipsA;
+        const myBet = isA ? betA : betB;
+        const oppBet = isA ? betB : betA;
+        const toCall = Math.max(0, oppBet - myBet);
+        const canRaise = !raised && myChips > toCall;
+        const fn = isA ? fnA : fnB;
+
+        const result = fn(myCards, phase.comm, pot, myChips, oppChips, toCall, canRaise, phase.name, history.length, seed);
+        let action = result.action;
+        let amount = 0;
+
+        if (action === 'fold') {
+          folded = actor;
+        } else if (action === 'check' && toCall === 0) {
+          // Check
+        } else if (action === 'call' || (action === 'check' && toCall > 0)) {
+          amount = Math.min(toCall, myChips);
+          if (isA) { chipsA -= amount; betA += amount; } else { chipsB -= amount; betB += amount; }
+          pot += amount;
+          action = 'call';
+        } else if (action === 'raise' && canRaise) {
+          const callAmt = Math.min(toCall, myChips);
+          const raiseAmt = Math.min(result.amount || PKR_BIG_BLIND * 2, myChips - callAmt);
+          amount = callAmt + raiseAmt;
+          if (isA) { chipsA -= amount; betA += amount; } else { chipsB -= amount; betB += amount; }
+          pot += amount;
+          raised = true;
+        } else {
+          if (toCall > 0) {
+            amount = Math.min(toCall, myChips);
+            if (isA) { chipsA -= amount; betA += amount; } else { chipsB -= amount; betB += amount; }
+            pot += amount;
+            action = 'call';
+          } else { action = 'check'; }
+        }
+
+        const moveStr = action === 'fold' ? 'Fold' : action === 'check' ? 'Check' : action === 'call' ? `Call ${amount}` : `Raise ${amount}`;
+        const agentData = { move: moveStr, reasoning: result.reasoning };
+        history.push({
+          turn: history.length, state: mkState(handNum, phase.name, phase.comm, pot, betA, betB, holeA, holeB, null),
+          agentA: isA ? agentData : null, agentB: isA ? null : agentData,
+          winner: null, scoreA: chipsA, scoreB: chipsB,
+          actionText: `${actor}: ${moveStr}`,
+        });
+      }
+
+      // If raised, give first actor chance to respond
+      if (raised && !folded) {
+        const responder = order[0];
+        const isA = responder === 'A';
+        const myCards = isA ? holeA : holeB;
+        const myChips = isA ? chipsA : chipsB;
+        const oppChips = isA ? chipsB : chipsA;
+        const myBet = isA ? betA : betB;
+        const oppBet = isA ? betB : betA;
+        const toCall = Math.max(0, oppBet - myBet);
+
+        if (toCall > 0) {
+          const fn = isA ? fnA : fnB;
+          const result = fn(myCards, phase.comm, pot, myChips, oppChips, toCall, false, phase.name, history.length, seed);
+          let action = result.action;
+          let amount = 0;
+
+          if (action === 'fold') {
+            folded = responder;
+          } else {
+            amount = Math.min(toCall, myChips);
+            if (isA) { chipsA -= amount; betA += amount; } else { chipsB -= amount; betB += amount; }
+            pot += amount;
+            action = 'call';
+          }
+
+          const moveStr = action === 'fold' ? 'Fold' : `Call ${amount}`;
+          const agentData = { move: moveStr, reasoning: result.reasoning };
+          history.push({
+            turn: history.length, state: mkState(handNum, phase.name, phase.comm, pot, betA, betB, holeA, holeB, null),
+            agentA: isA ? agentData : null, agentB: isA ? null : agentData,
+            winner: null, scoreA: chipsA, scoreB: chipsB,
+            actionText: `${responder}: ${moveStr}`,
+          });
+        }
+      }
+    }
+
+    // Showdown or fold resolution
+    let handResult = '';
+    if (folded) {
+      const winner = folded === 'A' ? 'B' : 'A';
+      if (winner === 'A') chipsA += pot; else chipsB += pot;
+      handResult = `${folded} folds \u2014 ${winner} wins ${pot}`;
+    } else {
+      const allA = [...holeA, ...board];
+      const allB = [...holeB, ...board];
+      const bestA = pkrBestHand(allA);
+      const bestB = pkrBestHand(allB);
+      const cmp = pkrCompareScores(bestA.score, bestB.score);
+      if (cmp > 0) {
+        chipsA += pot;
+        handResult = `A: ${pkrHandName(bestA.score)} \u2014 wins ${pot}`;
+      } else if (cmp < 0) {
+        chipsB += pot;
+        handResult = `B: ${pkrHandName(bestB.score)} \u2014 wins ${pot}`;
+      } else {
+        const half = Math.floor(pot / 2);
+        chipsA += half; chipsB += pot - half;
+        handResult = `Split \u2014 ${pkrHandName(bestA.score)}`;
+      }
+    }
+
+    history.push({
+      turn: history.length, state: mkState(handNum, 'showdown', board, 0, 0, 0, holeA, holeB, handResult),
+      agentA: null, agentB: null, winner: null, scoreA: chipsA, scoreB: chipsB,
+      actionText: handResult,
+    });
+
+    pot = 0; betA = 0; betB = 0;
+    dealer = dealer === 'A' ? 'B' : 'A';
+  }
+
+  // Final winner
+  const finalWinner = chipsA > chipsB ? 'A' : chipsB > chipsA ? 'B' : 'draw';
+  history[history.length - 1].winner = finalWinner;
+
+  return history;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Available Games
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const ARENA_GAMES = [
-  {
-    id: 'snake',
-    title: 'Snake Battle',
-    desc: 'Two AI snakes compete for food on a shared grid. Eat to grow, avoid walls and each other.',
-    tags: ['Strategy', '2-Player'],
+  { id: 'snake', title: 'Snake Battle', category: 'ARC-style',
+    desc: 'Two AI snakes compete for food. Eat to grow, avoid walls and each other.',
+    tags: ['Territorial', 'Simultaneous'],
     config: { width: 20, height: 20, maxTurns: 200, seed: 42 },
     strategies: AI_STRATEGIES,
-  },
-  {
-    id: 'chess960',
-    title: 'Fischer Random Chess',
-    desc: 'Chess960 — back rank pieces are shuffled. Full chess rules with randomized openings.',
-    tags: ['Chess', 'Turn-based'],
+    run: runMatch, render: renderSnakeFrame, preview: renderSnakePreview },
+  { id: 'tron', title: 'Tron', category: 'ARC-style',
+    desc: 'Light cycles leave trails. Last one alive wins. Claim space, cut off your opponent.',
+    tags: ['Territorial', 'Simultaneous'],
+    config: { width: 25, height: 25, maxTurns: 200, seed: 42 },
+    strategies: TRON_STRATEGIES,
+    run: runTronMatch, render: renderTronFrame, preview: renderTronPreview },
+  { id: 'connect4', title: 'Connect Four', category: 'Board Games',
+    desc: 'Drop pieces into columns. First to connect 4 in a row wins.',
+    tags: ['Symbolic', 'Turn-based'],
+    config: { seed: 42 },
+    strategies: C4_STRATEGIES,
+    run: runC4Match, render: renderC4Frame, preview: renderC4Preview },
+  { id: 'chess960', title: 'Fischer Random Chess', category: 'Board Games',
+    desc: 'Chess960 — back rank pieces shuffled. Full chess with unique openings every game.',
+    tags: ['Symbolic', 'Turn-based'],
     config: { maxMoves: 80, seed: 42 },
     strategies: CHESS_STRATEGIES,
-  },
+    run: runChessMatch, render: renderChessFrame, preview: renderChessPreview },
+  { id: 'othello', title: 'Othello', category: 'Board Games',
+    desc: 'Place pieces to flip your opponent. Control the board — corners are king.',
+    tags: ['Symbolic', 'Turn-based'],
+    config: { seed: 42 },
+    strategies: OTHELLO_STRATEGIES,
+    run: runOthelloMatch, render: renderOthelloFrame, preview: renderOthelloPreview },
+  { id: 'go9', title: 'Go 9x9', category: 'Board Games',
+    desc: 'Ancient strategy game. Surround territory, capture stones. 6.5 komi for White.',
+    tags: ['Symbolic', 'Turn-based'],
+    config: { maxMoves: 120, seed: 42 },
+    strategies: GO_STRATEGIES,
+    run: runGoMatch, render: renderGoFrame, preview: renderGoPreview },
+  { id: 'gomoku', title: 'Gomoku', category: 'Board Games',
+    desc: 'Place stones on a 15x15 board. First to get 5 in a row wins.',
+    tags: ['Symbolic', 'Turn-based'],
+    config: { seed: 42 },
+    strategies: GMK_STRATEGIES,
+    run: runGomokuMatch, render: renderGomokuFrame, preview: renderGomokuPreview },
+  { id: 'artillery', title: 'Artillery', category: 'Action',
+    desc: 'Tanks on opposite hills. Adjust angle and power to land shots on your opponent.',
+    tags: ['Physics', 'Turn-based'],
+    config: { maxTurns: 20, seed: 42 },
+    strategies: ART_STRATEGIES,
+    run: runArtilleryMatch, render: renderArtilleryFrame, preview: renderArtilleryPreview },
+  { id: 'poker', title: 'Texas Hold\'em', category: 'Incomplete Information',
+    desc: 'Hidden hole cards, community board, and betting. Bluff or fold?',
+    tags: ['Cards', 'Turn-based'],
+    config: { maxHands: 10, seed: 42 },
+    strategies: PKR_STRATEGIES,
+    run: runPokerMatch, render: renderPokerFrame, preview: renderPokerPreview },
 ];
 
 
@@ -840,9 +3233,67 @@ const Arena = {
    Init
    ═══════════════════════════════════════════════════════════════════════════ */
 
+function buildGameCards() {
+  const container = document.getElementById('gameCardRow');
+  container.innerHTML = '';
+
+  // Group games by category, preserving order of first appearance
+  const categories = [];
+  const catMap = {};
+  for (const game of ARENA_GAMES) {
+    const cat = game.category || 'Other';
+    if (!catMap[cat]) { catMap[cat] = []; categories.push(cat); }
+    catMap[cat].push(game);
+  }
+
+  let firstGame = true;
+  for (const cat of categories) {
+    const section = document.createElement('div');
+    section.className = 'game-category';
+
+    const label = document.createElement('div');
+    label.className = 'game-category-label';
+    label.textContent = cat;
+    section.appendChild(label);
+
+    const grid = document.createElement('div');
+    grid.className = 'game-category-grid';
+
+    for (const game of catMap[cat]) {
+      const card = document.createElement('div');
+      card.className = 'arena-game-card' + (firstGame ? ' active' : '');
+      card.dataset.game = game.id;
+      card.onclick = function() { selectGameCard(this, game.id); };
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'arena-game-preview';
+      canvas.id = `preview-${game.id}`;
+      canvas.width = 120; canvas.height = 120;
+      card.appendChild(canvas);
+
+      const meta = document.createElement('div');
+      meta.className = 'arena-game-meta';
+      meta.innerHTML =
+        `<div class="arena-game-title">${game.title}</div>` +
+        `<div class="arena-game-desc">${game.desc}</div>` +
+        `<div class="arena-game-tags">${game.tags.map(t => `<span class="arena-tag">${t}</span>`).join('')}</div>`;
+      card.appendChild(meta);
+
+      grid.appendChild(card);
+      firstGame = false;
+    }
+
+    section.appendChild(grid);
+    container.appendChild(section);
+  }
+}
+
 function initArena() {
   Arena.canvas = document.getElementById('arenaCanvas');
   Arena.ctx = Arena.canvas.getContext('2d');
+
+  // Build categorized game cards dynamically
+  buildGameCards();
 
   // Render game card previews
   for (const game of ARENA_GAMES) {
@@ -872,21 +3323,7 @@ function initArena() {
 }
 
 function renderPreview(canvas, game) {
-  if (game.id === 'chess960') {
-    renderChessPreview(canvas, game.config);
-    return;
-  }
-  const snakeGame = new SnakeGame(game.config);
-  const grid = snakeGame.getGrid();
-  const size = 120;
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const cellW = size / snakeGame.W, cellH = size / snakeGame.H;
-  for (let y = 0; y < snakeGame.H; y++)
-    for (let x = 0; x < snakeGame.W; x++) {
-      ctx.fillStyle = ARC3[grid[y][x]];
-      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
-    }
+  if (game.preview) { game.preview(canvas, game.config); return; }
 }
 
 
@@ -987,12 +3424,8 @@ function startMatch() {
   // Update topbar
   document.getElementById('arenaGameTitle').textContent = game.title;
 
-  // Run the full match (dispatch by game type)
-  if (game.id === 'chess960') {
-    Arena.history = runChessMatch(config, strategyA, strategyB);
-  } else {
-    Arena.history = runMatch(config, strategyA, strategyB);
-  }
+  // Run the full match (dispatch via game entry)
+  Arena.history = game.run(config, strategyA, strategyB);
   Arena.currentStep = 0;
 
   // Build reasoning logs
@@ -1025,28 +3458,9 @@ function renderStep(step) {
   Arena.canvas.width = canvasSize;
   Arena.canvas.height = canvasSize;
 
-  // Game-specific rendering
-  if (Arena.selectedGame === 'chess960') {
-    renderChessFrame(Arena.ctx, frame, canvasSize);
-  } else {
-    // Snake grid rendering
-    const grid = frame.grid;
-    const gridH = grid.length, gridW = grid[0].length;
-    const cellW = canvasSize / gridW, cellH = canvasSize / gridH;
-    for (let y = 0; y < gridH; y++)
-      for (let x = 0; x < gridW; x++) {
-        Arena.ctx.fillStyle = ARC3[grid[y][x]];
-        Arena.ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
-      }
-    Arena.ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-    Arena.ctx.lineWidth = 0.5;
-    for (let x = 0; x <= gridW; x++) {
-      Arena.ctx.beginPath(); Arena.ctx.moveTo(x*cellW,0); Arena.ctx.lineTo(x*cellW,canvasSize); Arena.ctx.stroke();
-    }
-    for (let y = 0; y <= gridH; y++) {
-      Arena.ctx.beginPath(); Arena.ctx.moveTo(0,y*cellH); Arena.ctx.lineTo(canvasSize,y*cellH); Arena.ctx.stroke();
-    }
-  }
+  // Game-specific rendering (dispatch via game entry)
+  const gameDef = ARENA_GAMES.find(g => g.id === Arena.selectedGame);
+  if (gameDef && gameDef.render) gameDef.render(Arena.ctx, frame, canvasSize);
 
   // Update scrubber position
   document.getElementById('arenaScrubber').value = step;

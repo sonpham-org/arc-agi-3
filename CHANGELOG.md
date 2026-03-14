@@ -5,6 +5,32 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.3.3] — feat: Arena — Artillery upgrade + Texas Hold'em Poker
+*Author: Claude Opus 4.6 | 2026-03-14*
+
+### Added
+- **Texas Hold'em Poker** — New "Incomplete Information" category. 10-hand match, 100 starting chips, blinds 1/2. Full hand evaluation (high card through straight flush), showdown comparison, seeded deck shuffle. 3 AI strategies: Tight (selective, premium-only), Aggressive (frequent raises, 25% bluff rate), Calculator (pot odds + equity math). Green felt table rendering with card faces, dealer button, pot/chip display.
+- **Artillery: Tank Movement** — Tanks can now move left/right (3 units per move) instead of only shooting. Costs a turn. AI strategies use movement tactically: Sniper dodges incoming fire, Lobber repositions to close distance, Wildcard moves chaotically ~33% of turns.
+- **Artillery: Projectile Animation** — Shots now animate with 10 sub-frames showing the shell flying along its trajectory. Glowing yellow projectile dot, growing trajectory trail, and explosion flash on impact (larger for direct hits). Movement also animates with 4 slide frames.
+- **Artillery: Wind Compensation** — All AI strategies now account for wind in their trajectory simulations (previously ignored). Shared `artSimulateShot()` helper replaces duplicated simulation code.
+
+---
+
+## [1.3.2] — feat: Arena — 4 new games (Connect Four, Tron, Othello, Go 9x9)
+*Author: Claude Opus 4.6 | 2026-03-14*
+
+### Added
+- **Connect Four** — 7x6 drop-piece game. 3 AI strategies: Dropper (greedy), Blocker (defensive), Balanced (minimax depth 5 with alpha-beta). Blue board with red/orange pieces. Turn-based.
+- **Tron (Light Cycles)** — 25x25 grid, simultaneous movement, trail claiming. 3 AI strategies: Space Max (flood fill), Aggressive (cut-off), Cautious (central/safe). Last alive wins.
+- **Othello (Reversi)** — 8x8 board with flanking captures. 3 AI strategies: Corner Grabber (positional weights), Maximizer (max flips), Positional (balanced). Green board with blue/red pieces.
+- **Go 9x9** — Full Go rules: liberties, captures, ko, Chinese scoring (area + 6.5 komi). 3 AI strategies: Territorial (corners/edges), Aggressive (invade/capture), Balanced (territory+connection). Wooden board with star points.
+- **Game tags** — Categorized all 6 Arena games: Territorial (Snake, Tron), Symbolic (Connect Four, Chess960, Othello, Go).
+- **Gomoku (5-in-a-row)** — 15x15 board, first to 5 in a line wins. 3 AI strategies: Offensive (attack-weighted), Defensive (block-weighted), Balanced (center control). Line scoring evaluates open/blocked ends. Nearby-moves optimization for fast AI on 225-cell board.
+- **Artillery** — 120x80 terrain with midpoint-displacement hills. Two tanks (HP 5) take turns shooting with angle + power. Per-turn wind shifts affect trajectories. 3 AI strategies: Sniper (precise simulation), Lobber (high arcs), Wildcard (jittered aim). Parabolic projectile physics with gravity.
+- **Dispatcher pattern** — ARENA_GAMES entries now include `run`, `render`, `preview` functions. Simplified startMatch, renderStep, renderPreview to dispatch via game entry instead of if/else chains.
+
+---
+
 ## [1.3.1] — fix: resume error + browse sessions & leaderboard table redesign
 *Author: Claude Opus 4.6 | 2026-03-14*
 
