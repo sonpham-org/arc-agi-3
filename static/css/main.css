@@ -658,11 +658,18 @@
     border: 1px solid var(--border); background: transparent;
     color: var(--text-dim); text-decoration: none; cursor: pointer;
     transition: all 0.15s; font-family: inherit; font-weight: 500; white-space: nowrap; }
-  .nav-switch-btn:hover { color: var(--text); border-color: var(--accent); background: var(--surface2); }
+  .nav-switch-btn:hover { background: var(--surface2); }
+  .nav-switch-btn.to-arena:hover { color: #e09540; border-color: #e09540; }
+  .nav-switch-btn.to-obs:hover { color: #58a6ff; border-color: #58a6ff; }
+  [data-theme="light"] .nav-switch-btn.to-arena:hover { color: #a06a18; border-color: #a06a18; }
+  [data-theme="light"] .nav-switch-btn.to-obs:hover { color: #0969da; border-color: #0969da; }
   .logo-with-sub { display: flex; flex-direction: column; align-items: center; gap: 1px; }
   .logo-sub-link { font-size: 9px; color: var(--text-dim); text-decoration: none;
-    opacity: 0.4; transition: opacity 0.15s; letter-spacing: 0.3px; }
-  .logo-sub-link:hover { opacity: 1; color: var(--accent); }
+    opacity: 0.5; transition: all 0.15s; letter-spacing: 0.3px; }
+  .logo-sub-link.to-arena:hover { opacity: 1; color: #e09540; }
+  .logo-sub-link.to-obs:hover { opacity: 1; color: #58a6ff; }
+  [data-theme="light"] .logo-sub-link.to-arena:hover { color: #a06a18; }
+  [data-theme="light"] .logo-sub-link.to-obs:hover { color: #0969da; }
 
   .session-tab-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px;
     background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0;

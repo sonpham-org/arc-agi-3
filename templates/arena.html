@@ -13,42 +13,37 @@
   <!-- ── Top Nav ──────────────────────────────────────────────────────────── -->
   <div class="arena-top-nav">
     <span class="app-title">
-      <!-- Logo pixel art:  XXXX          XXXX
-                          XOOX -- -- -- XOOX
-                          XOOX -- -- -- XOOX
-                          XXXX          XXXX
-           X = border squares, O = solid inner square, both filled same color.
-           Ping-pong pulse: left bright → connectors wave right → right bright → connectors wave left → repeat -->
-      <svg class="arena-logo" viewBox="0 0 53 16" width="64" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <!-- Left block: border (X) at 0.5 opacity, inner (O) at full — both solid -->
-        <rect x="0" y="0" width="16" height="16" rx="1.5" fill="var(--accent)">
-          <animate attributeName="opacity" values="0.55;0.55;0.1;0.1;0.55" keyTimes="0;0.2;0.45;0.8;1" dur="3s" repeatCount="indefinite"/>
-        </rect>
-        <rect x="4" y="4" width="8" height="8" rx="1" fill="var(--accent)">
+      <!-- Logo: [A][A] . . [B][B]  — two stacked squares per side, two dots
+                [A][A] . . [B][B]
+           sq=5, gap between stack=2, dot r=1.5, spacing=3 -->
+      <svg class="arena-logo" viewBox="0 0 27 12" width="90" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Left: two stacked amber squares -->
+        <rect x="0" y="0" width="5" height="5" rx="1" fill="var(--accent)">
           <animate attributeName="opacity" values="1;1;0.15;0.15;1" keyTimes="0;0.2;0.45;0.8;1" dur="3s" repeatCount="indefinite"/>
         </rect>
-        <!-- Connector dots: wave left→right then right→left -->
-        <circle cx="20" cy="8" r="1.5" fill="var(--accent)">
+        <rect x="0" y="7" width="5" height="5" rx="1" fill="var(--accent)">
+          <animate attributeName="opacity" values="1;1;0.15;0.15;1" keyTimes="0;0.2;0.45;0.8;1" dur="3s" repeatCount="indefinite"/>
+        </rect>
+        <!-- Dot 1 (amber) -->
+        <circle cx="10" cy="6" r="1.5" fill="var(--accent)">
           <animate attributeName="opacity" values="0.5;0.12;0.12;0.12;0.5" keyTimes="0;0.15;0.45;0.85;1" dur="3s" repeatCount="indefinite"/>
         </circle>
-        <circle cx="26.5" cy="8" r="1.5" fill="var(--accent)">
-          <animate attributeName="opacity" values="0.12;0.5;0.12;0.5;0.12" keyTimes="0;0.25;0.45;0.75;1" dur="3s" repeatCount="indefinite"/>
-        </circle>
-        <circle cx="33" cy="8" r="1.5" fill="var(--accent)">
+        <!-- Dot 2 (red) -->
+        <circle cx="17" cy="6" r="1.5" fill="var(--red)">
           <animate attributeName="opacity" values="0.12;0.12;0.5;0.12;0.12" keyTimes="0;0.35;0.5;0.65;1" dur="3s" repeatCount="indefinite"/>
         </circle>
-        <!-- Right block: border (X) + inner (O), offset animation -->
-        <rect x="37" y="0" width="16" height="16" rx="1.5" fill="var(--accent)">
-          <animate attributeName="opacity" values="0.1;0.1;0.55;0.55;0.1" keyTimes="0;0.2;0.45;0.8;1" dur="3s" repeatCount="indefinite"/>
+        <!-- Right: two stacked red squares -->
+        <rect x="22" y="0" width="5" height="5" rx="1" fill="var(--red)">
+          <animate attributeName="opacity" values="0.15;0.15;1;1;0.15" keyTimes="0;0.2;0.45;0.8;1" dur="3s" repeatCount="indefinite"/>
         </rect>
-        <rect x="41" y="4" width="8" height="8" rx="1" fill="var(--accent)">
+        <rect x="22" y="7" width="5" height="5" rx="1" fill="var(--red)">
           <animate attributeName="opacity" values="0.15;0.15;1;1;0.15" keyTimes="0;0.2;0.45;0.8;1" dur="3s" repeatCount="indefinite"/>
         </rect>
       </svg>
-      <span class="app-title-text">ARC Arena<a class="logo-sub-link" href="/obs">&#8594; to Observatory</a></span>
+      <span class="app-title-text">ARC Arena<a class="logo-sub-link to-obs" href="/obs">&#8594; to Observatory</a></span>
     </span>
     <span style="flex:1"></span>
-    <a class="nav-switch-btn" href="/obs">&#8592; to Observatory</a>
+    <a class="nav-switch-btn to-obs" href="/obs">&#8592; to Observatory</a>
     <button id="themeToggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:6px;line-height:1;" title="Toggle light/dark mode"></button>
   </div>
 
