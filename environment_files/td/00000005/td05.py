@@ -151,11 +151,11 @@ def _build_path(*waypoints):
 # Lane 1 (mid): 5 enemies   — y-band 13–18 or similar
 # Lane 2 (bot): 8 enemies   — y-band 23–28 or similar
 
-# Level 1 – Crescent Bay: each lane dips downward (U-shape)
+# Level 1 – Crescent Bay: single zigzag (step-down shape)
 _LANES_1 = [
-    _build_path((0, 3),  (10, 3),  (10, 8),  (20, 8),  (20, 3),  (31, 3)),   # top: 3 enemies
-    _build_path((0, 13), (10, 13), (10, 18), (20, 18), (20, 13), (31, 13)),   # mid: 5 enemies
-    _build_path((0, 23), (10, 23), (10, 28), (20, 28), (20, 23), (31, 23)),   # bot: 8 enemies
+    _build_path((0, 3),  (15, 3),  (15, 8),  (31, 8)),    # top: 3 enemies
+    _build_path((0, 13), (15, 13), (15, 18), (31, 18)),    # mid: 5 enemies
+    _build_path((0, 23), (15, 23), (15, 28), (31, 28)),    # bot: 8 enemies
 ]
 
 # Level 2 – River Bend: each lane arches upward (inverted-U shape)
@@ -208,6 +208,31 @@ def _fill(frame, lx, ly, color):
         frame[py:py + 2, px:px + 2] = color
 
 
+def _fill_road(frame, lx, ly, color):
+    """Draw a road cell as 3×3 pixels (1px wider than standard 2×2)."""
+    px, py = lx * 2, ly * 2
+    for dy in range(3):
+        for dx in range(3):
+            ppx, ppy = px + dx, py + dy
+            if 0 <= ppx < 64 and 0 <= ppy < 64:
+                frame[ppy, ppx] = color
+
+
+def _fill_tower(frame, lx, ly, base_color, top_color):
+    """Draw a 4×4 pixel tower centered on logical cell (lx, ly)."""
+    cx, cy = lx * 2, ly * 2
+    for dy in range(-1, 3):
+        for dx in range(-1, 3):
+            ppx, ppy = cx + dx, cy + dy
+            if 0 <= ppx < 64 and 0 <= ppy < 64:
+                frame[ppy, ppx] = base_color
+    # Top indicator: 2 pixels centered on top row
+    for dx in range(2):
+        ppx, ppy = cx + dx, cy - 1
+        if 0 <= ppx < 64 and 0 <= ppy < 64:
+            frame[ppy, ppx] = top_color
+
+
 def _draw_range_circle(frame, lx, ly, radius_cells, color):
     """Draw a circle (Bresenham) around logical cell (lx, ly)."""
     cx = lx * 2 + 1
@@ -232,8 +257,8 @@ def _draw_range_circle(frame, lx, ly, radius_cells, color):
 
 # ── Display ───────────────────────────────────────────────────────────────────
 
-class Td01Display(RenderableUserDisplay):
-    def __init__(self, game: "Td01"):
+class Td05Display(RenderableUserDisplay):
+    def __init__(self, game: "Td05"):
         self.game = game
 
     def render_interface(self, frame: np.ndarray) -> np.ndarray:
@@ -242,17 +267,17 @@ class Td01Display(RenderableUserDisplay):
         # Background: grass
         frame[:, :] = GRASS_C
 
-        # Lane paths
+        # Lane paths (3×3 per cell for wider roads)
         for lane_path in g.lane_paths:
             for (px, py) in lane_path:
-                _fill(frame, px, py, PATH_C)
+                _fill_road(frame, px, py, PATH_C)
 
         # Gates (lane starts) and castle endpoints (lane ends)
         for lane_path in g.lane_paths:
             gx, gy = lane_path[0]
-            _fill(frame, gx, gy, GATE_C)
+            _fill_road(frame, gx, gy, GATE_C)
             ex, ey = lane_path[-1]
-            _fill(frame, ex, ey, CASTLE_C)
+            _fill_road(frame, ex, ey, CASTLE_C)
 
         # Tower range circles
         for (tx, ty) in g.towers:
@@ -284,21 +309,17 @@ class Td01Display(RenderableUserDisplay):
                     if 0 <= px + dx < 64 and 0 <= py + dy < 64:
                         frame[py + dy, px + dx] = pellet_c
 
-        # Towers
+        # Towers (4×4 pixel design)
         for (tx, ty) in g.towers:
             kind = g.tower_types.get((tx, ty), 'normal')
             if kind == 'slow':
-                _fill(frame, tx, ty, SLOW_TOWER_C)
-                frame[ty * 2, tx * 2 + 1] = SLOW_TOWER_TOP_C
+                _fill_tower(frame, tx, ty, SLOW_TOWER_C, SLOW_TOWER_TOP_C)
             elif kind == 'laser':
-                _fill(frame, tx, ty, LASER_TOWER_C)
-                frame[ty * 2, tx * 2 + 1] = LASER_TOWER_TOP_C
+                _fill_tower(frame, tx, ty, LASER_TOWER_C, LASER_TOWER_TOP_C)
             elif kind == 'electric':
-                _fill(frame, tx, ty, ELECTRIC_TOWER_C)
-                frame[ty * 2, tx * 2 + 1] = ELECTRIC_TOWER_TOP_C
+                _fill_tower(frame, tx, ty, ELECTRIC_TOWER_C, ELECTRIC_TOWER_TOP_C)
             else:
-                _fill(frame, tx, ty, TOWER_C)
-                frame[ty * 2, tx * 2 + 1] = TOWER_TOP_C
+                _fill_tower(frame, tx, ty, TOWER_C, TOWER_TOP_C)
 
         # Enemies
         for e in g.enemies:
@@ -359,9 +380,9 @@ class Td01Display(RenderableUserDisplay):
 
 # ── Game ──────────────────────────────────────────────────────────────────────
 
-class Td01(ARCBaseGame):
+class Td05(ARCBaseGame):
     def __init__(self):
-        self.display = Td01Display(self)
+        self.display = Td05Display(self)
 
         # Mutable state – properly set by on_set_level
         self.lane_paths      = _LANES_1
@@ -414,7 +435,14 @@ class Td01(ARCBaseGame):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _cursor_invalid(self):
-        return self.cursor in self.path_set or self.cursor in self.tower_set
+        return self.cursor in self.path_set or self._tower_overlap(*self.cursor)
+
+    def _tower_overlap(self, cx, cy):
+        """True if a 4×4 tower at (cx, cy) would overlap any existing tower."""
+        for (tx, ty) in self.towers:
+            if abs(cx - tx) <= 1 and abs(cy - ty) <= 1:
+                return True
+        return False
 
     def _towers_shoot(self):
         """Each tower fires at the enemy furthest along its lane within range."""
@@ -585,7 +613,7 @@ class Td01(ARCBaseGame):
                     cost = ELECTRIC_TOWER_COST
                 else:
                     cost = TOWER_COST
-                if (cx, cy) not in self.path_set and self.money >= cost:
+                if (cx, cy) not in self.path_set and not self._tower_overlap(cx, cy) and self.money >= cost:
                     self.towers.append((cx, cy))
                     self.tower_set.add((cx, cy))
                     self.tower_types[(cx, cy)] = self.selected_tower
