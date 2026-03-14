@@ -69,15 +69,15 @@
   align-items: center; justify-content: center; font-weight: 700;
   font-size: 16px; color: #000; flex-shrink: 0;
 }
-.agent-avatar-a { background: var(--accent); }
-.agent-avatar-b { background: var(--red); }
+.agent-avatar-a { background: var(--red); }
+.agent-avatar-b { background: var(--accent); }
 .agent-info { flex: 1; min-width: 0; }
 .agent-name { font-weight: 600; font-size: 14px; }
 .agent-score-box { text-align: center; flex-shrink: 0; }
 .agent-score-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
 .agent-score-val { font-size: 24px; font-weight: 700; line-height: 1; }
-.score-a { color: var(--accent); }
-.score-b { color: var(--red); }
+.score-a { color: var(--red); }
+.score-b { color: var(--accent); }
 
 /* ── Agent Settings (pre-match) ───────────────────────────────────────────── */
 .agent-settings {
@@ -109,8 +109,8 @@
   overflow: hidden; border: 1px solid var(--border);
 }
 .stat-fill { display: block; height: 100%; border-radius: 3px; transition: width 0.3s; }
-#panelA .stat-fill { background: var(--accent); }
-#panelB .stat-fill { background: var(--red); }
+#panelA .stat-fill { background: var(--red); }
+#panelB .stat-fill { background: var(--accent); }
 
 /* ── Agent Log (during match — hidden pre-match) ─────────────────────────── */
 .agent-log {
@@ -227,8 +227,8 @@
 }
 .match-status.ready { background: #30363d; color: var(--text-dim); }
 .match-status.playing { background: #3fb95033; color: var(--green); }
-.match-status.win-a { background: #1f6feb33; color: var(--accent); }
-.match-status.win-b { background: #f8514933; color: var(--red); }
+.match-status.win-a { background: #f8514933; color: var(--red); }
+.match-status.win-b { background: #e0954033; color: var(--accent); }
 .match-status.draw { background: #bc8cff33; color: var(--purple); }
 
 .arena-canvas-area {
@@ -247,8 +247,8 @@
 }
 .sb-agent { display: flex; align-items: center; gap: 8px; }
 .sb-dot { width: 10px; height: 10px; border-radius: 50%; }
-.sb-dot-a { background: var(--accent); }
-.sb-dot-b { background: var(--red); }
+.sb-dot-a { background: var(--red); }
+.sb-dot-b { background: var(--accent); }
 .sb-name { font-size: 12px; font-weight: 600; }
 .sb-score { font-size: 20px; font-weight: 700; }
 .sb-vs { font-size: 13px; color: var(--text-dim); font-weight: 600; }
