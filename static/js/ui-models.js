@@ -92,7 +92,7 @@ function updateAllByokKeys() {
     const placeholder = provider === 'anthropic'
       ? 'Paste API key (sk-ant-api...) or Claude Code token (sk-ant-oat...)...'
       : `Paste API key for ${label} here...`;
-    html += `<input type="text" class="text-input" data-byok-provider="${provider}" value="${saved.replace(/"/g, '&quot;')}" placeholder="${placeholder}" style="margin-bottom:4px;font-size:10px;font-family:monospace;">`;
+    html += `<input type="password" class="text-input" data-byok-provider="${provider}" value="${saved.replace(/"/g, '&quot;')}" placeholder="${placeholder}" style="margin-bottom:4px;font-size:10px;font-family:monospace;">`;
     if (provider === 'anthropic') {
       html += `<div style="font-size:9px;color:var(--text-dim);margin-bottom:4px;">No API key? Run <code style="background:var(--bg-secondary);padding:1px 4px;border-radius:3px;">claude setup-token</code> in your terminal to generate a free OAuth token from your Claude Pro/Max subscription.</div>`;
     }
