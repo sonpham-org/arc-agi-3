@@ -76,6 +76,13 @@ def get_models(args: dict) -> dict:
 
     # Discover local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)
     if mode == "staging":
+        # Build set of api_model values already covered by MODEL_REGISTRY entries
+        # so discovered models don't duplicate registry entries with different display names.
+        _registry_api_models = {
+            info.get("api_model", k)
+            for k, info in MODEL_REGISTRY.items()
+            if info.get("provider") in ("lmstudio", "local", "ollama")
+        }
         LOCAL_PORTS = [
             (1234, "LM Studio"),
             (8080, "Local Server"),
@@ -93,6 +100,9 @@ def get_models(args: dict) -> dict:
                             continue
                         # Skip embedding models — not chat models
                         if "embedding" in mid.lower():
+                            continue
+                        # Skip if already covered by a MODEL_REGISTRY entry
+                        if mid in _registry_api_models:
                             continue
                         is_lmstudio = (port == 1234)
                         provider_name = "lmstudio" if is_lmstudio else "local"

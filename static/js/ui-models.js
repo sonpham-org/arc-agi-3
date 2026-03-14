@@ -138,6 +138,7 @@ const _SUB_SELECT_IDS = [
   'sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect',
   'sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect',
   'sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect',
+  'sf_wm_agentModelSelect', 'sf_wm_wmModelSelect',
 ];
 
 function syncModelToSubSelects(newModel) {
@@ -145,10 +146,12 @@ function syncModelToSubSelects(newModel) {
     const el = document.getElementById(id);
     if (!el) continue;
     const cur = el.value;
-    // Sync if sub-select is empty or was following the previous main model
+    // Sync if sub-select is empty, or was following the previous main model
+    // (user hasn't explicitly customized it)
     if (!cur || cur === _prevMainModel) {
       if ([...el.options].some(o => o.value === newModel)) {
         el.value = newModel;
+        el.dataset.cascadeLastVal = newModel;
       }
     }
   }

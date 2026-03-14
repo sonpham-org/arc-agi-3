@@ -47,6 +47,7 @@ async function saveArcApiKey() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function _populateSubModelSelect(sel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, savedVal) {
+  sel.innerHTML = '';
   for (const prov of providerOrder) {
     const models = groups[prov];
     if (!models?.length) continue;

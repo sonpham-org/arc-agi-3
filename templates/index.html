@@ -464,10 +464,11 @@
       <!-- ── Right panel ───────────────────────────────────────────── -->
       <div class="right-panel">
 
-          <!-- Tab bar: Agent Settings | Prompts -->
+          <!-- Tab bar: Agent Settings | Prompts | Graphics -->
           <div class="subtab-bar">
             <button class="active" onclick="switchSubTab('settings')">Agent Settings</button>
             <button onclick="switchSubTab('prompts')">Prompts</button>
+            <button onclick="switchSubTab('graphics')">Graphics</button>
           </div>
           <!-- Hidden spinner (referenced by LLM code) -->
           <span id="llmSpinner" style="display:none;"><span class="spinner"></span></span>
@@ -477,32 +478,29 @@
             <div class="settings-columns" id="settingsColumns">
               <!-- Populated dynamically by renderScaffoldingSettings() -->
             </div>
-
-            <!-- ── Canvas settings (persistent, always visible) ── -->
-            <div id="canvasSettings" style="padding:6px 14px 8px;border-top:1px solid var(--border);flex-shrink:0;">
-              <div class="sub-header" style="margin-bottom:4px;">Canvas</div>
-              <div class="opt-row">
-                <span class="opt-label">Diff overlay</span>
-                <label class="toggle"><input type="checkbox" id="showChanges" checked><span class="slider"></span></label>
-              </div>
-              <div class="opt-row">
-                <span class="opt-label">Opacity</span>
-                <input type="range" id="changeOpacity" min="0" max="100" value="40" style="width:100px;">
-                <span id="changeOpacityVal" style="font-size:11px;width:28px;color:var(--text-dim);">40%</span>
-              </div>
-              <div class="opt-row">
-                <span class="opt-label">Highlight color</span>
-                <input type="color" id="changeColor" value="#ff0000" style="width:28px;height:20px;border:none;background:none;cursor:pointer;">
-              </div>
-            </div>
-
-            <!-- Transport bar moved to canvas panel -->
           </div>
 
           <!-- ── Prompts subtab ── -->
           <div class="subtab-pane" id="subtabPrompts" style="display:none;flex-direction:column;flex:1;overflow:auto;padding:14px;">
             <div id="promptsTabBody" class="prompt-fields">
               <!-- Populated dynamically by renderPromptsTab() -->
+            </div>
+          </div>
+
+          <!-- ── Graphics subtab ── -->
+          <div class="subtab-pane" id="subtabGraphics" style="display:none;padding:14px;">
+            <div class="opt-row">
+              <span class="opt-label">Diff overlay</span>
+              <label class="toggle"><input type="checkbox" id="showChanges" checked><span class="slider"></span></label>
+            </div>
+            <div class="opt-row">
+              <span class="opt-label">Opacity</span>
+              <input type="range" id="changeOpacity" min="0" max="100" value="40" style="width:100px;">
+              <span id="changeOpacityVal" style="font-size:11px;width:28px;color:var(--text-dim);">40%</span>
+            </div>
+            <div class="opt-row">
+              <span class="opt-label">Highlight color</span>
+              <input type="color" id="changeColor" value="#ff0000" style="width:28px;height:20px;border:none;background:none;cursor:pointer;">
             </div>
           </div>
 
