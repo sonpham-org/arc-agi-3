@@ -674,7 +674,7 @@ def anthropic_proxy():
                 "content-type": "application/json",
                 "User-Agent": "sonpham-arc3/1.2.8 (ARC Prize research; https://three.arcprize.org; https://arc.markbarney.net; https://arc3.sonpham.net; contact mark@markbarney.net)",
             },
-            json=body,
+            json={**body, "metadata": {"user_id": "arc-prize-research"}},
             timeout=120.0,
         )
         return jsonify(resp.json()), resp.status_code
