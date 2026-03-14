@@ -584,6 +584,9 @@
   .btn-blink { animation: btnBlink 0.5s ease-in-out 3 forwards; }
   @keyframes btnBlink { 0%, 100% { background: var(--surface); border-color: var(--accent); color: var(--accent); }
     50% { background: var(--accent); border-color: var(--accent); color: #000; } }
+  .btn-obs-active { animation: obsActivePulse 2s ease-in-out infinite; }
+  @keyframes obsActivePulse { 0%, 100% { border-color: var(--green); color: var(--green); }
+    50% { background: var(--green); border-color: var(--green); color: #000; } }
   .transport-desc { font-size: 10px; color: var(--dim); text-align: center; margin-top: 4px;
     min-height: 14px; }
 

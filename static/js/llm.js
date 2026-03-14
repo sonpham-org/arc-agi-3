@@ -842,10 +842,18 @@ async function toggleAutoPlay() {
     // Update obs pause button text
     const _obsPB = document.getElementById('obsPauseBtn');
     if (_obsPB) _obsPB.innerHTML = '\u00BB Resume';
+    // Update Observatory button — enabled but stop blinking (paused)
+    const _obsBtn = document.getElementById('backToObsBtn');
+    if (_obsBtn) { _obsBtn.disabled = false; _obsBtn.classList.remove('btn-obs-active'); }
     return;
   }
   if (!sessionId) { alert('Start a game first'); return; }
   if (currentState.state !== 'NOT_FINISHED') return;
+
+  // Validate model selection early — before entering observatory
+  const _snap = ss?._settings;
+  const _earlyModel = (_snap && !ss?.autoPlaying) ? _snap.model : getSelectedModel();
+  if (!_earlyModel) { alert('Select or type a model name'); return; }
 
   // ── Branch-on-settings-change: if resumed session has different settings, auto-branch ──
   if (ss && ss._originalSettings && ss.stepCount > 0) {
@@ -993,6 +1001,9 @@ async function toggleAutoPlay() {
   unlockSettings();
   updateAutoBtn();
   renderSessionTabs();
+  // Stop Observatory button blinking (session ended)
+  const _obsBtnEnd = document.getElementById('backToObsBtn');
+  if (_obsBtnEnd) { _obsBtnEnd.disabled = false; _obsBtnEnd.classList.remove('btn-obs-active'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1033,6 +1044,10 @@ async function resetSession() {
 
   // Clear reasoning panel
   document.getElementById('reasoningContent').innerHTML = '';
+
+  // Reset Observatory button
+  const _obsBtnReset = document.getElementById('backToObsBtn');
+  if (_obsBtnReset) { _obsBtnReset.disabled = true; _obsBtnReset.classList.remove('btn-obs-active'); }
 
   await startGame(gameId);
 }

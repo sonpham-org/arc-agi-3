@@ -43,9 +43,9 @@ function enterObsMode(ss) {
   const pauseBtn = document.getElementById('obsPauseBtn');
   if (pauseBtn) pauseBtn.innerHTML = (ss.autoPlaying) ? '&#10074;&#10074; Pause' : '&#187; Resume';
 
-  // Hide "Back to Observatory" button since we're in obs mode
+  // Disable Observatory button while in obs mode (it's always visible now)
   const obsBtn = document.getElementById('backToObsBtn');
-  if (obsBtn) obsBtn.style.display = 'none';
+  if (obsBtn) { obsBtn.disabled = true; obsBtn.classList.remove('btn-obs-active'); }
 
   // Re-render from existing events
   renderObsScreen(ss);
@@ -67,6 +67,9 @@ function enterObsMode(ss) {
   _obsScrubLive = true;
   obsScrubUpdate();
 
+  // Initialize memory panel by replaying all existing steps
+  if (typeof obsMemoryInit === 'function') obsMemoryInit();
+
   // Start elapsed timer only if autoplay is active
   if (ss.autoPlaying) {
     _obsElapsedTimer = setInterval(() => updateObsElapsed(ss), 1000);
@@ -81,18 +84,31 @@ function exitObsMode() {
   // Toggle back to settings view via CSS class
   document.getElementById('outerLayout')?.classList.remove('view-observatory');
 
-  // Move canvas back
+  // Move canvas back — insert before the transport bar so it doesn't end up below it
   const canvasEl = document.getElementById('gameCanvas');
   const _ml = document.getElementById('mainLayout');
   const canvasCenter = _ml.querySelector('.canvas-center');
   if (canvasEl && canvasCenter) {
-    canvasCenter.appendChild(canvasEl);
+    const transportBar = document.getElementById('transportBar');
+    if (transportBar) {
+      canvasCenter.insertBefore(canvasEl, transportBar);
+    } else {
+      canvasCenter.appendChild(canvasEl);
+    }
   }
   unlockSettings();
 
-  // Show "Back to Observatory" button in transport bar
+  // Enable Observatory button with active pulse to show session is running
   const obsBtn = document.getElementById('backToObsBtn');
-  if (obsBtn) obsBtn.style.display = '';
+  if (obsBtn) {
+    const ss = getActiveSession();
+    obsBtn.disabled = false;
+    if (ss && ss.autoPlaying) {
+      obsBtn.classList.add('btn-obs-active');
+    } else {
+      obsBtn.classList.remove('btn-obs-active');
+    }
+  }
 }
 
 function syncObsReasoning() {
@@ -156,9 +172,9 @@ function syncObsReasoning() {
     }
     dst.innerHTML = html;
   }
-  // Auto-scroll to bottom
-  const wrap = dst.closest('.obs-reasoning-wrap');
-  if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  // Auto-scroll to bottom (scroll the log sub-container, not the outer flex wrap)
+  const logWrap = dst.closest('.obs-reasoning-log') || dst.closest('.obs-reasoning-wrap');
+  if (logWrap) logWrap.scrollTop = logWrap.scrollHeight;
 }
 
 // ── Server sync (POST new events every 5s) ──

@@ -429,7 +429,7 @@
             <button class="btn" onclick="resetSession()" id="resetBtn"
               onmouseenter="showTransportDesc('Restart the current game from scratch')"
               onmouseleave="clearTransportDesc()">&#8635; Restart</button>
-            <button class="btn" id="backToObsBtn" onclick="enterObsMode()" style="display:none;"
+            <button class="btn" id="backToObsBtn" onclick="enterObsMode()" disabled
               onmouseenter="showTransportDesc('Return to the observatory view')"
               onmouseleave="clearTransportDesc()">&#128300; Observatory</button>
           </div>
@@ -609,7 +609,7 @@
         </div>
         <div class="obs-transport">
           <button class="btn" id="obsPauseBtn" onclick="toggleAutoPlay()">&#187; Resume</button>
-          <button class="btn" id="obsBackBtn" onclick="exitObsMode()">&#9881; Settings</button>
+          <button class="btn" id="obsBackBtn" onclick="exitObsMode()">&#9881; Back to Settings</button>
         </div>
       </div>
     </div>
