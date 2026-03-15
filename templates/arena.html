@@ -207,11 +207,8 @@ const FEATURES = {{ features | tojson }};
       <!-- Program.md viewer/editor — 2/3 height -->
       <div class="ar-program-area" id="arProgramArea">
         <div class="ar-section-header">
-          <span>program.md</span>
-          <div class="ar-program-controls">
-            <button class="ar-btn ar-btn-xs" id="arProgramEditBtn" onclick="arToggleEdit()">Edit</button>
-            <select class="ar-small-select" id="arProgramVersion"></select>
-          </div>
+          <span>program.md <button class="ar-btn ar-btn-xs" id="arProgramEditBtn" onclick="arToggleEdit()" style="margin-left:6px">Edit</button></span>
+          <select class="ar-small-select" id="arProgramVersion"></select>
         </div>
         <div class="ar-program-view" id="arProgramView">
           <div class="ar-no-data">Select a game to view its evolution program</div>
@@ -231,10 +228,6 @@ const FEATURES = {{ features | tojson }};
       <div class="ar-discussion-area" id="arDiscussionArea">
         <div class="ar-section-header">
           <span>Strategy Discussion</span>
-          <div class="ar-contribute-inline">
-            <select class="ar-small-select" id="arContributeModel" title="Model"></select>
-            <input type="password" id="arContributeKey" placeholder="API key" class="ar-input ar-input-sm" title="BYOK key">
-          </div>
         </div>
         <div class="ar-comments-list" id="arCommentsList"></div>
         <div class="ar-comment-input">

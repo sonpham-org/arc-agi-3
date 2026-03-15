@@ -782,12 +782,7 @@
   border-radius: 4px; padding: 6px 8px; font-family: inherit; font-size: 12px;
   resize: none;
 }
-/* Model + key inline in discussion header */
-.ar-contribute-inline {
-  display: flex; gap: 4px; align-items: center;
-}
-.ar-contribute-inline .ar-small-select { font-size: 10px; padding: 2px 4px; max-width: 140px; }
-.ar-contribute-inline .ar-input-sm { font-size: 10px; padding: 2px 6px; width: 100px; }
+/* (model/key inputs removed — server-side ARENA_CLAUDE_KEY handles evolution) */
 
 /* ── Col 3: Leaderboard + Recent Games (narrow ~10%) ── */
 .ar-mid-col {

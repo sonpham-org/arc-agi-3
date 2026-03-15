@@ -37,7 +37,8 @@ from db_arena import (
 #   Config
 # ═══════════════════════════════════════════════════════════════════════════
 
-HEARTBEAT_INTERVAL = 15 * 60  # 15 minutes
+HEARTBEAT_INTERVAL_NORMAL = 15 * 60  # 15 minutes
+HEARTBEAT_INTERVAL_FAST = 60         # 1 minute when new user feedback exists
 TOURNAMENT_GAMES_PER_TICK = 20
 EVOLUTION_AGENTS_PER_TICK = 1
 MAX_TOOL_ROUNDS = 6
@@ -50,6 +51,7 @@ _heartbeat_state = {
     'last_tick': None,
     'last_error': None,
     'ticks': 0,
+    'last_comment_check': 0,  # timestamp of last comment we processed
     'agents_created': 0,
     'games_played': 0,
     'thread': None,
@@ -441,21 +443,41 @@ def _run_tournament(game_id='snake', match_count=20):
 #   Heartbeat Thread
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _has_new_feedback(game_id='snake'):
+    """Check if there are strategy discussion comments newer than our last check."""
+    try:
+        from db_arena import arena_get_comments
+        comments = arena_get_comments(game_id, limit=5)
+        if not comments:
+            return False
+        newest = max(c['created_at'] for c in comments)
+        if newest > _heartbeat_state['last_comment_check']:
+            _heartbeat_state['last_comment_check'] = newest
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _heartbeat_loop():
-    """Main heartbeat loop — runs in a daemon thread."""
+    """Main heartbeat loop — runs in a daemon thread.
+    Normal: 15-min interval. Speeds up to 1-min when new user feedback exists."""
     _heartbeat_state['running'] = True
-    print('[heartbeat] Arena heartbeat started (15-min interval)')
+    _heartbeat_state['last_comment_check'] = time.time()
+    print('[heartbeat] Arena heartbeat started (15min normal, 1min on new feedback)')
 
     while _heartbeat_state['running']:
         api_key = os.environ.get('ARENA_CLAUDE_KEY', '')
-        if not api_key:
-            # No key configured — just run tournament with existing agents
-            pass
 
         try:
             tick_start = time.time()
             _heartbeat_state['ticks'] += 1
-            print(f'[heartbeat] Tick #{_heartbeat_state["ticks"]} starting...')
+
+            has_feedback = _has_new_feedback('snake')
+            if has_feedback:
+                print(f'[heartbeat] Tick #{_heartbeat_state["ticks"]} (FAST — new user feedback)')
+            else:
+                print(f'[heartbeat] Tick #{_heartbeat_state["ticks"]} starting...')
 
             # 1. Evolution (if API key available)
             if api_key:
@@ -479,8 +501,9 @@ def _heartbeat_loop():
             print(f'[heartbeat] Tick error: {e}')
             traceback.print_exc()
 
-        # Sleep for interval
-        time.sleep(HEARTBEAT_INTERVAL)
+        # Sleep: 1 min if new feedback pending, 15 min otherwise
+        interval = HEARTBEAT_INTERVAL_FAST if _has_new_feedback('snake') else HEARTBEAT_INTERVAL_NORMAL
+        time.sleep(interval)
 
 
 def start_arena_heartbeat():
