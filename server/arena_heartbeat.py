@@ -137,25 +137,29 @@ def _run_snake_match(code_a, code_b, max_turns=350):
         return {'winner': None, 'turns': 0, 'scores': [3, 3], 'error': str(e)}
 
 
+_ALLOWED_MODULES = {'random', 'math', 'collections', 'itertools', 'functools', 'heapq'}
+
+def _safe_import(name, *args, **kwargs):
+    """Restricted import — only allow safe standard library modules."""
+    if name in _ALLOWED_MODULES:
+        return __builtins__['__import__'](name, *args, **kwargs) if isinstance(__builtins__, dict) else __import__(name, *args, **kwargs)
+    raise ImportError(f"Module '{name}' is not allowed")
+
 def _load_agent_fn(code):
     """Safely load a get_move function from Python code string."""
     try:
-        namespace = {'__builtins__': {
-            'abs': abs, 'min': min, 'max': max, 'len': len, 'range': range,
-            'int': int, 'float': float, 'str': str, 'list': list, 'dict': dict,
-            'set': set, 'tuple': tuple, 'bool': bool, 'enumerate': enumerate,
-            'zip': zip, 'sorted': sorted, 'reversed': reversed, 'sum': sum,
-            'any': any, 'all': all, 'map': map, 'filter': filter,
-            'isinstance': isinstance, 'type': type, 'print': lambda *a, **k: None,
-            'True': True, 'False': False, 'None': None,
-        }}
-        # Allow standard library imports
-        import collections
-        import math as _math
-        namespace['collections'] = collections
-        namespace['math'] = _math
-        namespace['random'] = random
-
+        namespace = {
+            '__builtins__': {
+                '__import__': _safe_import,
+                'abs': abs, 'min': min, 'max': max, 'len': len, 'range': range,
+                'int': int, 'float': float, 'str': str, 'list': list, 'dict': dict,
+                'set': set, 'tuple': tuple, 'bool': bool, 'enumerate': enumerate,
+                'zip': zip, 'sorted': sorted, 'reversed': reversed, 'sum': sum,
+                'any': any, 'all': all, 'map': map, 'filter': filter,
+                'isinstance': isinstance, 'type': type, 'print': lambda *a, **k: None,
+                'True': True, 'False': False, 'None': None,
+            }
+        }
         exec(code, namespace)
         fn = namespace.get('get_move')
         if callable(fn):

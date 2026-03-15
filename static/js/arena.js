@@ -4929,7 +4929,7 @@ function arStartLocalResearch() {
 
 function arStartPolling(gameId) {
   arStopPolling();
-  // Heartbeat every 15 minutes — refreshes leaderboard, comments, recent games
+  // Refresh dashboard every 60 seconds — leaderboard, comments, recent games
   AR.pollTimer = setInterval(async () => {
     if (AR.selectedGame !== gameId) { arStopPolling(); return; }
     try {
@@ -4938,7 +4938,7 @@ function arStartPolling(gameId) {
     } catch (e) {
       // Silently fail
     }
-  }, 15 * 60 * 1000);
+  }, 60 * 1000);
 }
 
 function arStopPolling() {
