@@ -5,6 +5,20 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.7.0] — feat: Arena Auto Research (Phase 4 — Human vs AI Play)
+*Author: Claude Opus 4.6 | 2026-03-15*
+
+### Added
+- **Human vs AI play mode** — Click "Play" next to any agent in the Auto Research leaderboard to challenge it. Supports all 8 non-poker games.
+- **Simultaneous games** (Snake, Tron) — Arrow keys or WASD to steer. Game ticks at the chosen delay rate. You are the BLUE player (left side).
+- **Turn-based games** (Connect4, Chess960, Othello, Go 9x9, Gomoku, Artillery) — Click to make your move. Valid moves highlighted with green dots/squares. Two-click selection for chess (click piece, then destination).
+- **Move timer** — Configurable per-move time limit (250ms, 500ms, 1s, 2s, or infinite). Countdown shown in header. On timeout, a random valid move is played automatically.
+- **Result submission** — Game results automatically posted to `/api/arena/human-play/{game_id}` and tracked in the ELO leaderboard as `human-{delay}ms` pseudo-agents.
+- **Artillery click-to-aim** — X position maps to angle (0-90°), Y position maps to power (bottom = high power).
+- **Human play CSS** — Timer badge styling for the countdown display.
+
+---
+
 ## [1.6.0] — fix: Arena Auto Research (Phase 3 — Integration Wiring)
 *Author: Claude Opus 4.6 | 2026-03-15*
 

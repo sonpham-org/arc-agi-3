@@ -4601,11 +4601,34 @@ function arCloseHumanDialog() {
   document.getElementById('arHumanDialog').style.display = 'none';
 }
 
-function arStartHumanPlay() {
-  // TODO Phase 4: Launch human play mode
-  const delay = parseInt(document.querySelector('input[name="arDelay"]:checked').value);
-  alert(`Human play coming in Phase 4! Delay: ${delay}ms vs agent #${AR._humanAgentId}`);
+async function arStartHumanPlay() {
+  const delay = parseInt(document.querySelector('input[name="arDelay"]:checked')?.value ?? 1000);
+  const gameId = AR._humanGameId;
+  const agentId = AR._humanAgentId;
   arCloseHumanDialog();
+
+  // Fetch agent code from server (or local pool)
+  let agentCode = null;
+  let agentName = 'AI';
+  const localAgent = LocalResearch?.agents?.find(a => a.id === agentId || a.name === String(agentId));
+  if (localAgent) {
+    agentCode = localAgent.code;
+    agentName = localAgent.name;
+  } else {
+    try {
+      const resp = await fetch(`/api/arena/agents/${gameId}/${agentId}`);
+      const data = await resp.json();
+      agentCode = data.code;
+      agentName = data.name || 'AI';
+    } catch (e) {
+      alert('Failed to load agent: ' + e.message);
+      return;
+    }
+  }
+  if (!agentCode) { alert('Agent has no code'); return; }
+
+  // Launch human play mode (defined in arena-autoresearch.js)
+  arLaunchHumanPlay(gameId, agentCode, agentName, delay);
 }
 
 

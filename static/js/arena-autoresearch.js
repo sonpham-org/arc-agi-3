@@ -1,7 +1,8 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-15 23:45
+// Date: 2026-03-16 01:00
 // PURPOSE: Arena Auto Research — in-browser evolution + tournament engine.
 //   Phase 2: headless match runner, per-game state adapters, live tournament canvases.
+//   Phase 4: human vs AI play mode — keyboard/click input, timed moves, result submission.
 //   Evolution: LLM tool-calling loop generates JS agents using BYOK API keys.
 //   Tournament: runs game matches headlessly via game engine classes from arena.js.
 //   Swiss matchmaking, ELO tracking, agent validation, safety sandbox.
@@ -1467,5 +1468,514 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
       }
       ctx.fillRect(c * cellW, r * cellH, cellW + 0.5, cellH + 0.5);
     }
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Human vs AI Play — Phase 4
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const HumanPlay = {
+  active: false,
+  gameId: null,
+  engine: null,
+  aiFn: null,
+  aiName: '',
+  aiMemory: {},
+  humanMemory: {},
+  delayMs: 1000,       // time limit per human move (0 = infinite)
+  timer: null,          // game loop interval (simultaneous games)
+  timerCountdown: null, // countdown display interval
+  moveDeadline: 0,      // timestamp when current move times out
+  humanDir: null,        // buffered direction for simultaneous games
+  turns: 0,
+  canvas: null,
+  ctx: null,
+  canvasSize: 480,
+  _keyHandler: null,
+  _clickHandler: null,
+};
+
+/** Launch human vs AI play session. Called from arStartHumanPlay() in arena.js */
+function arLaunchHumanPlay(gameId, agentCode, agentName, delayMs) {
+  if (gameId === 'poker') {
+    alert('Poker human play is not yet supported.');
+    return;
+  }
+
+  const aiFn = arCreateAgentFn(agentCode);
+  if (!aiFn) { alert('Failed to load AI agent code.'); return; }
+
+  const game = ARENA_GAMES.find(g => g.id === gameId);
+  if (!game) return;
+
+  // Init state
+  HumanPlay.active = true;
+  HumanPlay.gameId = gameId;
+  HumanPlay.engine = _arNewEngine(gameId, game.config);
+  HumanPlay.aiFn = aiFn;
+  HumanPlay.aiName = agentName;
+  HumanPlay.aiMemory = {};
+  HumanPlay.humanMemory = {};
+  HumanPlay.delayMs = delayMs;
+  HumanPlay.turns = 0;
+  HumanPlay.humanDir = null;
+
+  // Build UI in arCenter
+  const center = document.getElementById('arCenter');
+  const sz = HumanPlay.canvasSize;
+
+  center.innerHTML = `
+    <div class="ar-section-header">
+      <span>You vs ${escHtml(agentName)}</span>
+      <div>
+        <span class="ar-human-timer-badge" id="hpTimer">${delayMs ? delayMs + 'ms' : 'No limit'}</span>
+        <button class="ar-btn ar-btn-sm" onclick="arHumanQuit()">Quit</button>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:12px;">
+      <canvas id="hpCanvas" width="${sz}" height="${sz}" style="image-rendering:pixelated;border:2px solid var(--border);border-radius:4px;max-width:100%;max-height:calc(100vh - 200px);cursor:${_arIsSimultaneous(gameId) ? 'default' : 'pointer'};"></canvas>
+      <div id="hpStatus" style="margin-top:8px;font-size:13px;font-weight:600;color:var(--text);"></div>
+      <div id="hpHint" style="font-size:11px;color:var(--text-dim);margin-top:4px;"></div>
+    </div>
+  `;
+
+  HumanPlay.canvas = document.getElementById('hpCanvas');
+  HumanPlay.ctx = HumanPlay.canvas.getContext('2d');
+
+  // Render initial state
+  _hpRender();
+
+  // Set up input handlers
+  if (_arIsSimultaneous(gameId)) {
+    _hpSetupSimultaneous();
+  } else {
+    _hpSetupTurnBased();
+  }
+}
+
+/** Clean up and exit human play */
+function arHumanQuit() {
+  HumanPlay.active = false;
+  if (HumanPlay.timer) { clearInterval(HumanPlay.timer); HumanPlay.timer = null; }
+  if (HumanPlay.timerCountdown) { clearInterval(HumanPlay.timerCountdown); HumanPlay.timerCountdown = null; }
+  if (HumanPlay._keyHandler) { document.removeEventListener('keydown', HumanPlay._keyHandler); HumanPlay._keyHandler = null; }
+  if (HumanPlay._clickHandler && HumanPlay.canvas) { HumanPlay.canvas.removeEventListener('click', HumanPlay._clickHandler); HumanPlay._clickHandler = null; }
+
+  // Restore research view
+  const gameId = AR.selectedGame || HumanPlay.gameId;
+  if (gameId) arSelectGame(gameId, 'community');
+  else {
+    const center = document.getElementById('arCenter');
+    if (center) center.innerHTML = '<div class="ar-no-data">Select a game to begin</div>';
+  }
+}
+
+
+/* ── Render ─────────────────────────────────────────────────────────────── */
+
+function _hpRender() {
+  const { gameId, engine, ctx, canvasSize: sz } = HumanPlay;
+  if (!engine || !ctx) return;
+
+  // Build a frame object matching what the arena render functions expect
+  const frame = _hpBuildFrame(gameId, engine);
+  const game = ARENA_GAMES.find(g => g.id === gameId);
+  if (game && game.render) {
+    game.render(ctx, frame, sz);
+  }
+
+  // Overlay valid moves for turn-based click games
+  if (!_arIsSimultaneous(gameId) && !engine.over) {
+    const who = _arWhoseTurn(gameId, engine);
+    if (who === 'A') { // Human's turn
+      _hpDrawValidMoves(gameId, engine, ctx, sz);
+    }
+  }
+}
+
+function _hpBuildFrame(gameId, engine) {
+  switch (gameId) {
+    case 'snake': return { grid: engine.getGrid() };
+    case 'tron': return { grid: engine.getGrid() };
+    case 'connect4': return { board: engine.getBoard(), lastMove: engine.lastMove };
+    case 'chess960': return { board: engine.getBoard(), lastMove: engine.lastMove };
+    case 'othello': return { board: engine.getBoard(), lastMove: engine.lastMove };
+    case 'go9': return { board: engine.getBoard(), lastMove: engine.lastMove };
+    case 'gomoku': return { board: engine.getBoard(), lastMove: engine.lastMove };
+    case 'artillery': return { state: engine.getState() };
+    default: return {};
+  }
+}
+
+function _hpDrawValidMoves(gameId, engine, ctx, sz) {
+  ctx.fillStyle = 'rgba(79, 204, 48, 0.25)';
+
+  if (gameId === 'connect4') {
+    const moves = engine.getLegalMoves();
+    const cellW = sz / 7;
+    for (const col of moves) {
+      ctx.fillRect(col * cellW + 2, 2, cellW - 4, 10);
+    }
+  } else if (gameId === 'othello') {
+    const moves = engine.getLegalMoves();
+    const sq = sz / 8;
+    for (const m of moves) {
+      ctx.beginPath();
+      ctx.arc((m.c + 0.5) * sq, (m.r + 0.5) * sq, sq * 0.15, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (gameId === 'go9') {
+    const moves = engine.getLegalMoves();
+    const margin = sz * 0.06, inner = sz - margin * 2, step = inner / 8;
+    for (const m of moves) {
+      ctx.beginPath();
+      ctx.arc(margin + m[1] * step, margin + m[0] * step, step * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (gameId === 'gomoku') {
+    // Too many moves to highlight — skip for gomoku
+  } else if (gameId === 'chess960') {
+    const moves = engine.getLegalMoves();
+    const sq = sz / 8;
+    const sources = new Set(moves.map(m => m.f[0] * 8 + m.f[1]));
+    ctx.fillStyle = 'rgba(79, 204, 48, 0.15)';
+    for (const idx of sources) {
+      const r = Math.floor(idx / 8), c = idx % 8;
+      ctx.fillRect(c * sq, r * sq, sq, sq);
+    }
+  }
+}
+
+
+/* ── Simultaneous Game Loop (Snake, Tron) ──────────────────────────────── */
+
+function _hpSetupSimultaneous() {
+  const { gameId, engine, delayMs } = HumanPlay;
+
+  // Default human direction = current snake/tron direction
+  if (gameId === 'snake') HumanPlay.humanDir = engine.snakeA.dir;
+  else if (gameId === 'tron') HumanPlay.humanDir = engine.dirA;
+  else HumanPlay.humanDir = 0;
+
+  // Keyboard handler
+  const keyHandler = (e) => {
+    if (!HumanPlay.active) return;
+    switch (e.key) {
+      case 'ArrowUp': case 'w': case 'W': HumanPlay.humanDir = 0; e.preventDefault(); break;
+      case 'ArrowRight': case 'd': case 'D': HumanPlay.humanDir = 1; e.preventDefault(); break;
+      case 'ArrowDown': case 's': case 'S': HumanPlay.humanDir = 2; e.preventDefault(); break;
+      case 'ArrowLeft': case 'a': case 'A': HumanPlay.humanDir = 3; e.preventDefault(); break;
+      case 'Escape': arHumanQuit(); break;
+    }
+  };
+  document.addEventListener('keydown', keyHandler);
+  HumanPlay._keyHandler = keyHandler;
+
+  _hpUpdateStatus('Arrow keys or WASD to move. Game starts in 1s...');
+  _hpUpdateHint(gameId === 'snake' ? 'You are the BLUE snake (left side)' : 'You are BLUE (left side)');
+
+  // Start game loop after 1s
+  setTimeout(() => {
+    if (!HumanPlay.active) return;
+    const tickRate = delayMs > 0 ? Math.max(delayMs, 150) : 200;
+    HumanPlay.timer = setInterval(() => {
+      if (!HumanPlay.active || engine.over) {
+        clearInterval(HumanPlay.timer);
+        HumanPlay.timer = null;
+        if (engine.over) _hpGameOver();
+        return;
+      }
+
+      // Build AI state and get AI move
+      const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
+      const aiRaw = arSafeCall(HumanPlay.aiFn, aiState, 50);
+      const aiDir = _arParseDir(aiRaw);
+
+      // Step engine with human's buffered direction + AI direction
+      engine.step(HumanPlay.humanDir, aiDir);
+      HumanPlay.turns++;
+
+      _hpRender();
+      _hpUpdateStatus(`Turn ${HumanPlay.turns} | You: ${_AR_DIR_NAMES[HumanPlay.humanDir]} | AI: ${_AR_DIR_NAMES[aiDir]}`);
+    }, tickRate);
+  }, 1000);
+}
+
+
+/* ── Turn-Based Game Loop (C4, Chess, Othello, Go, Gomoku, Artillery) ── */
+
+function _hpSetupTurnBased() {
+  const { gameId, engine, delayMs } = HumanPlay;
+
+  // Human = A (moves first in most games)
+  _hpUpdateHint(_hpGetControlHint(gameId));
+
+  // Start countdown if human moves first
+  if (_arWhoseTurn(gameId, engine) === 'A') {
+    _hpStartHumanTurn();
+  } else {
+    _hpDoAiTurn();
+  }
+
+  // Click handler for board
+  const clickHandler = (e) => {
+    if (!HumanPlay.active || engine.over) return;
+    if (_arWhoseTurn(gameId, engine) !== 'A') return; // Not human's turn
+
+    const rect = HumanPlay.canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+
+    const move = _hpClickToMove(gameId, engine, x, y);
+    if (!move) return;
+
+    // Cancel timer
+    if (HumanPlay.timerCountdown) { clearInterval(HumanPlay.timerCountdown); HumanPlay.timerCountdown = null; }
+
+    // Apply human move
+    _hpApplyHumanMove(gameId, engine, move);
+    HumanPlay.turns++;
+    _hpRender();
+
+    if (engine.over) { _hpGameOver(); return; }
+
+    // AI's turn
+    _hpDoAiTurn();
+  };
+  HumanPlay.canvas.addEventListener('click', clickHandler);
+  HumanPlay._clickHandler = clickHandler;
+
+  // Escape to quit
+  const keyHandler = (e) => {
+    if (e.key === 'Escape') arHumanQuit();
+  };
+  document.addEventListener('keydown', keyHandler);
+  HumanPlay._keyHandler = keyHandler;
+}
+
+function _hpStartHumanTurn() {
+  _hpUpdateStatus(`Turn ${HumanPlay.turns + 1} | Your move`);
+  _hpRender();
+
+  if (HumanPlay.delayMs > 0) {
+    HumanPlay.moveDeadline = Date.now() + HumanPlay.delayMs;
+    const timerEl = document.getElementById('hpTimer');
+
+    HumanPlay.timerCountdown = setInterval(() => {
+      const remaining = Math.max(0, HumanPlay.moveDeadline - Date.now());
+      if (timerEl) timerEl.textContent = Math.ceil(remaining / 1000) + 's';
+
+      if (remaining <= 0) {
+        clearInterval(HumanPlay.timerCountdown);
+        HumanPlay.timerCountdown = null;
+        // Timeout: play random valid move
+        _hpTimeoutMove();
+      }
+    }, 100);
+  }
+}
+
+function _hpTimeoutMove() {
+  const { gameId, engine } = HumanPlay;
+  if (!HumanPlay.active || engine.over) return;
+  if (_arWhoseTurn(gameId, engine) !== 'A') return;
+
+  // Pick a random valid move
+  const state = _arBuildState(gameId, engine, 'A', HumanPlay.humanMemory);
+  let move;
+  if (state.validMoves && state.validMoves.length > 0) {
+    move = state.validMoves[Math.floor(Math.random() * state.validMoves.length)];
+  }
+  if (move) {
+    _hpApplyHumanMove(gameId, engine, move);
+    HumanPlay.turns++;
+    _hpRender();
+    _hpUpdateStatus(`Turn ${HumanPlay.turns} | Timeout — random move played`);
+    if (engine.over) { _hpGameOver(); return; }
+    _hpDoAiTurn();
+  }
+}
+
+function _hpDoAiTurn() {
+  const { gameId, engine } = HumanPlay;
+  if (engine.over) { _hpGameOver(); return; }
+
+  // Check if it's actually AI's turn (for games like Othello where passing happens)
+  if (_arWhoseTurn(gameId, engine) !== 'B') {
+    _hpStartHumanTurn();
+    return;
+  }
+
+  _hpUpdateStatus(`Turn ${HumanPlay.turns + 1} | AI thinking...`);
+
+  // Small delay so human can see the "thinking" state
+  setTimeout(() => {
+    if (!HumanPlay.active || engine.over) return;
+    const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
+    const raw = arSafeCall(HumanPlay.aiFn, aiState, 50);
+    _arStepEngine(gameId, engine, raw, null, aiState, null);
+    HumanPlay.turns++;
+    _hpRender();
+
+    if (engine.over) { _hpGameOver(); return; }
+
+    // Back to human
+    _hpStartHumanTurn();
+  }, 300);
+}
+
+
+/* ── Click → Move Conversion ──────────────────────────────────────────── */
+
+function _hpClickToMove(gameId, engine, normX, normY) {
+  switch (gameId) {
+    case 'connect4': {
+      const col = Math.floor(normX * 7);
+      const legal = engine.getLegalMoves();
+      return legal.includes(col) ? col : null;
+    }
+    case 'chess960': {
+      // Two-click: first click selects piece, second click selects destination
+      const r = Math.floor(normY * 8), c = Math.floor(normX * 8);
+      if (!HumanPlay._selectedSquare) {
+        // First click: select a piece
+        const piece = engine.board[r][c];
+        const isWhite = piece > 0 && engine.turn === 'w';
+        if (isWhite) {
+          HumanPlay._selectedSquare = [r, c];
+          _hpRender(); // Will highlight selected
+          // Highlight valid destinations
+          const moves = engine.getLegalMoves().filter(m => m.f[0] === r && m.f[1] === c);
+          const sz = HumanPlay.canvasSize, sq = sz / 8;
+          const ctx = HumanPlay.ctx;
+          ctx.fillStyle = 'rgba(30, 147, 255, 0.3)';
+          ctx.fillRect(c * sq, r * sq, sq, sq);
+          ctx.fillStyle = 'rgba(79, 204, 48, 0.35)';
+          for (const m of moves) {
+            ctx.fillRect(m.t[1] * sq, m.t[0] * sq, sq, sq);
+          }
+          return null; // Wait for second click
+        }
+        return null;
+      } else {
+        // Second click: select destination
+        const [sr, sc] = HumanPlay._selectedSquare;
+        HumanPlay._selectedSquare = null;
+        const move = engine.getLegalMoves().find(m => m.f[0] === sr && m.f[1] === sc && m.t[0] === r && m.t[1] === c);
+        if (move) return move;
+        // If clicked own piece, re-select
+        const piece = engine.board[r][c];
+        if (piece > 0 && engine.turn === 'w') {
+          HumanPlay._selectedSquare = [r, c];
+          _hpRender();
+          const moves = engine.getLegalMoves().filter(m => m.f[0] === r && m.f[1] === c);
+          const sz = HumanPlay.canvasSize, sq = sz / 8;
+          const ctx = HumanPlay.ctx;
+          ctx.fillStyle = 'rgba(30, 147, 255, 0.3)';
+          ctx.fillRect(c * sq, r * sq, sq, sq);
+          ctx.fillStyle = 'rgba(79, 204, 48, 0.35)';
+          for (const m of moves) ctx.fillRect(m.t[1] * sq, m.t[0] * sq, sq, sq);
+          return null;
+        }
+        return null;
+      }
+    }
+    case 'othello': {
+      const r = Math.floor(normY * 8), c = Math.floor(normX * 8);
+      const legal = engine.getLegalMoves();
+      const found = legal.find(m => m.r === r && m.c === c);
+      return found ? { row: r, col: c } : null;
+    }
+    case 'go9': {
+      const margin = 0.06, inner = 1 - margin * 2;
+      const col = Math.round((normX - margin) / inner * 8);
+      const row = Math.round((normY - margin) / inner * 8);
+      if (row < 0 || row > 8 || col < 0 || col > 8) return null;
+      if (!engine.isLegalMove(row, col)) return null;
+      return { row, col };
+    }
+    case 'gomoku': {
+      const bsz = engine.size;
+      const margin = 0.05, inner = 1 - margin * 2;
+      const col = Math.round((normX - margin) / inner * (bsz - 1));
+      const row = Math.round((normY - margin) / inner * (bsz - 1));
+      if (row < 0 || row >= bsz || col < 0 || col >= bsz) return null;
+      if (engine.board[row][col] !== 0) return null;
+      return { row, col };
+    }
+    case 'artillery': {
+      // Click anywhere = shoot at 45 degrees, power based on click height
+      const power = Math.round((1 - normY) * 100);
+      const angle = Math.round(normX * 90);
+      return { angle: Math.max(5, Math.min(85, angle)), power: Math.max(10, Math.min(100, power)) };
+    }
+    default:
+      return null;
+  }
+}
+
+/** Apply a human move to the engine */
+function _hpApplyHumanMove(gameId, engine, move) {
+  // Reuse the step engine for the "A" player side
+  _arStepEngine(gameId, engine, move, null, null, null);
+}
+
+
+/* ── Game Over ─────────────────────────────────────────────────────────── */
+
+function _hpGameOver() {
+  HumanPlay.active = false;
+  if (HumanPlay.timer) { clearInterval(HumanPlay.timer); HumanPlay.timer = null; }
+  if (HumanPlay.timerCountdown) { clearInterval(HumanPlay.timerCountdown); HumanPlay.timerCountdown = null; }
+
+  const winner = HumanPlay.engine.winner;
+  const isWin = winner === 'A';
+  const isDraw = winner === 'draw' || !winner;
+  const resultText = isWin ? 'You Win!' : isDraw ? 'Draw!' : `${HumanPlay.aiName} Wins!`;
+  const resultColor = isWin ? '#4FCC30' : isDraw ? '#e09540' : '#F93C31';
+
+  _hpUpdateStatus(`<span style="color:${resultColor};font-size:18px;">${resultText}</span>`);
+  _hpUpdateHint(`${HumanPlay.turns} turns played. <button class="ar-btn ar-btn-sm" onclick="arHumanQuit()">Back to Research</button>`);
+
+  // Submit result to server
+  const humanResult = isWin ? 'human' : isDraw ? 'draw' : 'ai';
+  fetch(`/api/arena/human-play/${HumanPlay.gameId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      opponent_agent_id: AR._humanAgentId,
+      delay_ms: HumanPlay.delayMs,
+      winner: humanResult,
+      turns: HumanPlay.turns,
+    }),
+  }).then(r => r.json()).then(data => {
+    if (data.error) console.warn('Human play submit error:', data.error);
+  }).catch(e => console.warn('Human play submit failed:', e.message));
+}
+
+
+/* ── UI Helpers ─────────────────────────────────────────────────────────── */
+
+function _hpUpdateStatus(html) {
+  const el = document.getElementById('hpStatus');
+  if (el) el.innerHTML = html;
+}
+
+function _hpUpdateHint(html) {
+  const el = document.getElementById('hpHint');
+  if (el) el.innerHTML = html;
+}
+
+function _hpGetControlHint(gameId) {
+  switch (gameId) {
+    case 'connect4': return 'Click a column to drop your piece (you are RED)';
+    case 'chess960': return 'Click a piece, then click where to move it (you are WHITE)';
+    case 'othello': return 'Click a green dot to place your piece (you are DARK)';
+    case 'go9': return 'Click an intersection to place a stone (you are BLACK)';
+    case 'gomoku': return 'Click to place a stone — get 5 in a row (you are BLACK)';
+    case 'artillery': return 'Click to aim: X = angle (0-90), Y = power (bottom=high)';
+    default: return 'Click to make your move';
   }
 }

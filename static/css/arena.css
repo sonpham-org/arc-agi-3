@@ -844,6 +844,61 @@
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Local Research Dashboard
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ar-local-dashboard {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+.ar-local-top {
+  flex: 1; display: flex; min-height: 0; overflow: hidden;
+}
+.ar-local-obs {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.ar-obs-log {
+  flex: 1; overflow-y: auto; padding: 6px 8px; font-size: 11px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.ar-obs-entry {
+  display: flex; gap: 6px; padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ar-obs-time { color: var(--text-dim); font-size: 10px; flex-shrink: 0; width: 55px; }
+.ar-obs-type { font-weight: 700; font-size: 10px; flex-shrink: 0; width: 40px; }
+.ar-obs-content { color: var(--text-dim); word-break: break-word; flex: 1; overflow: hidden; }
+.ar-obs-info .ar-obs-type { color: #ffaa00; }
+.ar-obs-llm .ar-obs-type { color: #1E93FF; }
+.ar-obs-tool .ar-obs-type { color: #A356D6; }
+.ar-obs-error .ar-obs-type { color: #F93C31; }
+.ar-obs-error .ar-obs-content { color: #F93C31; }
+
+.ar-local-lb {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+.ar-local-lb-wrap {
+  flex: 1; overflow-y: auto;
+}
+.ar-local-status {
+  padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-dim); flex-shrink: 0;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Human vs AI Play
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ar-human-timer-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; font-family: 'Consolas', 'Monaco', monospace;
+  background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb44;
+  min-width: 40px; text-align: center;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Responsive
    ═══════════════════════════════════════════════════════════════════════════ */
 
