@@ -17,8 +17,12 @@ import threading
 import time
 import traceback
 
-# Add snake_autoresearch to path for reuse
-_SNAKE_AUTORESEARCH_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'snake_autoresearch')
+# Bundled snake engine and seeds live in server/
+_SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+_SEEDS_DIR = os.path.join(_SERVER_DIR, 'arena_seeds')
+
+# Also check external snake_autoresearch for LLM client (evolution only)
+_SNAKE_AUTORESEARCH_DIR = os.path.join(_SERVER_DIR, '..', '..', 'snake_autoresearch')
 if os.path.isdir(_SNAKE_AUTORESEARCH_DIR):
     sys.path.insert(0, os.path.abspath(_SNAKE_AUTORESEARCH_DIR))
 
@@ -63,7 +67,13 @@ _heartbeat_state = {
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _load_default_program():
-    """Load default_program.md from snake_autoresearch."""
+    """Load default_program.md from bundled seeds (or external snake_autoresearch)."""
+    # Try bundled copy first
+    path = os.path.join(_SEEDS_DIR, 'default_program.md')
+    if os.path.exists(path):
+        with open(path) as f:
+            return f.read()
+    # Fallback to external
     path = os.path.join(_SNAKE_AUTORESEARCH_DIR, 'default_program.md')
     if os.path.exists(path):
         with open(path) as f:
@@ -93,11 +103,15 @@ def get_move(state):
 # ═══════════════════════════════════════════════════════════════════════════
 
 try:
-    from snake_game import SnakeGame as _SnakeGameBase
+    from server.snake_engine import SnakeGame as _SnakeGameBase
     _HAS_SNAKE_ENGINE = True
 except ImportError:
-    _HAS_SNAKE_ENGINE = False
-    _SnakeGameBase = None
+    try:
+        from server.snake_engine import SnakeGame as _SnakeGameBase
+        _HAS_SNAKE_ENGINE = True
+    except ImportError:
+        _HAS_SNAKE_ENGINE = False
+        _SnakeGameBase = None
 
 
 def _run_snake_match(code_a, code_b, max_turns=350):
@@ -309,7 +323,7 @@ def _handle_tool(name, args, game_id, agents, created_list):
 
         # Quick test run
         try:
-            from snake_game import SnakeGame
+            from server.snake_engine import SnakeGame
             game = SnakeGame(width=20, height=20, max_turns=10, food_count=3)
             game.setup()
             state = game.get_state(0)
@@ -501,7 +515,10 @@ def _seed_if_empty(game_id):
 
     print(f'[tournament] No agents found for {game_id}, seeding baselines...')
 
-    seed_dir = os.path.join(_SNAKE_AUTORESEARCH_DIR, 'agents', 'seed')
+    # Use bundled seeds (server/arena_seeds/), fallback to external
+    seed_dir = _SEEDS_DIR
+    if not os.path.isdir(seed_dir):
+        seed_dir = os.path.join(_SNAKE_AUTORESEARCH_DIR, 'agents', 'seed')
     seeds = {
         'seed_random': os.path.join(seed_dir, 'random_agent.py'),
         'seed_greedy': os.path.join(seed_dir, 'greedy_agent.py'),
