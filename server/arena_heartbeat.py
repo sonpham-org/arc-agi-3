@@ -33,6 +33,8 @@ from db_arena import (
     arena_get_leaderboard,
     arena_get_agent,
     arena_update_elo,
+    arena_count_pair_games,
+    MAX_STORED_GAMES_PER_PAIR,
     _db,
 )
 
@@ -423,7 +425,6 @@ def _run_tournament(game_id='snake', match_count=20):
             continue
 
         # Skip pairs that already played 10+ games — enough ELO signal
-        from db_arena import arena_count_pair_games
         if arena_count_pair_games(a1['id'], a2['id']) >= MAX_STORED_GAMES_PER_PAIR:
             continue
 
@@ -493,18 +494,28 @@ def _tournament_loop():
     # Seed agents if DB is empty
     _seed_if_empty('snake')
 
+    consecutive_zeros = 0
     while _heartbeat_state['running']:
         try:
             games = _run_tournament(game_id='snake', match_count=1)
             if games > 0:
                 _heartbeat_state['games_played'] += games
+                consecutive_zeros = 0
+                if _heartbeat_state['games_played'] % 10 == 0:
+                    print(f'[tournament] {_heartbeat_state["games_played"]} total games played')
             else:
-                # No valid pairs left — all pairs saturated at 10 games
-                # Wait longer before checking again
-                time.sleep(30)
+                consecutive_zeros += 1
+                if consecutive_zeros == 1:
+                    # Log why on first zero — helps debug
+                    agents = arena_get_leaderboard('snake', limit=10)
+                    _heartbeat_state['last_error'] = f'tournament: 0 games, {len(agents)} agents loaded'
+                    print(f'[tournament] No games played ({len(agents)} agents). Retrying in 10s...')
+                time.sleep(10)
                 continue
         except Exception as e:
+            _heartbeat_state['last_error'] = f'tournament: {e}'
             print(f'[tournament] Error: {e}')
+            traceback.print_exc()
             time.sleep(10)
             continue
 
