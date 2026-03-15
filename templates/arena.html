@@ -447,6 +447,32 @@ const FEATURES = {{ features | tojson }};
 
 <!-- Scaffolding schemas (declarative field definitions) -->
 <script src="/static/js/config/scaffolding-schemas.js?v={{ static_v }}"></script>
+<!-- Shim: provide getModelInfo/PROVIDER_LABELS/modelsData for scaffolding.js (normally from ui-models.js) -->
+<script>
+let modelsData = [];
+const PROVIDER_LABELS = {
+  openai:'OpenAI', anthropic:'Anthropic', gemini:'Gemini', groq:'Groq',
+  mistral:'Mistral', cloudflare:'Cloudflare', huggingface:'HuggingFace',
+  ollama:'Ollama', lmstudio:'LM Studio', copilot:'Copilot', puter:'Puter',
+};
+function getModelInfo(key) { return modelsData.find(m => m.name === key); }
+function loadPuterJS() { return Promise.resolve(); }
+function estimateTokens(text) { return text ? Math.ceil(text.length / 4) : 0; }
+async function fetchJSON(url, body, signal) {
+  const opts = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) } : {};
+  if (signal) opts.signal = signal;
+  const r = await fetch(url, opts);
+  return r.json();
+}
+function toggleTheme() {
+  const t = document.documentElement.getAttribute('data-theme') === 'light' ? '' : 'light';
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('arc-theme', t || '');
+}
+</script>
+<!-- LLM calling infrastructure (callLLM, provider routing, BYOK keys) -->
+<script src="/static/js/scaffolding.js?v={{ static_v }}"></script>
 <script src="/static/js/arena.js?v={{ static_v }}"></script>
+<script src="/static/js/arena-autoresearch.js?v={{ static_v }}"></script>
 </body>
 </html>

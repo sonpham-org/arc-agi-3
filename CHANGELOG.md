@@ -5,6 +5,20 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.6.0] — fix: Arena Auto Research (Phase 3 — Integration Wiring)
+*Author: Claude Opus 4.6 | 2026-03-15*
+
+### Fixed
+- **Missing `estimateTokens()` shim** — `callLLM()` called `estimateTokens()` (from `utils/tokens.js`) which wasn't loaded in `arena.html`. Added inline shim. Anthropic provider calls would crash without this.
+- **Missing `fetchJSON()` shim** — Added inline shim in `arena.html` for API helper used by `scaffolding.js`.
+- **Global `modelsData` not synced** — `arenaLoadModels()` populated `Arena.modelsData` but never updated the global `modelsData` that `getModelInfo()` and `callLLM()` depend on. All LLM calls would fail with "No API key for undefined".
+- **Local research mode not switching views** — `arStartLocalResearch()` now calls `switchArenaMode('research')` before starting, so the research view is visible instead of the match layout.
+- **Community data fetch on local mode** — `arSelectGame('local')` no longer fetches community research data (which would error on games with no server-side data yet).
+- **Model dialog loading** — `arShowLocalDialog()` now awaits `arenaLoadModels()` if models haven't been fetched yet, preventing empty model dropdown.
+- **Added `toggleTheme()` shim** — Theme toggle button in arena top nav now works.
+
+---
+
 ## [1.5.0] — feat: Arena Auto Research (Phase 2 — Headless Engine + Evolution)
 *Author: Claude Opus 4.6 | 2026-03-15*
 

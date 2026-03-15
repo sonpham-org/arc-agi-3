@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-15 22:00
+// Date: 2026-03-16 00:30
 // PURPOSE: ARC Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
@@ -4032,6 +4032,9 @@ async function arenaLoadModels() {
     Arena.modelsData = data.models || [];
     Arena.modelsLoaded = true;
 
+    // Sync to global modelsData so getModelInfo() and callLLM() work from arena context
+    modelsData = Arena.modelsData;
+
     // Populate any already-rendered harness panels
     arenaPopulateModels('arenaA_');
     arenaPopulateModels('arenaB_');
@@ -4315,11 +4318,16 @@ async function arSelectGame(gameId, mode) {
     el.classList.toggle('active', el.dataset.game === gameId);
   });
 
-  // Update status
   const game = ARENA_GAMES.find(g => g.id === gameId);
-  document.getElementById('arStatusText').textContent = `Loading ${game ? game.title : gameId}...`;
 
-  // Fetch research data
+  // Local mode: skip community data fetch — local research UI is handled by arStartLocal
+  if (mode === 'local') {
+    document.getElementById('arStatusText').textContent = `${game ? game.title : gameId} — Local Research`;
+    return;
+  }
+
+  // Community mode: fetch research data from server
+  document.getElementById('arStatusText').textContent = `Loading ${game ? game.title : gameId}...`;
   try {
     const data = await fetch(`/api/arena/research/${gameId}`).then(r => r.json());
     if (data.error) {
@@ -4603,11 +4611,40 @@ function arStartHumanPlay() {
 
 /* ── Local Auto Research Dialog ── */
 
-function arShowLocalDialog(gameId) {
+async function arShowLocalDialog(gameId) {
   AR._localGameId = gameId;
   const game = ARENA_GAMES.find(g => g.id === gameId);
   document.getElementById('arLocalDialogTitle').textContent =
     `Local Auto Research: ${game ? game.title : gameId}`;
+
+  // Ensure models are loaded
+  if (!Arena.modelsLoaded) {
+    await arenaLoadModels();
+  }
+
+  // Populate model select from Arena's loaded models
+  const sel = document.getElementById('arLocalModel');
+  if (sel) {
+    sel.innerHTML = '';
+    const models = Arena.modelsData || [];
+    if (!models.length) {
+      sel.innerHTML = '<option value="">No models available</option>';
+    } else {
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = `${m.name} (${m.provider})`;
+        sel.appendChild(opt);
+      }
+    }
+  }
+
+  // Also populate contribute model select
+  const contSel = document.getElementById('arContributeModel');
+  if (contSel && sel) {
+    contSel.innerHTML = sel.innerHTML;
+  }
+
   document.getElementById('arLocalDialog').style.display = 'flex';
 }
 
@@ -4616,9 +4653,33 @@ function arCloseLocalDialog() {
 }
 
 function arStartLocalResearch() {
-  // TODO Phase 2: Launch in-browser evolution
-  alert('Local auto research coming in Phase 2!');
+  const gameId = AR._localGameId;
+  const model = document.getElementById('arLocalModel').value;
+  const apiKey = document.getElementById('arLocalKey').value;
+  const maxTokens = document.getElementById('arLocalTokens').value;
+
+  if (!model) { alert('Select a model'); return; }
+
+  const config = {
+    model,
+    apiKey,
+    maxTokens: parseInt(maxTokens) || 16384,
+    workers: parseInt(document.getElementById('arLocalWorkers').value) || 3,
+    matchmaking: {
+      swiss: parseInt(document.getElementById('arMmSwiss').value) || 90,
+      random: parseInt(document.getElementById('arMmRandom').value) || 10,
+    },
+  };
+
   arCloseLocalDialog();
+
+  // Switch to research view if not already there
+  switchArenaMode('research');
+
+  arSelectGame(gameId, 'local');
+
+  // Start local research (async, runs in background)
+  arStartLocal(gameId, config);
 }
 
 
