@@ -4434,30 +4434,78 @@ function arRenderResearch(gameId, data) {
 }
 
 // Default program.md for snake (shown when server has no program yet)
-const _AR_DEFAULT_PROGRAM = `# Snake Battle — Evolution Program
+const _AR_DEFAULT_PROGRAM = `# Snake Agent Evolution Program
 
 ## Objective
-Evolve agents that consistently win Snake Battle matches against diverse opponents.
-
-## Game Rules
-- 20x20 grid, two snakes, one food at a time
-- Eat food to grow, avoid walls and opponent
-- Colliding with walls, self, or opponent = death
-- Last snake alive wins; if both die same turn = draw
-
-## Strategy Guidelines
-- **Food control**: Prioritize safe paths to food over shortest paths
-- **Space control**: Avoid corners; prefer center and open areas
-- **Opponent awareness**: Track enemy position and cut off their escape routes
-- **Lookahead**: Evaluate multiple moves ahead before committing
+Create snake agents that win competitive 2-player snake games on a 20x20 grid.
 
 ## Agent Interface
-\`\`\`javascript
-function getMove(state) {
-  // state.grid, state.mySnake, state.enemySnake, state.food, state.turn, state.memory
-  return 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
-}
+Each agent is a standalone Python file with ONE function:
+\`\`\`python
+def get_move(state):
+    # state keys:
+    #   'grid_size': (20, 20)
+    #   'my_snake': [[x,y], ...] - head first, LISTS not tuples
+    #   'my_direction': 'UP'/'DOWN'/'LEFT'/'RIGHT'
+    #   'enemy_snake': [[x,y], ...] - empty list if dead
+    #   'enemy_direction': str or None
+    #   'food': [[x,y], ...]
+    #   'turn': int
+    # Returns: 'UP', 'DOWN', 'LEFT', or 'RIGHT'
 \`\`\`
+
+## Critical Rules
+- Coordinates are LISTS [x,y] - convert with tuple() before using in sets
+- Always: \\\`occupied = set(tuple(s) for s in state['my_snake'])\\\`
+- enemy_snake can be empty (dead) - always check first
+- Only standard library (random, math, collections). No os/subprocess/socket.
+- Must return in <100ms. Must not crash.
+- Directions: UP=(0,-1) DOWN=(0,1) LEFT=(-1,0) RIGHT=(1,0)
+- (0,0) = top-left, x right, y down
+
+## Agent Memory (prev_moves)
+Each agent has access to \\\`state['prev_moves']\\\` — a mutable list that persists across turns within a game.
+Use it to track your own history, detect patterns, or implement stateful strategies.
+
+## Scoring & ELO System
+Agents are ranked by ELO rating (starting at 1000, K-factor=32).
+
+**How games are decided:**
+- Last snake alive wins (opponent hit wall, self, or your body)
+- Head-on collision (both heads on same cell) = both die = draw
+- If both survive to turn 350 (max turns): longer snake wins; equal length = draw
+
+**How ELO updates:**
+- Expected score: E = 1 / (1 + 10^((opponent_elo - your_elo) / 400))
+- Win = 1.0, Draw = 0.5, Loss = 0.0
+- New ELO = old ELO + 32 * (actual - expected)
+
+**Key implications for strategy:**
+- Killing the opponent (making them crash) is the fastest way to win
+- If you can't kill them, out-eat them — longer snake wins at timeout
+- Draws gain ELO only if opponent is higher-rated
+- Survival matters: crashing = instant loss, even if you were longer
+
+## Strategies to Explore
+- BFS/A* pathfinding to nearest food
+- Flood fill to maximize reachable space
+- Enemy movement prediction and path cutting
+- Center board control
+- Survival-first: maximize distance from walls and enemy
+- Hybrid: BFS when safe, defensive when threatened
+- Trap setting: herd enemy toward walls
+- Space denial: cut off enemy's reachable area
+
+## Current Focus
+Your #1 goal is to BEAT the current top-performing agents on the leaderboard.
+
+Study the best agent's code carefully. Identify its weaknesses:
+- What situations does it handle poorly?
+- Where does it make suboptimal decisions?
+- What strategies would exploit its blind spots?
+
+Then build an agent specifically designed to counter and outperform it.
+Every new agent should aim to climb to #1 on the ELO leaderboard.
 `;
 
 // Store original program content for diffing
