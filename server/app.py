@@ -1,5 +1,5 @@
 # Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-11 13:47
+# Date: 2026-03-15 00:00
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
 #   session persistence (save/resume/branch via SQLite), game step proxying, model registry
 #   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
@@ -120,23 +120,6 @@ except ImportError as e:
     app.logger.warning(f'Blueprint registration skipped: {e}')
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# FEATURE FLAGS — dual-mode gating (local vs online)
-# ═══════════════════════════════════════════════════════════════════════════
-
-FEATURES = {
-    "copilot":       {"staging": False,  "prod": False},
-    "server_llm":    {"staging": False,  "prod": False},  # removed: all LLM calls are client-side
-    "puter_js":      {"staging": True,   "prod": True},
-    "byok":          {"staging": True,   "prod": True},
-    "session_db":    {"staging": True,   "prod": True},
-    "memory_md":     {"staging": True,   "prod": False},
-    "pyodide_game":  {"staging": True,   "prod": True},
-}
-
-# Games hidden in prod mode (non-foundation games)
-HIDDEN_GAMES = ["ab", "fd", "fy", "pt", "sh"]
-
 DEV_SECRET = os.environ.get("DEV_SECRET", "arc-dev-2026")
 
 # Will be set by CLI args; default to staging
@@ -199,7 +182,208 @@ def game_ab():
 
 @app.route("/arena")
 def arena():
-    return render_template("arena.html", static_v=_STATIC_VERSION)
+    mode = get_mode()
+    return render_template("arena.html", static_v=_STATIC_VERSION, mode=mode, features=get_enabled_features())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ARENA AUTO RESEARCH API
+# ═══════════════════════════════════════════════════════════════════════════
+
+from server.services import arena_research_service as _ar_svc
+from db_arena import (
+    arena_get_comments as _ar_get_comments,
+    arena_post_comment as _ar_post_comment,
+    arena_vote_comment as _ar_vote_comment,
+    arena_get_program as _ar_get_program,
+    arena_propose_program as _ar_propose_program,
+    arena_vote_program as _ar_vote_program,
+    arena_apply_program_vote as _ar_apply_vote,
+    arena_get_agent as _ar_get_agent,
+    arena_get_recent_games as _ar_get_recent_games,
+    arena_get_game as _ar_get_game,
+)
+
+
+@app.route("/api/arena/research/<game_id>")
+def arena_research_overview(game_id):
+    result = _ar_svc.get_research_overview(game_id)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/api/arena/agents/<game_id>")
+def arena_agents_list(game_id):
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    from db_arena import arena_get_leaderboard
+    leaderboard = arena_get_leaderboard(game_id, limit=200)
+    return jsonify(leaderboard)
+
+
+@app.route("/api/arena/agents/<game_id>/<int:agent_id>")
+def arena_agent_detail(game_id, agent_id):
+    agent = _ar_get_agent(game_id, agent_id)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    return jsonify(agent)
+
+
+@app.route("/api/arena/agents/<game_id>", methods=["POST"])
+def arena_agent_submit(game_id):
+    data = request.get_json(force=True)
+    name = data.get("name", "")
+    code = data.get("code", "")
+    contributor = data.get("contributor")
+    user = get_current_user()
+    if user:
+        contributor = contributor or user.get("id")
+    result = _ar_svc.submit_agent(game_id, name, code, contributor=contributor)
+    if isinstance(result, dict) and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@app.route("/api/arena/games/<game_id>")
+def arena_games_list(game_id):
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    limit = request.args.get("limit", 50, type=int)
+    games = _ar_get_recent_games(game_id, limit=min(limit, 200))
+    return jsonify(games)
+
+
+@app.route("/api/arena/games/<game_id>/<int:match_id>")
+def arena_game_detail(game_id, match_id):
+    game = _ar_get_game(game_id, match_id)
+    if not game:
+        return jsonify({"error": "Game not found"}), 404
+    return jsonify(game)
+
+
+@app.route("/api/arena/games/<game_id>", methods=["POST"])
+def arena_game_submit(game_id):
+    data = request.get_json(force=True)
+    result = _ar_svc.submit_game_result(
+        game_id=game_id,
+        agent1_id=data.get("agent1_id"),
+        agent2_id=data.get("agent2_id"),
+        winner_id=data.get("winner_id"),
+        scores=(data.get("agent1_score", 0), data.get("agent2_score", 0)),
+        turns=data.get("turns", 0),
+        history=data.get("history"),
+    )
+    if result and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result or {"ok": True})
+
+
+@app.route("/api/arena/comments/<game_id>")
+def arena_comments_list(game_id):
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    comments = _ar_get_comments(game_id)
+    return jsonify(comments)
+
+
+@app.route("/api/arena/comments/<game_id>", methods=["POST"])
+def arena_comment_post(game_id):
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    data = request.get_json(force=True)
+    content = data.get("content", "")
+    ok, err = _ar_svc.validate_comment(content)
+    if not ok:
+        return jsonify({"error": err}), 400
+    user = get_current_user()
+    user_id = user["id"] if user else data.get("user_id", "anon")
+    username = user.get("display_name", user.get("email", "Anon")) if user else data.get("username", "Anon")
+    comment = _ar_post_comment(
+        game_id, user_id, username, content.strip(),
+        comment_type=data.get("type", "strategy"),
+        parent_id=data.get("parent_id"),
+    )
+    return jsonify(comment), 201
+
+
+@app.route("/api/arena/comments/<game_id>/<int:comment_id>/vote", methods=["POST"])
+def arena_comment_vote(game_id, comment_id):
+    data = request.get_json(force=True)
+    vote = data.get("vote", 0)
+    if vote not in (1, -1):
+        return jsonify({"error": "vote must be 1 or -1"}), 400
+    user = get_current_user()
+    user_id = user["id"] if user else data.get("user_id", "anon")
+    result = _ar_vote_comment(comment_id, user_id, vote)
+    if not result:
+        return jsonify({"error": "Already voted same direction"}), 400
+    return jsonify(result)
+
+
+@app.route("/api/arena/program/<game_id>")
+def arena_program_get(game_id):
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    return jsonify(_ar_get_program(game_id))
+
+
+@app.route("/api/arena/program/<game_id>/propose", methods=["POST"])
+def arena_program_propose(game_id):
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    data = request.get_json(force=True)
+    content = data.get("content", "")
+    if not content.strip():
+        return jsonify({"error": "content required"}), 400
+    user = get_current_user()
+    author = user["id"] if user else data.get("author", "anon")
+    summary = data.get("change_summary", "")
+    vote_seconds = data.get("vote_seconds", 10)
+    proposal = _ar_propose_program(game_id, content, author, summary, vote_seconds)
+    return jsonify(proposal), 201
+
+
+@app.route("/api/arena/program/<game_id>/vote", methods=["POST"])
+def arena_program_vote(game_id):
+    data = request.get_json(force=True)
+    version_id = data.get("version_id")
+    vote = data.get("vote", 0)
+    if vote not in (1, -1):
+        return jsonify({"error": "vote must be 1 or -1"}), 400
+    user = get_current_user()
+    user_id = user["id"] if user else data.get("user_id", "anon")
+    result = _ar_vote_program(version_id, user_id, vote)
+    if isinstance(result, dict) and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/api/arena/program/<game_id>/apply/<int:version_id>", methods=["POST"])
+def arena_program_apply(game_id, version_id):
+    applied = _ar_apply_vote(version_id)
+    return jsonify({"applied": applied})
+
+
+@app.route("/api/arena/human-play/<game_id>", methods=["POST"])
+def arena_human_play(game_id):
+    data = request.get_json(force=True)
+    result = _ar_svc.submit_human_play(
+        game_id=game_id,
+        opponent_agent_id=data.get("opponent_agent_id"),
+        delay_ms=data.get("delay_ms", 1000),
+        winner=data.get("winner", "draw"),
+        turns=data.get("turns", 0),
+    )
+    if isinstance(result, dict) and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result or {"ok": True})
 
 
 @app.route("/")

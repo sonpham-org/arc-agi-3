@@ -222,6 +222,133 @@ def _init_db():
         -- Leaderboard index
         CREATE INDEX IF NOT EXISTS idx_sessions_leaderboard
             ON sessions(player_type, steps, levels DESC);
+
+        -- ═══════════════════════════════════════════════════════════════════
+        -- Arena Auto Research tables
+        -- ═══════════════════════════════════════════════════════════════════
+
+        -- Per-game auto research context
+        CREATE TABLE IF NOT EXISTS arena_research (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            program_md TEXT DEFAULT '',
+            program_version INTEGER DEFAULT 0,
+            generation INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'stopped',
+            created_at REAL DEFAULT (unixepoch('now')),
+            updated_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ar_game ON arena_research(game_id);
+
+        -- Agents (shared genome pool per game)
+        CREATE TABLE IF NOT EXISTS arena_agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            code TEXT NOT NULL,
+            generation INTEGER DEFAULT 0,
+            elo REAL DEFAULT 1000.0,
+            peak_elo REAL DEFAULT 1000.0,
+            games_played INTEGER DEFAULT 0,
+            wins INTEGER DEFAULT 0,
+            losses INTEGER DEFAULT 0,
+            draws INTEGER DEFAULT 0,
+            contributor TEXT,
+            is_human INTEGER DEFAULT 0,
+            is_anchor INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            created_at REAL DEFAULT (unixepoch('now')),
+            UNIQUE(game_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_aa_game_elo ON arena_agents(game_id, elo DESC);
+        CREATE INDEX IF NOT EXISTS idx_aa_game_active ON arena_agents(game_id, active);
+
+        -- Games (matches between agents)
+        CREATE TABLE IF NOT EXISTS arena_games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            agent1_id INTEGER REFERENCES arena_agents(id),
+            agent2_id INTEGER REFERENCES arena_agents(id),
+            winner_id INTEGER REFERENCES arena_agents(id),
+            agent1_score INTEGER DEFAULT 0,
+            agent2_score INTEGER DEFAULT 0,
+            turns INTEGER DEFAULT 0,
+            history TEXT DEFAULT '[]',
+            is_upset INTEGER DEFAULT 0,
+            created_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ag_game ON arena_games(game_id);
+        CREATE INDEX IF NOT EXISTS idx_ag_agents ON arena_games(agent1_id, agent2_id);
+        CREATE INDEX IF NOT EXISTS idx_ag_created ON arena_games(created_at);
+
+        -- Evolution cycles (LLM conversations that produced agents)
+        CREATE TABLE IF NOT EXISTS arena_evolution_cycles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            generation INTEGER,
+            worker_label TEXT,
+            agents_created INTEGER DEFAULT 0,
+            agents_passed INTEGER DEFAULT 0,
+            conversation TEXT DEFAULT '[]',
+            started_at REAL,
+            finished_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_aec_game ON arena_evolution_cycles(game_id);
+
+        -- Community discussion (strategy comments + votes)
+        CREATE TABLE IF NOT EXISTS arena_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            user_id TEXT,
+            username TEXT DEFAULT 'Anon',
+            content TEXT NOT NULL,
+            comment_type TEXT DEFAULT 'strategy',
+            parent_id INTEGER REFERENCES arena_comments(id),
+            upvotes INTEGER DEFAULT 0,
+            downvotes INTEGER DEFAULT 0,
+            created_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ac_game ON arena_comments(game_id, created_at DESC);
+
+        -- Program.md version history (for voting)
+        CREATE TABLE IF NOT EXISTS arena_program_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            author TEXT,
+            change_summary TEXT,
+            votes_for INTEGER DEFAULT 0,
+            votes_against INTEGER DEFAULT 0,
+            vote_deadline REAL,
+            applied INTEGER DEFAULT 0,
+            created_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_apv_game ON arena_program_versions(game_id, version DESC);
+
+        -- Vote tracking (prevent double-voting)
+        CREATE TABLE IF NOT EXISTS arena_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            version_id INTEGER REFERENCES arena_program_versions(id),
+            user_id TEXT NOT NULL,
+            vote INTEGER NOT NULL,
+            created_at REAL DEFAULT (unixepoch('now')),
+            UNIQUE(version_id, user_id)
+        );
+
+        -- Human play sessions
+        CREATE TABLE IF NOT EXISTS arena_human_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            human_agent_id INTEGER REFERENCES arena_agents(id),
+            opponent_id INTEGER REFERENCES arena_agents(id),
+            delay_ms INTEGER NOT NULL,
+            winner TEXT,
+            turns INTEGER DEFAULT 0,
+            created_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ahs_game ON arena_human_sessions(game_id);
     """)
 
     conn.commit()
@@ -548,6 +675,32 @@ from db_memory import (
 from db_deprecated import (
     _log_turn,
     _get_session_turns,
+)
+
+# Arena Auto Research
+from db_arena import (
+    arena_get_or_create_research,
+    arena_get_leaderboard,
+    arena_submit_agent,
+    arena_get_agent,
+    arena_record_game,
+    arena_update_elo,
+    arena_get_recent_games,
+    arena_get_game,
+    arena_count_pair_games,
+    arena_prune_weak_agents,
+    arena_get_comments,
+    arena_post_comment,
+    arena_vote_comment,
+    arena_get_program,
+    arena_propose_program,
+    arena_vote_program,
+    arena_apply_program_vote,
+    arena_submit_human_result,
+    arena_get_or_create_human_agent,
+    arena_get_research_stats,
+    arena_strip_old_history,
+    arena_delete_old_games,
 )
 
 # Facade exports

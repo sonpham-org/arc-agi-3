@@ -1,11 +1,15 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-14 16:00
+// Date: 2026-03-15 22:00
 // PURPOSE: ARC Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
-//   Implements 8 games: Snake Battle, Tron, Connect Four, Fischer Random Chess,
-//   Othello, Go 9x9, Gomoku, Artillery. Each has engine, AI, rendering, match runner.
+//   Supports Code mode (built-in AI) and Harness mode (LLM scaffolding settings).
+//   Implements 9 games: Snake Battle, Tron, Connect Four, Fischer Random Chess,
+//   Othello, Go 9x9, Gomoku, Artillery, Poker. Each has engine, AI, rendering, match runner.
 //   Dispatcher pattern: ARENA_GAMES entries have run/render/preview functions.
+//   Arena Observatory: per-agent observability overlay (Agent A obs LEFT, Agent B obs RIGHT).
+//   Auto Research: mode switcher, per-game community/local research, leaderboard,
+//   strategy discussion, program.md viewer/editor/voting, human vs AI play dialog.
 // SRP/DRY check: Pass — self-contained arena module, no overlap with main app JS
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3218,7 +3222,8 @@ function runMatch(config, strategyA, strategyB) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const Arena = {
-  mode: 'setup',          // 'setup' | 'match'
+  mode: 'setup',          // 'setup' | 'match' | 'observe'
+  obsAgent: null,         // 'A' | 'B' — which agent is being observed
   selectedGame: 'snake',
   history: null,
   currentStep: 0,
@@ -3226,6 +3231,10 @@ const Arena = {
   playTimer: null,
   canvas: null,
   ctx: null,
+  obsCanvas: null,
+  obsCtx: null,
+  modelsData: [],         // model list from /api/llm/models
+  modelsLoaded: false,
 };
 
 
@@ -3291,6 +3300,8 @@ function buildGameCards() {
 function initArena() {
   Arena.canvas = document.getElementById('arenaCanvas');
   Arena.ctx = Arena.canvas.getContext('2d');
+  Arena.obsCanvas = document.getElementById('arenaObsCanvas');
+  Arena.obsCtx = Arena.obsCanvas.getContext('2d');
 
   // Build categorized game cards dynamically
   buildGameCards();
@@ -3301,8 +3312,11 @@ function initArena() {
     if (preview) renderPreview(preview, game);
   }
 
-  // Wire up scrubber
+  // Wire up scrubbers (main + obs)
   document.getElementById('arenaScrubber').addEventListener('input', e => {
+    scrubTo(parseInt(e.target.value));
+  });
+  document.getElementById('arenaObsScrubber').addEventListener('input', e => {
     scrubTo(parseInt(e.target.value));
   });
 
@@ -3320,6 +3334,9 @@ function initArena() {
   });
 
   updateThemeBtn();
+
+  // Load models for harness mode (async, non-blocking)
+  arenaLoadModels();
 }
 
 function renderPreview(canvas, game) {
@@ -3366,12 +3383,18 @@ function enterMatchMode() {
   // Hide game selection, show match area
   document.getElementById('gameSelectArea').classList.add('hidden');
   document.getElementById('matchArea').classList.add('visible');
+
+  // Ensure obs screen is hidden
+  document.getElementById('arenaObsScreen').style.display = 'none';
 }
 
 function enterSetupMode() {
   Arena.mode = 'setup';
   stopPlayback();
   hideWinnerOverlay();
+
+  // Hide obs screen if open
+  document.getElementById('arenaObsScreen').style.display = 'none';
 
   // Show settings, hide logs
   document.getElementById('settingsA').style.display = '';
@@ -3394,6 +3417,11 @@ function enterSetupMode() {
 }
 
 function backToSetup() {
+  if (Arena.mode === 'observe') {
+    // From obs mode, go back to match view (not setup)
+    exitArenaObs();
+    return;
+  }
   enterSetupMode();
 }
 
@@ -3455,14 +3483,31 @@ function renderStep(step) {
 
   const frame = Arena.history[step];
   const canvasSize = 512;
+  const gameDef = ARENA_GAMES.find(g => g.id === Arena.selectedGame);
+
+  // Render on main canvas
   Arena.canvas.width = canvasSize;
   Arena.canvas.height = canvasSize;
-
-  // Game-specific rendering (dispatch via game entry)
-  const gameDef = ARENA_GAMES.find(g => g.id === Arena.selectedGame);
   if (gameDef && gameDef.render) gameDef.render(Arena.ctx, frame, canvasSize);
 
-  // Update scrubber position
+  // Also render on obs canvas if in observe mode
+  if (Arena.mode === 'observe') {
+    Arena.obsCanvas.width = canvasSize;
+    Arena.obsCanvas.height = canvasSize;
+    if (gameDef && gameDef.render) gameDef.render(Arena.obsCtx, frame, canvasSize);
+    // Update obs scrubber
+    document.getElementById('arenaObsScrubber').value = step;
+    document.getElementById('obsScrubLabel').textContent = `Turn ${frame.turn}`;
+    // Update obs status
+    document.getElementById('obsStatTurn').textContent = frame.turn;
+    document.getElementById('obsStatStep').textContent = step;
+    // Update obs play button
+    document.getElementById('arenaObsPlayBtn').textContent = Arena.playing ? 'Pause' : 'Play';
+    // Highlight obs log
+    highlightObsLogEntry(step);
+  }
+
+  // Update main scrubber position
   document.getElementById('arenaScrubber').value = step;
   document.getElementById('scrubLabel').textContent = `Turn ${frame.turn}`;
 
@@ -3672,15 +3717,929 @@ function updateThemeBtn() {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 document.addEventListener('keydown', e => {
-  if (Arena.mode !== 'match' || !Arena.history) return;
+  if ((Arena.mode !== 'match' && Arena.mode !== 'observe') || !Arena.history) return;
 
   if (e.key === ' ' || e.key === 'k') { e.preventDefault(); arenaPlayPause(); }
   if (e.key === 'ArrowLeft' || e.key === 'j') { e.preventDefault(); arenaStepBack(); }
   if (e.key === 'ArrowRight' || e.key === 'l') { e.preventDefault(); arenaStepForward(); }
   if (e.key === 'Home') { e.preventDefault(); stopPlayback(); scrubTo(0); }
   if (e.key === 'End') { e.preventDefault(); stopPlayback(); scrubTo(Arena.history.length - 1); }
-  if (e.key === 'Escape') { backToSetup(); }
+  if (e.key === 'Escape') {
+    if (Arena.mode === 'observe') exitArenaObs();
+    else backToSetup();
+  }
 });
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Code / Harness Mode Toggle
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function toggleAgentMode(agent) {
+  const mode = document.getElementById(`agentMode${agent}`).value;
+  const codeDiv = document.getElementById(`codeMode${agent}`);
+  const harnessDiv = document.getElementById(`harnessMode${agent}`);
+
+  if (mode === 'code') {
+    codeDiv.style.display = '';
+    harnessDiv.style.display = 'none';
+  } else {
+    codeDiv.style.display = 'none';
+    harnessDiv.style.display = '';
+    // Render harness settings if not already rendered
+    const container = document.getElementById(`harnessSettings${agent}`);
+    if (!container.dataset.rendered) {
+      const savedType = localStorage.getItem(`arc_arena_${agent.toLowerCase()}_scaffolding_type`) || 'linear';
+      renderArenaHarness(agent, savedType);
+      container.dataset.rendered = '1';
+    }
+  }
+  localStorage.setItem(`arc_arena_${agent.toLowerCase()}_mode`, mode);
+}
+
+function getAgentMode(agent) {
+  return document.getElementById(`agentMode${agent}`)?.value || 'code';
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Arena Harness Settings Renderer
+   Renders scaffolding settings into agent panels using SCAFFOLDING_SCHEMAS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function renderArenaHarness(agent, schemaId) {
+  const schema = SCAFFOLDING_SCHEMAS[schemaId];
+  if (!schema) return;
+
+  const prefix = `arena${agent}_`;
+  const container = document.getElementById(`harnessSettings${agent}`);
+  if (!container) return;
+
+  let html = '';
+
+  // Harness type selector
+  html += '<div class="setting-section">';
+  html += '<div class="setting-label">Harness</div>';
+  html += `<select class="setting-select" id="${prefix}scaffoldingSelect" onchange="switchArenaHarness('${agent}', this.value)">`;
+  for (const key of Object.keys(SCAFFOLDING_SCHEMAS)) {
+    const s = SCAFFOLDING_SCHEMAS[key];
+    html += `<option value="${key}"${key === schemaId ? ' selected' : ''}>${s.name}</option>`;
+  }
+  html += '</select>';
+  html += `<div style="font-size:10px;color:var(--text-dim);margin-top:4px;">${schema.description}</div>`;
+  html += '</div>';
+
+  // Pipeline visualizer
+  html += `<div id="${prefix}pipelineViz" style="margin-bottom:8px;"></div>`;
+
+  // Render sections
+  for (const section of schema.sections) {
+    const openCls = section.open ? ' open' : '';
+    html += `<div class="opt-section${openCls}" id="${prefix}${section.id}">`;
+    html += `<div class="opt-header" onclick="arenaToggleSection('${prefix}${section.id}')">`;
+    html += `<span>${section.label}</span><span class="chevron">&#9654;</span></div>`;
+
+    if (section.customHtml) {
+      // Replace static IDs with prefixed ones for BYOK containers
+      let customHtml = section.customHtml();
+      customHtml = customHtml.replace(/id="byokKeysContainer"/g, `id="${prefix}byokKeysContainer"`);
+      customHtml = customHtml.replace(/id="copilotNotAuth"/g, `id="${prefix}copilotNotAuth"`);
+      customHtml = customHtml.replace(/id="copilotAuthed"/g, `id="${prefix}copilotAuthed"`);
+      customHtml = customHtml.replace(/id="copilotDeviceCode"/g, `id="${prefix}copilotDeviceCode"`);
+      customHtml = customHtml.replace(/id="copilotUserCode"/g, `id="${prefix}copilotUserCode"`);
+      customHtml = customHtml.replace(/id="copilotVerifyLink"/g, `id="${prefix}copilotVerifyLink"`);
+      html += `<div class="opt-body">${customHtml}</div>`;
+    } else if (section.fields) {
+      html += `<div class="opt-body${section.bodyClass ? ' ' + section.bodyClass : ''}">`;
+      for (const f of section.fields) {
+        html += arenaRenderField(f, prefix);
+      }
+      html += '</div>';
+    } else if (section.groups) {
+      html += '<div class="opt-body">';
+      for (const g of section.groups) {
+        html += arenaRenderGroup(g, prefix);
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+
+  // Render pipeline visualizer
+  arenaRenderPipeline(schema, `${prefix}pipelineViz`);
+
+  // Populate model selects
+  arenaPopulateModels(prefix);
+
+  // Restore saved settings
+  arenaRestoreSettings(agent, schemaId);
+}
+
+function switchArenaHarness(agent, schemaId) {
+  localStorage.setItem(`arc_arena_${agent.toLowerCase()}_scaffolding_type`, schemaId);
+  renderArenaHarness(agent, schemaId);
+}
+
+function arenaToggleSection(sectionId) {
+  const section = document.getElementById(sectionId);
+  if (section) section.classList.toggle('open');
+}
+
+function arenaRenderField(f, prefix) {
+  const id = prefix + f.id;
+  switch (f.type) {
+    case 'toggle': {
+      const label = f.labelHtml || f.label;
+      return `<div class="opt-row"><span class="opt-label">${label}</span><label class="toggle"><input type="checkbox" id="${id}"${f.default ? ' checked' : ''}><span class="slider"></span></label></div>`;
+    }
+    case 'model-select': {
+      let h = '<div style="margin-bottom:8px;">';
+      h += `<select id="${id}"><option value="">Loading...</option></select>`;
+      if (f.capsId) h += `<div class="model-caps" id="${prefix}${f.capsId}"></div>`;
+      h += '</div>';
+      return h;
+    }
+    case 'quadswitch':
+    case 'triswitch':
+    case 'multiswitch': {
+      const cls = f.type === 'quadswitch' ? 'quadswitch' : 'triswitch';
+      let h = '<div>';
+      h += `<div class="opt-label" style="margin-bottom:4px;">${f.label}</div>`;
+      h += `<div class="${cls}" id="${id}">`;
+      for (const o of f.options) {
+        h += `<label><input type="radio" name="${prefix}${f.name}" value="${o.v}"${o.checked ? ' checked' : ''}><span>${o.l}</span></label>`;
+      }
+      h += '</div>';
+      if (f.hint) h += `<div style="font-size:10px;color:var(--text-dim);margin-top:4px;">${f.hint}</div>`;
+      h += '</div>';
+      return h;
+    }
+    case 'number-spin': {
+      let h = '<div class="opt-row" style="margin-top:8px;">';
+      h += `<span class="opt-label">${f.label}</span>`;
+      h += '<span class="spin-wrap">';
+      h += `<input type="number" id="${id}" value="${f.default}" min="${f.min}" max="${f.max}" step="${f.step}" style="width:68px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">`;
+      h += '<span class="spin-btns">';
+      h += `<button class="spin-btn" onclick="arenaSpinField('${id}',${f.step},${f.max})">&#9650;</button>`;
+      h += `<button class="spin-btn" onclick="arenaSpinField('${id}',-${f.step},${f.max},${f.min})">&#9660;</button>`;
+      h += '</span></span></div>';
+      return h;
+    }
+    case 'number-input': {
+      let h = `<div class="opt-row"><span class="opt-label">${f.label}</span>`;
+      h += `<input type="number" id="${id}"`;
+      if (f.default !== undefined) h += ` value="${f.default}"`;
+      if (f.placeholder) h += ` placeholder="${f.placeholder}"`;
+      h += ` min="${f.min}" max="${f.max}"`;
+      h += ` style="width:${f.width || '55px'};background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;">`;
+      h += '</div>';
+      return h;
+    }
+    case 'number-spin-unit': {
+      let h = `<div class="opt-row"><span class="opt-label">${f.label}</span>`;
+      h += '<span class="spin-wrap">';
+      h += `<input type="number" id="${id}" value="${f.default}" min="${f.min}" step="${f.step}" style="width:${f.width || '68px'};background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px 0 0 4px;padding:3px 6px;font-family:inherit;font-size:12px;">`;
+      h += '<span class="spin-btns">';
+      h += `<button class="spin-btn" onclick="arenaSpinField('${id}',${f.step},999999)">&#9650;</button>`;
+      h += `<button class="spin-btn" onclick="arenaSpinField('${id}',-${f.step},999999,${f.min})">&#9660;</button>`;
+      h += '</span></span>';
+      h += `<select id="${prefix}${f.unitId}" style="width:62px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:11px;margin-left:4px;">`;
+      for (const u of f.units) {
+        h += `<option value="${u.v}"${u.selected ? ' selected' : ''}>${u.l}</option>`;
+      }
+      h += '</select></div>';
+      return h;
+    }
+    case 'compact-model-select': {
+      let h = '<div style="margin-bottom:8px;">';
+      h += `<select id="${id}" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:12px;">`;
+      h += '<option value="auto">Auto (cheapest of same provider)</option>';
+      h += '<option value="auto-fastest">Auto (fastest of same provider)</option>';
+      h += '<option value="same">Same as reasoning</option>';
+      h += '</select>';
+      if (f.hint) h += `<div style="font-size:9px;color:var(--dim);margin-top:3px;">${f.hint}</div>`;
+      h += '</div>';
+      return h;
+    }
+    case 'grid-2col':
+    case 'grid-2col-body': {
+      let h = `<div class="settings-grid"${f.marginBottom ? ` style="margin-bottom:${f.marginBottom};"` : ''}>`;
+      for (const child of f.children) {
+        h += arenaRenderField(child, prefix);
+      }
+      h += '</div>';
+      return h;
+    }
+    default: return '';
+  }
+}
+
+function arenaRenderGroup(g, prefix) {
+  let h = '';
+  if (g.toggleId) {
+    h += '<div class="sub-header" style="display:flex;align-items:center;justify-content:space-between;">';
+    h += `<span>${g.subHeader}</span>`;
+    h += `<label class="toggle" style="margin:0;"><input type="checkbox" id="${prefix}${g.toggleId}"${g.toggleDefault ? ' checked' : ''}><span class="slider"></span></label>`;
+    h += '</div>';
+    h += `<div id="${prefix}${g.bodyId}">`;
+  } else {
+    h += `<div class="sub-header">${g.subHeader}</div>`;
+  }
+  for (const f of g.fields) {
+    h += arenaRenderField(f, prefix);
+  }
+  if (g.toggleId) h += '</div>';
+  return h;
+}
+
+function arenaSpinField(id, delta, max, min) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const cur = parseInt(el.value) || 0;
+  const step = Math.abs(delta);
+  let next = cur + delta;
+  if (min !== undefined) next = Math.max(min, next);
+  if (max !== undefined) next = Math.min(max, next);
+  el.value = next;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Arena Pipeline Visualizer (simplified version)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function arenaRenderPipeline(schema, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container || !schema.pipeline?.length) { if (container) container.innerHTML = ''; return; }
+
+  const nodes = schema.pipeline;
+  const edges = schema.edges || [];
+
+  // Agent Spawn: skip complex layout, show simple text
+  if (schema.id === 'agent_spawn') {
+    container.innerHTML = `<div style="font-size:10px;color:var(--text-dim);padding:4px 0;">Pipeline: ${nodes.map(n => n.label).join(' → ')}</div>`;
+    return;
+  }
+
+  // Simple vertical pipeline for side panel
+  const nodeW = 120, nodeH = 24, gapY = 20, padX = 20, padTop = 8, padBot = 8;
+  const svgW = nodeW + padX * 2;
+  const svgH = padTop + nodes.length * nodeH + (nodes.length - 1) * gapY + padBot;
+
+  let svg = `<svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">`;
+  svg += '<defs><marker id="arrowA" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 3.5 L0 7 z" fill="var(--text-dim)"/></marker></defs>';
+
+  const nodePos = {};
+  nodes.forEach((n, i) => {
+    nodePos[n.id] = { x: padX, y: padTop + i * (nodeH + gapY), w: nodeW, h: nodeH };
+  });
+
+  // Draw edges (forward only for simplicity)
+  for (const e of edges) {
+    const fromP = nodePos[e.from];
+    const toP = nodePos[e.to];
+    if (!fromP || !toP) continue;
+    const x = fromP.x + fromP.w / 2;
+    const y1 = fromP.y + fromP.h;
+    const y2 = toP.y;
+    if (y2 > y1) {
+      svg += `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="var(--text-dim)" stroke-width="1" marker-end="url(#arrowA)" opacity="0.4"/>`;
+    }
+  }
+
+  // Draw nodes
+  for (const node of nodes) {
+    const p = nodePos[node.id];
+    svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="5" fill="none" stroke="${node.color}" stroke-width="1.5"/>`;
+    svg += `<text x="${p.x + p.w/2}" y="${p.y + p.h/2 + 1}" font-size="9" fill="${node.color}" text-anchor="middle" dominant-baseline="middle" font-weight="600">${node.label}</text>`;
+  }
+
+  svg += '</svg>';
+  container.innerHTML = svg;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Arena Model Loading & Population
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+async function arenaLoadModels() {
+  try {
+    const resp = await fetch('/api/llm/models');
+    const data = await resp.json();
+    Arena.modelsData = data.models || [];
+    Arena.modelsLoaded = true;
+
+    // Populate any already-rendered harness panels
+    arenaPopulateModels('arenaA_');
+    arenaPopulateModels('arenaB_');
+  } catch (e) {
+    console.warn('[Arena] Failed to load models:', e.message);
+  }
+}
+
+function arenaPopulateModels(prefix) {
+  if (!Arena.modelsLoaded) return;
+
+  const models = Arena.modelsData;
+  const groups = {};
+  for (const m of models) {
+    if (!m.available) continue;
+    const key = m.provider.charAt(0).toUpperCase() + m.provider.slice(1);
+    (groups[key] ??= []).push(m);
+  }
+  const providerOrder = ['Local', 'Lmstudio', 'Ollama', 'Copilot', 'Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface'];
+  const providerLabels = { Local: 'Local Models (free)', Lmstudio: 'LM Studio (free, local)', Puter: 'Puter.js (free)' };
+
+  const unavail = models.filter(m => !m.available);
+  const byokGroups = {};
+  for (const m of unavail) {
+    const key = m.provider.charAt(0).toUpperCase() + m.provider.slice(1);
+    (byokGroups[key] ??= []).push(m);
+  }
+  const byokProviderOrder = ['Gemini', 'Anthropic', 'Cloudflare', 'Groq', 'Mistral', 'Huggingface'];
+
+  // Find all <select> elements in this prefix's container
+  const container = document.getElementById(prefix === 'arenaA_' ? 'harnessSettingsA' : 'harnessSettingsB');
+  if (!container) return;
+
+  const selects = container.querySelectorAll('select');
+  for (const sel of selects) {
+    // Only populate model selects (not harness selector, compact selects, etc.)
+    if (!sel.id || !sel.id.endsWith('modelSelect') && !sel.id.endsWith('ModelSelect')) continue;
+    if (sel.querySelector('option[value="auto"]')) continue; // compact model select
+
+    const savedVal = sel.value;
+    sel.innerHTML = '<option value="">Select a model...</option>';
+
+    for (const prov of providerOrder) {
+      const provModels = groups[prov];
+      if (!provModels?.length) continue;
+      const grp = document.createElement('optgroup');
+      grp.label = providerLabels[prov] || prov;
+      for (const m of provModels) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        const caps = [];
+        if (m.capabilities?.image) caps.push('IMG');
+        if (m.capabilities?.reasoning) caps.push('RSN');
+        if (m.capabilities?.tools) caps.push('TLS');
+        const capStr = caps.length ? ` [${caps.join(',')}]` : '';
+        opt.textContent = `${m.name} — ${m.price}${capStr}`;
+        grp.appendChild(opt);
+      }
+      sel.appendChild(grp);
+    }
+
+    for (const prov of byokProviderOrder) {
+      const provModels = byokGroups[prov];
+      if (!provModels?.length) continue;
+      const grp = document.createElement('optgroup');
+      grp.label = `${prov} (BYOK)`;
+      for (const m of provModels) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        const caps = [];
+        if (m.capabilities?.image) caps.push('IMG');
+        if (m.capabilities?.reasoning) caps.push('RSN');
+        if (m.capabilities?.tools) caps.push('TLS');
+        const capStr = caps.length ? ` [${caps.join(',')}]` : '';
+        opt.textContent = `${m.name} — ${m.price}${capStr}`;
+        grp.appendChild(opt);
+      }
+      sel.appendChild(grp);
+    }
+
+    if (savedVal && [...sel.options].some(o => o.value === savedVal)) sel.value = savedVal;
+  }
+}
+
+function arenaRestoreSettings(agent, schemaId) {
+  try {
+    const raw = localStorage.getItem(`arc_arena_${agent.toLowerCase()}_settings_${schemaId}`);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    const prefix = `arena${agent}_`;
+
+    // Restore model select
+    const modelSel = document.getElementById(`${prefix}modelSelect`);
+    if (modelSel && s.model && [...modelSel.options].some(o => o.value === s.model)) {
+      modelSel.value = s.model;
+    }
+  } catch {}
+}
+
+function arenaSaveSettings(agent) {
+  try {
+    const prefix = `arena${agent}_`;
+    const scaffoldingSel = document.getElementById(`${prefix}scaffoldingSelect`);
+    const schemaId = scaffoldingSel?.value || 'linear';
+    const modelSel = document.getElementById(`${prefix}modelSelect`);
+    const settings = {
+      scaffolding: schemaId,
+      model: modelSel?.value || '',
+    };
+    localStorage.setItem(`arc_arena_${agent.toLowerCase()}_settings_${schemaId}`, JSON.stringify(settings));
+  } catch {}
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Arena Observatory — Per-Agent Observability
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function enterArenaObs(agent) {
+  if (!Arena.history) return;
+  Arena.mode = 'observe';
+  Arena.obsAgent = agent;
+
+  const obsScreen = document.getElementById('arenaObsScreen');
+  const obsBody = document.getElementById('arenaObsBody');
+  const obsTitle = document.getElementById('obsAgentTitle');
+
+  // Show obs screen
+  obsScreen.style.display = 'flex';
+
+  // Set layout direction (agent A = obs LEFT, agent B = obs RIGHT)
+  obsBody.className = 'arena-obs-body ' + (agent === 'A' ? 'obs-agent-a' : 'obs-agent-b');
+
+  // Update title
+  obsTitle.textContent = `Agent ${agent} Observatory`;
+
+  // Update agent switch buttons
+  document.getElementById('obsSwitchA').classList.toggle('active', agent === 'A');
+  document.getElementById('obsSwitchB').classList.toggle('active', agent === 'B');
+
+  // Update obs status
+  document.getElementById('obsStatAgent').textContent = agent;
+
+  // Set up obs scrubber
+  const maxStep = Arena.history.length - 1;
+  document.getElementById('arenaObsScrubber').max = maxStep;
+  document.getElementById('arenaObsScrubber').value = Arena.currentStep;
+
+  // Build obs log for this agent
+  buildObsLog(agent);
+
+  // Render current step on obs canvas
+  renderStep(Arena.currentStep);
+}
+
+function exitArenaObs() {
+  Arena.mode = 'match';
+  Arena.obsAgent = null;
+  document.getElementById('arenaObsScreen').style.display = 'none';
+}
+
+function switchArenaObs(agent) {
+  if (Arena.obsAgent === agent) return;
+  enterArenaObs(agent);
+}
+
+function buildObsLog(agent) {
+  const logContainer = document.getElementById('arenaObsLog');
+  logContainer.innerHTML = '';
+
+  if (!Arena.history) return;
+
+  for (let i = 0; i < Arena.history.length; i++) {
+    const frame = Arena.history[i];
+    const agentData = agent === 'A' ? frame.agentA : frame.agentB;
+    if (!agentData) continue;
+
+    const colorIndex = agent === 'A' ? C.A_HEAD : C.B_HEAD;
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.dataset.step = i;
+    entry.innerHTML =
+      `<div class="log-entry-turn">Turn ${frame.turn}</div>` +
+      `<div class="log-entry-move" style="color:${ARC3[colorIndex]}">${escHtml(agentData.move)}</div>` +
+      `<div class="log-entry-reasoning">${escHtml(agentData.reasoning)}</div>`;
+    entry.addEventListener('click', () => { stopPlayback(); scrubTo(i); });
+    logContainer.appendChild(entry);
+  }
+}
+
+function highlightObsLogEntry(step) {
+  const logContainer = document.getElementById('arenaObsLog');
+  if (!logContainer) return;
+
+  logContainer.querySelectorAll('.log-entry.active').forEach(el => el.classList.remove('active'));
+  const active = logContainer.querySelector(`.log-entry[data-step="${step}"]`);
+  if (active) {
+    active.classList.add('active');
+    active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Auto Research Module
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const AR = {
+  mode: 'community',       // 'community' | 'local'
+  selectedGame: null,       // current game being researched
+  pollTimer: null,
+  localRunning: false,
+};
+
+function switchArenaMode(mode) {
+  const matchBtn = document.getElementById('modeBtnMatch');
+  const researchBtn = document.getElementById('modeBtnResearch');
+  const layout = document.getElementById('arenaLayout');
+  const researchView = document.getElementById('arResearchView');
+  const statusBar = document.getElementById('arStatusBar');
+
+  if (mode === 'research') {
+    matchBtn.classList.remove('active');
+    researchBtn.classList.add('active');
+    layout.style.display = 'none';
+    researchView.style.display = 'flex';
+    statusBar.style.display = 'flex';
+    if (!AR.selectedGame) {
+      arBuildGameList();
+    }
+  } else {
+    researchBtn.classList.remove('active');
+    matchBtn.classList.add('active');
+    layout.style.display = 'flex';
+    researchView.style.display = 'none';
+    statusBar.style.display = 'none';
+    arStopPolling();
+  }
+}
+
+function arBuildGameList() {
+  const container = document.getElementById('arGameList');
+  container.innerHTML = '';
+
+  const categories = [];
+  const catMap = {};
+  for (const game of ARENA_GAMES) {
+    const cat = game.category || 'Other';
+    if (!catMap[cat]) { catMap[cat] = []; categories.push(cat); }
+    catMap[cat].push(game);
+  }
+
+  for (const cat of categories) {
+    const catDiv = document.createElement('div');
+    catDiv.className = 'ar-game-cat';
+    catDiv.innerHTML = `<div class="ar-game-cat-label">${escHtml(cat)}</div>`;
+
+    for (const game of catMap[cat]) {
+      const item = document.createElement('div');
+      item.className = 'ar-game-item' + (AR.selectedGame === game.id ? ' active' : '');
+      item.dataset.game = game.id;
+      item.innerHTML =
+        `<div class="ar-game-item-name">${escHtml(game.title)}</div>` +
+        `<div class="ar-game-item-btns">` +
+          `<button class="ar-btn ar-btn-sm ar-btn-community" onclick="arSelectGame('${game.id}','community');event.stopPropagation();" title="Community Auto Research">C</button>` +
+          `<button class="ar-btn ar-btn-sm ar-btn-local" onclick="arShowLocalDialog('${game.id}');event.stopPropagation();" title="Local Auto Research">L</button>` +
+        `</div>`;
+      item.addEventListener('click', () => arSelectGame(game.id, 'community'));
+      catDiv.appendChild(item);
+    }
+    container.appendChild(catDiv);
+  }
+}
+
+async function arSelectGame(gameId, mode) {
+  AR.selectedGame = gameId;
+  AR.mode = mode || 'community';
+
+  // Highlight in game list
+  document.querySelectorAll('.ar-game-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.game === gameId);
+  });
+
+  // Update status
+  const game = ARENA_GAMES.find(g => g.id === gameId);
+  document.getElementById('arStatusText').textContent = `Loading ${game ? game.title : gameId}...`;
+
+  // Fetch research data
+  try {
+    const data = await fetch(`/api/arena/research/${gameId}`).then(r => r.json());
+    if (data.error) {
+      document.getElementById('arStatusText').textContent = `Error: ${data.error}`;
+      return;
+    }
+    arRenderResearch(gameId, data);
+    arStartPolling(gameId);
+  } catch (e) {
+    document.getElementById('arStatusText').textContent = `Failed to load: ${e.message}`;
+  }
+}
+
+function arRenderResearch(gameId, data) {
+  const game = ARENA_GAMES.find(g => g.id === gameId);
+  const title = game ? game.title : gameId;
+
+  // Status bar
+  document.getElementById('arStatusText').textContent =
+    `${title} | Gen ${data.generation} | ${data.agent_count} agents | ${data.game_count} games` +
+    (data.best_agent ? ` | Best: ${data.best_agent} (${data.best_elo})` : '');
+
+  // Program.md
+  arRenderProgram(data.program);
+
+  // Leaderboard
+  arRenderLeaderboard(gameId, data.leaderboard || []);
+  document.getElementById('arAgentCount').textContent = `${data.agent_count} agents`;
+
+  // Comments (load separately for freshness)
+  arLoadComments(gameId);
+
+  // Recent games
+  arLoadRecentGames(gameId);
+}
+
+function arRenderProgram(program) {
+  if (!program) return;
+  const view = document.getElementById('arProgramView');
+  const content = program.content || '';
+  if (!content) {
+    view.innerHTML = '<div class="ar-no-data">No program.md yet. Create one to steer evolution.</div>';
+  } else {
+    // Simple markdown rendering (headers, bold, lists)
+    view.innerHTML = `<div class="ar-markdown">${arSimpleMarkdown(content)}</div>`;
+  }
+
+  // Version selector
+  const sel = document.getElementById('arProgramVersion');
+  sel.innerHTML = '';
+  if (program.versions) {
+    for (const v of program.versions) {
+      const opt = document.createElement('option');
+      opt.value = v.version;
+      opt.textContent = `v${v.version}` + (v.author ? ` (${v.author})` : '');
+      sel.appendChild(opt);
+    }
+  }
+
+  // Active proposal indicator
+  if (program.active_proposal) {
+    const deadline = new Date(program.active_proposal.vote_deadline * 1000);
+    const remaining = Math.max(0, Math.ceil((program.active_proposal.vote_deadline - Date.now()/1000)));
+    view.innerHTML += `<div class="ar-vote-banner">Active proposal: ${remaining}s left — For: ${program.active_proposal.votes_for} Against: ${program.active_proposal.votes_against}</div>`;
+  }
+}
+
+function arSimpleMarkdown(text) {
+  return escHtml(text)
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\n/g, '<br>');
+}
+
+function arRenderLeaderboard(gameId, agents) {
+  const tbody = document.getElementById('arLeaderboardBody');
+  if (!agents.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="ar-no-data">No agents yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = agents.map((a, i) => {
+    const eloClass = a.elo >= 1200 ? 'ar-elo-high' : a.elo < 1000 ? 'ar-elo-low' : '';
+    const humanBadge = a.is_human ? ' <span class="ar-badge-human">H</span>' : '';
+    const anchorBadge = a.is_anchor ? ' <span class="ar-badge-anchor">⚓</span>' : '';
+    return `<tr class="ar-lb-row" data-agent-id="${a.id}">
+      <td>${i + 1}</td>
+      <td>
+        <span class="ar-agent-name" onclick="arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">${escHtml(a.name)}</span>
+        ${humanBadge}${anchorBadge}
+      </td>
+      <td class="ar-elo ${eloClass}">${Math.round(a.elo)}</td>
+      <td>${a.wins}/${a.losses}/${a.draws}</td>
+      <td>${a.games_played}</td>
+      <td class="ar-contributor">${escHtml(a.contributor || '—')}</td>
+      <td>
+        ${a.is_human ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function arLoadComments(gameId) {
+  try {
+    const comments = await fetch(`/api/arena/comments/${gameId}`).then(r => r.json());
+    const container = document.getElementById('arCommentsList');
+    if (!comments.length) {
+      container.innerHTML = '<div class="ar-no-data">No discussion yet. Be the first!</div>';
+      return;
+    }
+    container.innerHTML = comments.map(c => `
+      <div class="ar-comment">
+        <div class="ar-comment-header">
+          <span class="ar-comment-author">${escHtml(c.username)}</span>
+          <span class="ar-comment-time">${arTimeAgo(c.created_at)}</span>
+          <span class="ar-comment-votes">
+            <button class="ar-vote-btn" onclick="arVoteComment(${c.id},1)">▲ ${c.upvotes}</button>
+            <button class="ar-vote-btn" onclick="arVoteComment(${c.id},-1)">▼ ${c.downvotes}</button>
+          </span>
+        </div>
+        <div class="ar-comment-body">${escHtml(c.content)}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+async function arLoadRecentGames(gameId) {
+  try {
+    const games = await fetch(`/api/arena/games/${gameId}?limit=20`).then(r => r.json());
+    const container = document.getElementById('arRecentGames');
+    if (!games.length) {
+      container.innerHTML = '<div class="ar-no-data">No games yet</div>';
+      return;
+    }
+    container.innerHTML = games.map(g => {
+      const winnerClass = g.winner_name === 'Draw' ? 'ar-draw' : '';
+      return `<div class="ar-recent-game">
+        <span class="ar-rg-agents">${escHtml(g.agent1_name)} vs ${escHtml(g.agent2_name)}</span>
+        <span class="ar-rg-result ${winnerClass}">${escHtml(g.winner_name)}</span>
+        <span class="ar-rg-turns">${g.turns}t</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+function arTimeAgo(ts) {
+  const s = Math.floor(Date.now()/1000 - ts);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
+
+
+/* ── Agent Code Modal ── */
+
+async function arShowAgentCode(gameId, agentId, name) {
+  try {
+    const agent = await fetch(`/api/arena/agents/${gameId}/${agentId}`).then(r => r.json());
+    document.getElementById('arCodeModalTitle').textContent = `${name} — Code`;
+    document.getElementById('arCodeModalCode').textContent = agent.code || '(no code)';
+    document.getElementById('arCodeModal').style.display = 'flex';
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+
+/* ── Comments ── */
+
+async function arPostComment() {
+  if (!AR.selectedGame) return;
+  const text = document.getElementById('arCommentText').value.trim();
+  if (!text) return;
+  try {
+    await fetch(`/api/arena/comments/${AR.selectedGame}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ content: text }),
+    });
+    document.getElementById('arCommentText').value = '';
+    arLoadComments(AR.selectedGame);
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+async function arVoteComment(commentId, vote) {
+  if (!AR.selectedGame) return;
+  try {
+    await fetch(`/api/arena/comments/${AR.selectedGame}/${commentId}/vote`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ vote }),
+    });
+    arLoadComments(AR.selectedGame);
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+
+/* ── Program.md ── */
+
+async function arProposeProgram() {
+  if (!AR.selectedGame) return;
+  const content = document.getElementById('arProgramTextarea').value.trim();
+  const summary = document.getElementById('arProgramSummary').value.trim();
+  if (!content) return;
+  try {
+    await fetch(`/api/arena/program/${AR.selectedGame}/propose`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ content, change_summary: summary }),
+    });
+    document.getElementById('arProgramEdit').style.display = 'none';
+    arSelectGame(AR.selectedGame, AR.mode);
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+// Wire up program mode selector
+document.addEventListener('DOMContentLoaded', () => {
+  const modeSelect = document.getElementById('arProgramMode');
+  if (modeSelect) {
+    modeSelect.addEventListener('change', e => {
+      const mode = e.target.value;
+      const view = document.getElementById('arProgramView');
+      const edit = document.getElementById('arProgramEdit');
+      if (mode === 'edit') {
+        view.style.display = 'none';
+        edit.style.display = 'flex';
+      } else {
+        view.style.display = '';
+        edit.style.display = 'none';
+      }
+    });
+  }
+});
+
+
+/* ── Human vs AI Dialog ── */
+
+function arShowHumanDialog(gameId, agentId, name, elo) {
+  AR._humanGameId = gameId;
+  AR._humanAgentId = agentId;
+  document.getElementById('arHumanDialogTitle').textContent = `Play Against: ${name}`;
+  document.getElementById('arHumanOpponent').innerHTML =
+    `<span class="ar-elo">${elo}</span> ELO — ${name}`;
+  document.getElementById('arHumanDialog').style.display = 'flex';
+
+  // Wire up delay radio change to update label
+  document.querySelectorAll('input[name="arDelay"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const ms = parseInt(r.value);
+      document.getElementById('arHumanLabel').textContent =
+        ms === 0 ? 'human-inf' : `human-${ms}ms`;
+    });
+  });
+}
+
+function arCloseHumanDialog() {
+  document.getElementById('arHumanDialog').style.display = 'none';
+}
+
+function arStartHumanPlay() {
+  // TODO Phase 4: Launch human play mode
+  const delay = parseInt(document.querySelector('input[name="arDelay"]:checked').value);
+  alert(`Human play coming in Phase 4! Delay: ${delay}ms vs agent #${AR._humanAgentId}`);
+  arCloseHumanDialog();
+}
+
+
+/* ── Local Auto Research Dialog ── */
+
+function arShowLocalDialog(gameId) {
+  AR._localGameId = gameId;
+  const game = ARENA_GAMES.find(g => g.id === gameId);
+  document.getElementById('arLocalDialogTitle').textContent =
+    `Local Auto Research: ${game ? game.title : gameId}`;
+  document.getElementById('arLocalDialog').style.display = 'flex';
+}
+
+function arCloseLocalDialog() {
+  document.getElementById('arLocalDialog').style.display = 'none';
+}
+
+function arStartLocalResearch() {
+  // TODO Phase 2: Launch in-browser evolution
+  alert('Local auto research coming in Phase 2!');
+  arCloseLocalDialog();
+}
+
+
+/* ── Polling ── */
+
+function arStartPolling(gameId) {
+  arStopPolling();
+  AR.pollTimer = setInterval(async () => {
+    if (AR.selectedGame !== gameId) { arStopPolling(); return; }
+    try {
+      const data = await fetch(`/api/arena/research/${gameId}`).then(r => r.json());
+      if (!data.error) arRenderResearch(gameId, data);
+    } catch (e) {
+      // Silently fail
+    }
+  }, 5000);
+}
+
+function arStopPolling() {
+  if (AR.pollTimer) { clearInterval(AR.pollTimer); AR.pollTimer = null; }
+}
 
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -9,31 +9,29 @@
 <link rel="stylesheet" href="/static/css/arena.css?v={{ static_v }}">
 </head>
 <body>
-<div class="arena-container">
+<!-- Template globals required by scaffolding-schemas.js -->
+<script>
+const MODE = {{ mode | tojson }};
+const FEATURES = {{ features | tojson }};
+</script>
+
+<div class="arena-container" id="arenaContainer">
   <!-- ── Top Nav ──────────────────────────────────────────────────────────── -->
   <div class="arena-top-nav">
     <span class="app-title">
-      <!-- Logo: [R] [] [] [A]   all gaps = 4px, small squares = 4x4, big squares = 9x9
-                [R]         [A]   stack gap=1 -->
       <svg class="arena-logo" viewBox="0 0 28 19.5" width="59" height="40" preserveAspectRatio="xMidYMid meet" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <!-- Cascade forward then back: R → r → a → A → a → r → R ...
-             8 phases over 3.2s, each element gets ~0.4s -->
-        <!-- Left: two stacked red squares (gap 1.5, rx 1) -->
         <rect x="0" y="0" width="9" height="9" rx="1" fill="var(--red)">
           <animate attributeName="opacity" values="1;0.12;0.12;0.12;0.12;0.12;0.12;1" keyTimes="0;0.15;0.3;0.45;0.55;0.7;0.85;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
         <rect x="0" y="10.5" width="9" height="9" rx="1" fill="var(--red)">
           <animate attributeName="opacity" values="1;0.12;0.12;0.12;0.12;0.12;0.12;1" keyTimes="0;0.15;0.3;0.45;0.55;0.7;0.85;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
-        <!-- Red dot — quick flash at forward phase 2, reverse phase 6 -->
         <rect x="11" y="8.75" width="2" height="2" rx="0.3" fill="var(--red)">
           <animate attributeName="opacity" values="0.12;0.12;1;0.12;0.12;0.12;0.12;1;0.12;0.12" keyTimes="0;0.14;0.18;0.25;0.45;0.55;0.74;0.78;0.85;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
-        <!-- Amber dot — quick flash at forward phase 3, reverse phase 5 -->
         <rect x="15" y="8.75" width="2" height="2" rx="0.3" fill="var(--accent)">
           <animate attributeName="opacity" values="0.12;0.12;1;0.12;0.12;0.12;0.12;1;0.12;0.12" keyTimes="0;0.27;0.31;0.38;0.45;0.55;0.62;0.66;0.72;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
-        <!-- Right: two stacked amber squares (gap 1.5, rx 1) -->
         <rect x="19" y="0" width="9" height="9" rx="1" fill="var(--accent)">
           <animate attributeName="opacity" values="0.12;0.12;0.12;1;1;0.12;0.12;0.12" keyTimes="0;0.15;0.3;0.45;0.55;0.7;0.85;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
@@ -44,12 +42,16 @@
       <span class="app-title-text">ARC Arena<a class="logo-sub-link to-obs" href="/obs">&#8594; to Observatory</a></span>
     </span>
     <span style="flex:1"></span>
+    <div class="arena-mode-switcher">
+      <button class="arena-mode-btn active" id="modeBtnMatch" onclick="switchArenaMode('match')">Match Mode</button>
+      <button class="arena-mode-btn" id="modeBtnResearch" onclick="switchArenaMode('research')">Auto Research</button>
+    </div>
     <a class="nav-switch-btn to-obs" href="/obs">&#8592; to Observatory</a>
     <button id="themeToggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:6px;line-height:1;" title="Toggle light/dark mode"></button>
   </div>
 
   <!-- ── Three-Column Layout (persistent) ─────────────────────────────────── -->
-  <div class="arena-layout">
+  <div class="arena-layout" id="arenaLayout">
 
     <!-- ── Left Panel: Agent A ──────────────────────────────────────────────── -->
     <div class="arena-side-panel" id="panelA">
@@ -66,28 +68,43 @@
 
       <!-- Settings mode (pre-match) -->
       <div class="agent-settings" id="settingsA">
+        <!-- Code / Harness mode selector -->
         <div class="setting-section">
-          <div class="setting-label">Strategy</div>
-          <select class="setting-select" id="stratA">
-            <option value="greedy" selected>Greedy</option>
-            <option value="aggressive">Aggressive</option>
-            <option value="cautious">Cautious</option>
+          <div class="setting-label">Agent Mode</div>
+          <select class="setting-select" id="agentModeA" onchange="toggleAgentMode('A')">
+            <option value="code" selected>Code (built-in AI)</option>
+            <option value="harness">Harness (LLM agent)</option>
           </select>
-          <div class="setting-desc" id="stratDescA">Chases food directly</div>
         </div>
-        <div class="setting-section">
-          <div class="setting-label">Personality</div>
-          <div class="agent-personality-preview" id="personalityA">
-            <div class="personality-bar">
-              <span class="personality-stat"><span class="stat-label">Aggression</span><span class="stat-bar"><span class="stat-fill" style="width:20%"></span></span></span>
-              <span class="personality-stat"><span class="stat-label">Caution</span><span class="stat-bar"><span class="stat-fill" style="width:40%"></span></span></span>
-              <span class="personality-stat"><span class="stat-label">Greed</span><span class="stat-bar"><span class="stat-fill" style="width:90%"></span></span></span>
+
+        <!-- Code mode: strategy + personality -->
+        <div id="codeModeA">
+          <div class="setting-section">
+            <div class="setting-label">Strategy</div>
+            <select class="setting-select" id="stratA">
+              <option value="greedy" selected>Greedy</option>
+            </select>
+            <div class="setting-desc" id="stratDescA">Chases food directly</div>
+          </div>
+          <div class="setting-section">
+            <div class="setting-label">Personality</div>
+            <div class="agent-personality-preview" id="personalityA">
+              <div class="personality-bar">
+                <span class="personality-stat"><span class="stat-label">Aggression</span><span class="stat-bar"><span class="stat-fill" style="width:20%"></span></span></span>
+                <span class="personality-stat"><span class="stat-label">Caution</span><span class="stat-bar"><span class="stat-fill" style="width:40%"></span></span></span>
+                <span class="personality-stat"><span class="stat-label">Greed</span><span class="stat-bar"><span class="stat-fill" style="width:90%"></span></span></span>
+              </div>
             </div>
           </div>
         </div>
+
+        <!-- Harness mode: scaffolding settings -->
+        <div id="harnessModeA" style="display:none;">
+          <div id="harnessSettingsA" class="harness-settings-container"></div>
+        </div>
       </div>
 
-      <!-- Observatory mode (during match) -->
+      <!-- Match mode: reasoning log -->
       <div class="agent-log" id="logA"></div>
     </div>
 
@@ -100,9 +117,7 @@
           <h2>Choose a Game</h2>
           <p>Select a game, configure your agents, and start the match</p>
         </div>
-        <div class="game-card-row" id="gameCardRow">
-          <!-- Populated dynamically by buildGameCards() -->
-        </div>
+        <div class="game-card-row" id="gameCardRow"></div>
         <div class="match-config">
           <div class="config-row">
             <label>Seed</label>
@@ -156,6 +171,10 @@
           <button class="btn" onclick="arenaStepBack()" title="Step back (&#8592;)">&#9664;</button>
           <button class="btn btn-primary" id="arenaPlayBtn" onclick="arenaPlayPause()">Play</button>
           <button class="btn" onclick="arenaStepForward()" title="Step forward (&#8594;)">&#9654;</button>
+          <span class="transport-sep"></span>
+          <button class="btn btn-obs-a" onclick="enterArenaObs('A')" title="Observe Agent A">Observe A</button>
+          <button class="btn btn-obs-b" onclick="enterArenaObs('B')" title="Observe Agent B">Observe B</button>
+          <span class="transport-sep"></span>
           <button class="btn" onclick="restartMatch()" title="Rematch with new settings">Rematch</button>
           <select id="arenaSpeed" title="Playback speed">
             <option value="500">0.5x</option>
@@ -183,34 +202,251 @@
 
       <!-- Settings mode (pre-match) -->
       <div class="agent-settings" id="settingsB">
+        <!-- Code / Harness mode selector -->
         <div class="setting-section">
-          <div class="setting-label">Strategy</div>
-          <select class="setting-select" id="stratB">
-            <option value="greedy">Greedy</option>
-            <option value="aggressive" selected>Aggressive</option>
-            <option value="cautious">Cautious</option>
+          <div class="setting-label">Agent Mode</div>
+          <select class="setting-select" id="agentModeB" onchange="toggleAgentMode('B')">
+            <option value="code" selected>Code (built-in AI)</option>
+            <option value="harness">Harness (LLM agent)</option>
           </select>
-          <div class="setting-desc" id="stratDescB">Hunts when longer, feeds when shorter</div>
         </div>
-        <div class="setting-section">
-          <div class="setting-label">Personality</div>
-          <div class="agent-personality-preview" id="personalityB">
-            <div class="personality-bar">
-              <span class="personality-stat"><span class="stat-label">Aggression</span><span class="stat-bar"><span class="stat-fill" style="width:80%"></span></span></span>
-              <span class="personality-stat"><span class="stat-label">Caution</span><span class="stat-bar"><span class="stat-fill" style="width:30%"></span></span></span>
-              <span class="personality-stat"><span class="stat-label">Greed</span><span class="stat-bar"><span class="stat-fill" style="width:50%"></span></span></span>
+
+        <!-- Code mode: strategy + personality -->
+        <div id="codeModeB">
+          <div class="setting-section">
+            <div class="setting-label">Strategy</div>
+            <select class="setting-select" id="stratB">
+              <option value="greedy">Greedy</option>
+            </select>
+            <div class="setting-desc" id="stratDescB">Chases food directly</div>
+          </div>
+          <div class="setting-section">
+            <div class="setting-label">Personality</div>
+            <div class="agent-personality-preview" id="personalityB">
+              <div class="personality-bar">
+                <span class="personality-stat"><span class="stat-label">Aggression</span><span class="stat-bar"><span class="stat-fill" style="width:80%"></span></span></span>
+                <span class="personality-stat"><span class="stat-label">Caution</span><span class="stat-bar"><span class="stat-fill" style="width:30%"></span></span></span>
+                <span class="personality-stat"><span class="stat-label">Greed</span><span class="stat-bar"><span class="stat-fill" style="width:50%"></span></span></span>
+              </div>
             </div>
           </div>
         </div>
+
+        <!-- Harness mode: scaffolding settings -->
+        <div id="harnessModeB" style="display:none;">
+          <div id="harnessSettingsB" class="harness-settings-container"></div>
+        </div>
       </div>
 
-      <!-- Observatory mode (during match) -->
+      <!-- Match mode: reasoning log -->
       <div class="agent-log" id="logB"></div>
     </div>
 
   </div>
+
+  <!-- ══ Auto Research View (hidden by default) ═══════════════════════════ -->
+  <div class="ar-layout" id="arResearchView" style="display:none;">
+
+    <!-- Left: Game List -->
+    <div class="ar-game-list" id="arGameList"></div>
+
+    <!-- Center: Research Content -->
+    <div class="ar-center" id="arCenter">
+
+      <!-- Program.md viewer -->
+      <div class="ar-program-area" id="arProgramArea">
+        <div class="ar-section-header">
+          <span>program.md</span>
+          <div class="ar-program-controls">
+            <select class="ar-small-select" id="arProgramMode">
+              <option value="rendered">Rendered</option>
+              <option value="raw">Raw</option>
+              <option value="edit">Edit</option>
+            </select>
+            <select class="ar-small-select" id="arProgramVersion"></select>
+          </div>
+        </div>
+        <div class="ar-program-view" id="arProgramView">
+          <div class="ar-no-data">Select a game to view its evolution program</div>
+        </div>
+        <div class="ar-program-edit" id="arProgramEdit" style="display:none;">
+          <textarea id="arProgramTextarea" placeholder="Write program.md content..."></textarea>
+          <div class="ar-program-edit-actions">
+            <input type="text" id="arProgramSummary" placeholder="Change summary..." class="ar-input">
+            <button class="ar-btn ar-btn-primary" onclick="arProposeProgram()">Propose Change (10s vote)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Leaderboard + Discussion split -->
+      <div class="ar-bottom-split">
+        <!-- Leaderboard -->
+        <div class="ar-leaderboard-area" id="arLeaderboardArea">
+          <div class="ar-section-header">
+            <span>Leaderboard</span>
+            <span class="ar-stat-badge" id="arAgentCount">0 agents</span>
+          </div>
+          <div class="ar-leaderboard-table-wrap">
+            <table class="ar-table" id="arLeaderboardTable">
+              <thead>
+                <tr>
+                  <th>#</th><th>Agent</th><th>ELO</th><th>W/L/D</th>
+                  <th>Games</th><th>By</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="arLeaderboardBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Discussion -->
+        <div class="ar-discussion-area" id="arDiscussionArea">
+          <div class="ar-section-header">
+            <span>Strategy Discussion</span>
+          </div>
+          <div class="ar-comments-list" id="arCommentsList"></div>
+          <div class="ar-comment-input">
+            <textarea id="arCommentText" placeholder="Discuss strategies..." rows="2"></textarea>
+            <button class="ar-btn ar-btn-primary" onclick="arPostComment()">Post</button>
+          </div>
+          <div class="ar-contribute-section">
+            <div class="ar-section-header"><span>Contribute Evolution</span></div>
+            <div class="ar-contribute-row">
+              <select class="ar-small-select" id="arContributeModel"></select>
+              <input type="password" id="arContributeKey" placeholder="API key" class="ar-input ar-input-sm">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Live Games + Compact Leaderboard -->
+    <div class="ar-right-col" id="arRightCol">
+      <div class="ar-section-header"><span>Live Tournament</span></div>
+      <div class="ar-live-games" id="arLiveGames">
+        <div class="ar-live-cell"><canvas id="arLive0" width="180" height="180"></canvas><div class="ar-live-info" id="arLiveInfo0"></div></div>
+        <div class="ar-live-cell"><canvas id="arLive1" width="180" height="180"></canvas><div class="ar-live-info" id="arLiveInfo1"></div></div>
+        <div class="ar-live-cell"><canvas id="arLive2" width="180" height="180"></canvas><div class="ar-live-info" id="arLiveInfo2"></div></div>
+        <div class="ar-live-cell"><canvas id="arLive3" width="180" height="180"></canvas><div class="ar-live-info" id="arLiveInfo3"></div></div>
+      </div>
+      <div class="ar-section-header" style="margin-top:8px"><span>Recent Games</span></div>
+      <div class="ar-recent-games" id="arRecentGames">
+        <div class="ar-no-data">No games yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar (Auto Research) -->
+  <div class="ar-status-bar" id="arStatusBar" style="display:none;">
+    <span id="arStatusText">Select a game to begin</span>
+  </div>
+
+  <!-- Local Auto Research Config Dialog -->
+  <div class="ar-dialog-overlay" id="arLocalDialog" style="display:none;">
+    <div class="ar-dialog">
+      <h3 id="arLocalDialogTitle">Local Auto Research</h3>
+      <label>Evolving Model</label>
+      <select id="arLocalModel" class="ar-select"></select>
+      <label>API Key</label>
+      <input type="password" id="arLocalKey" class="ar-input" placeholder="sk-...">
+      <div class="ar-hint">In-memory only. Never sent to our server.</div>
+      <div class="ar-dialog-grid">
+        <div><label>Workers</label><select id="arLocalWorkers" class="ar-select"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
+        <div><label>Max Tokens</label><select id="arLocalTokens" class="ar-select"><option value="4096">4k</option><option value="8192">8k</option><option value="16384" selected>16k</option><option value="32768">32k</option></select></div>
+      </div>
+      <label>Matchmaking</label>
+      <div class="ar-mm-grid">
+        <label>Swiss</label><input type="number" id="arMmSwiss" value="90" min="0" max="100" step="5">
+        <label>Random</label><input type="number" id="arMmRandom" value="10" min="0" max="100" step="5">
+      </div>
+      <div class="ar-dialog-actions">
+        <button class="ar-btn" onclick="arCloseLocalDialog()">Cancel</button>
+        <button class="ar-btn ar-btn-primary" onclick="arStartLocalResearch()">Start Local Research</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Human vs AI Play Dialog -->
+  <div class="ar-dialog-overlay" id="arHumanDialog" style="display:none;">
+    <div class="ar-dialog">
+      <h3 id="arHumanDialogTitle">Play Against AI</h3>
+      <div class="ar-human-opponent" id="arHumanOpponent"></div>
+      <label>Your Time Per Move</label>
+      <div class="ar-delay-options" id="arDelayOptions">
+        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="250"> <span>Fast (250ms)</span> <small>reflex mode</small></label>
+        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="500"> <span>Normal (500ms)</span> <small>competitive</small></label>
+        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="1000" checked> <span>Relaxed (1000ms)</span> <small>strategic</small></label>
+        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="2000"> <span>Slow (2000ms)</span> <small>careful analysis</small></label>
+        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="0"> <span>Infinite</span> <small>unlimited thinking</small></label>
+      </div>
+      <div class="ar-human-label-preview">You appear as: <strong id="arHumanLabel">human-1000ms</strong></div>
+      <div class="ar-dialog-actions">
+        <button class="ar-btn" onclick="arCloseHumanDialog()">Cancel</button>
+        <button class="ar-btn ar-btn-primary" onclick="arStartHumanPlay()">Start Game</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Code Modal -->
+  <div class="ar-dialog-overlay" id="arCodeModal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="ar-dialog ar-dialog-wide">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 id="arCodeModalTitle">Agent Code</h3>
+        <button class="ar-btn" onclick="document.getElementById('arCodeModal').style.display='none'">&times;</button>
+      </div>
+      <pre class="ar-code-view" id="arCodeModalCode"></pre>
+    </div>
+  </div>
+
+  <!-- ── Observatory Overlay (Agent A — left of canvas) ────────────────────── -->
+  <div class="arena-obs-screen" id="arenaObsScreen" style="display:none;">
+    <div class="arena-obs-topbar">
+      <button class="btn" id="obsBackBtn" onclick="exitArenaObs()">&#8592; Back to Match</button>
+      <span class="arena-obs-title" id="obsAgentTitle">Agent A Observatory</span>
+      <div class="arena-obs-agent-switch">
+        <button class="btn btn-obs-a active" id="obsSwitchA" onclick="switchArenaObs('A')">Agent A</button>
+        <button class="btn btn-obs-b" id="obsSwitchB" onclick="switchArenaObs('B')">Agent B</button>
+      </div>
+    </div>
+    <div class="arena-obs-body" id="arenaObsBody">
+      <!-- Obs panel — positioned left or right via CSS class -->
+      <div class="arena-obs-panel" id="arenaObsPanel">
+        <div class="arena-obs-status" id="arenaObsStatus">
+          <span class="obs-stat"><span class="obs-stat-label">Turn</span><span class="obs-stat-val" id="obsStatTurn">0</span></span>
+          <span class="obs-stat"><span class="obs-stat-label">Step</span><span class="obs-stat-val" id="obsStatStep">0</span></span>
+          <span class="obs-stat"><span class="obs-stat-label">Agent</span><span class="obs-stat-val" id="obsStatAgent">A</span></span>
+        </div>
+        <div class="arena-obs-log-wrap">
+          <div class="arena-obs-log" id="arenaObsLog"></div>
+        </div>
+      </div>
+      <!-- Game canvas area -->
+      <div class="arena-obs-canvas-area" id="arenaObsCanvasArea">
+        <canvas id="arenaObsCanvas" width="512" height="512"></canvas>
+        <div class="arena-obs-scrubber">
+          <label id="obsScrubLabel">Turn 0</label>
+          <input type="range" id="arenaObsScrubber" min="0" max="0" value="0">
+        </div>
+        <div class="arena-obs-transport">
+          <button class="btn" onclick="arenaStepBack()">&#9664;</button>
+          <button class="btn btn-primary" id="arenaObsPlayBtn" onclick="arenaPlayPause()">Play</button>
+          <button class="btn" onclick="arenaStepForward()">&#9654;</button>
+          <select id="arenaObsSpeed" title="Playback speed" onchange="document.getElementById('arenaSpeed').value=this.value;if(Arena.playing){stopPlayback();startPlayback();}">
+            <option value="500">0.5x</option>
+            <option value="200" selected>1x</option>
+            <option value="100">2x</option>
+            <option value="50">4x</option>
+            <option value="10">Max</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
+<!-- Scaffolding schemas (declarative field definitions) -->
+<script src="/static/js/config/scaffolding-schemas.js?v={{ static_v }}"></script>
 <script src="/static/js/arena.js?v={{ static_v }}"></script>
 </body>
 </html>

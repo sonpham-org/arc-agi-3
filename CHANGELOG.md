@@ -5,6 +5,57 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.4.0] — feat: Arena Auto Research (Phase 1)
+*Author: Claude Opus 4.6 | 2026-03-15*
+
+### Added
+- **Arena Auto Research tab** — New "Auto Research" mode switcher in the Arena top nav, toggling between Match Mode (existing) and Auto Research view. Auto Research provides per-game LLM-driven agent evolution with community collaboration.
+- **Per-game research infrastructure** — 8 new DB tables: `arena_research`, `arena_agents`, `arena_games`, `arena_evolution_cycles`, `arena_comments`, `arena_program_versions`, `arena_votes`, `arena_human_sessions`. Full ELO system with provisional K-factor (K=64 for first 20 games, K=32 after).
+- **Game list with C/L buttons** — Left column shows all 9 Arena games categorized. Each game has [C] (Community) and [L] (Local) buttons for launching auto research.
+- **Leaderboard** — ELO-ranked agent table per game. Click agent name to view code. "Play ▶" button to challenge any AI agent as a human.
+- **Strategy discussion** — Threaded comment system with upvote/downvote per game. Users discuss strategies that feed into program.md evolution steering.
+- **program.md viewer/editor** — Rendered/raw/edit modes with version history. "Propose Change" starts a 10-second community vote on program.md updates.
+- **Human vs AI play** — Dialog to select time delay (250ms, 500ms, 1000ms, 2000ms, infinite). Human results tracked as `human-{delay}ms` pseudo-agents in the ELO leaderboard.
+- **Sustainability limits** — 200 active agents/game cap, random pruning of sub-1000 ELO agents on overflow, 48h history TTL (upsets exempt), 90-day game record TTL, 10 games/pair storage cap, ELO gap skip (>400), daily submission rate limits.
+- **15 new API endpoints** under `/api/arena/*` — research overview, agent CRUD, game recording, comments, program.md voting, human play submission.
+- **Service layer** (`arena_research_service.py`) — Input validation, rate limiting, orchestration.
+- **DB module** (`db_arena.py`) — All arena-specific database operations with ELO calculations, upset detection, and cleanup functions.
+
+### Architecture
+- Agents are JS code strings with `getMove(state)` interface (matches existing Arena game engines)
+- Community auto research runs server-side via Claude OAuth (Phase 3)
+- Local auto research runs in-browser with BYOK keys (Phase 2)
+- Human play uses existing JS game engines with Web Worker agent execution (Phase 4)
+- Weekly ELO anchoring planned (Glicko-2 re-rating against seed agents pinned at 1000)
+
+---
+
+## [1.3.5] — feat: Arena Agent Mode + Observatory
+*Author: Claude Opus 4.6 | 2026-03-15*
+
+### Added
+- **Arena Code/Harness mode** — Each agent panel (A and B) now has an "Agent Mode" dropdown to choose between Code (built-in AI strategies) and Harness (LLM agent with full scaffolding settings). Code mode preserves the existing strategy + personality UI. Harness mode renders the same scaffolding settings as the main app (harness selector, pipeline visualizer, model select, thinking level, planning mode, compact context, BYOK keys).
+- **Arena Observatory** — Per-agent observability overlay accessible via "Observe A" / "Observe B" buttons in the match transport bar. Agent A observatory shows the obs panel on the LEFT with the game canvas on the RIGHT. Agent B observatory mirrors this (canvas LEFT, obs RIGHT). Only one agent observable at a time. Agent switch buttons at the top. "Back to Match" returns to the standard match view. Keyboard shortcut: Escape exits obs mode.
+- **Arena model loading** — Arena page now fetches `/api/llm/models` to populate harness model selects. Settings persist per-agent to localStorage.
+- **Scaffolding schemas in Arena** — `scaffolding-schemas.js` now loads in `arena.html` with server-injected `MODE` and `FEATURES` template variables.
+
+### Changed
+- Arena side panels widened from 300px to 320px to accommodate harness settings.
+- Arena server route now passes `mode` and `features` template variables (matching the main app route).
+
+---
+
+## [1.3.4] — feat: RGB (Read-Grep-Bash) harness
+*Author: Claude Opus 4.6 | 2026-03-15*
+
+### Added
+- **RGB harness** — New scaffolding option based on [alexisfox7/RGB-Agent](https://github.com/alexisfox7/RGB-Agent). Analyzer LLM reads a game prompt log using text-based Read/Grep/Bash tools, then outputs batched JSON action plans. Actions drain from a queue with zero LLM calls per step; queue flushes on score change to re-analyze.
+- **Text-based tool calling** — Tool use via `<tool_call>`/`<tool_result>` XML tags in prompt text, works with every model provider (Gemini, Groq, Mistral, LM Studio, Anthropic, OpenAI, etc.). No native tool_use API dependency.
+- **Files panel** — New Observatory panel (vertical split of the Memory area) showing the running game prompt log. Syntax-highlighted section markers, score lines, and analysis blocks. Scrubber support for stepping through log history.
+- **Action Queue** — Client-side port of RGB Agent's action_queue.py. Parses `[ACTIONS]` JSON plans, drains one per step, flushes on score change.
+
+---
+
 ## [1.3.3] — feat: Arena — Artillery upgrade + Texas Hold'em Poker
 *Author: Claude Opus 4.6 | 2026-03-14*
 
