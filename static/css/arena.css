@@ -84,12 +84,22 @@
   background: rgba(224, 149, 64, 0.06);
 }
 
+/* ── Harness selector + pipeline viz get side padding ─────────────────────── */
+.harness-settings-container > .setting-section {
+  padding: 0 14px;
+}
+
 /* ── Agent A: red accent overrides ────────────────────────────────────────── */
 .agent-panel-a .setting-select:hover { border-color: var(--red); }
 .agent-panel-a .harness-settings-container .toggle input:checked + .slider { background: var(--red); }
+/* Override BOTH the label background AND the inner span background/color */
 .agent-panel-a .harness-settings-container .quadswitch label:has(input:checked),
 .agent-panel-a .harness-settings-container .triswitch label:has(input:checked) {
   background: var(--red) !important; color: #fff !important; font-weight: 600;
+}
+.agent-panel-a .harness-settings-container .quadswitch input:checked + span,
+.agent-panel-a .harness-settings-container .triswitch input:checked + span {
+  background: var(--red) !important; color: #fff !important;
 }
 .agent-panel-a .harness-settings-container .quadswitch label:has(input:checked) span,
 .agent-panel-a .harness-settings-container .triswitch label:has(input:checked) span {
