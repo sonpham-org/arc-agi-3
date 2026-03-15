@@ -59,7 +59,7 @@
 
 /* ── Side Panels (Agent A left, Agent B right) ────────────────────────────── */
 .arena-side-panel {
-  width: 500px; flex-shrink: 0; display: flex; flex-direction: column;
+  width: 540px; flex-shrink: 0; display: flex; flex-direction: column;
   background: var(--surface); overflow: hidden;
 }
 #panelA { border-right: 1px solid var(--border); }
@@ -75,19 +75,29 @@
   color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
 }
 
-/* Agent A: tint section headers red */
+/* Agent A: tint section headers red, text RIGHT-aligned (faces center) */
 .agent-panel-a .harness-settings-container .opt-header {
   background: rgba(249, 60, 49, 0.06);
+  flex-direction: row-reverse;
 }
-/* Agent B: tint section headers orange */
+.agent-panel-a .harness-settings-container .opt-header .chevron {
+  transform: rotate(180deg);
+}
+.agent-panel-a .harness-settings-container .opt-section.open .opt-header .chevron {
+  transform: rotate(270deg);
+}
+/* Agent B: tint section headers orange, text LEFT-aligned (faces center) */
 .agent-panel-b .harness-settings-container .opt-header {
   background: rgba(224, 149, 64, 0.06);
 }
 
-/* ── Harness selector + pipeline viz get side padding ─────────────────────── */
+/* ── Harness selector + pipeline viz get padding ──────────────────────────── */
 .harness-settings-container > .setting-section {
-  padding: 0 14px;
+  padding: 8px 14px 0;
 }
+
+/* ── Agent A: IMG badge red ───────────────────────────────────────────────── */
+.agent-panel-a .badge-img { background: rgba(249, 60, 49, 0.2); color: var(--red); }
 
 /* ── Agent A: red accent overrides ────────────────────────────────────────── */
 .agent-panel-a .setting-select:hover { border-color: var(--red); }
@@ -112,16 +122,17 @@
 
 /* ── Toggle fix: circle alignment within pill ─────────────────────────────── */
 .harness-settings-container .toggle {
-  position: relative; display: inline-block; width: 34px; height: 18px; margin: 0;
+  position: relative; display: inline-flex; align-items: center;
+  width: 36px; height: 20px; margin: 0; flex-shrink: 0;
   vertical-align: middle;
 }
 .harness-settings-container .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
 .harness-settings-container .toggle .slider {
-  position: absolute; cursor: pointer; inset: 0; background: var(--border);
-  border-radius: 18px; transition: 0.2s;
+  position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--border); border-radius: 20px; transition: 0.2s;
 }
 .harness-settings-container .toggle .slider::before {
-  content: ''; position: absolute; height: 12px; width: 12px; left: 3px; bottom: 3px;
+  content: ''; position: absolute; height: 14px; width: 14px; left: 3px; top: 3px;
   background: var(--text-dim); border-radius: 50%; transition: 0.2s;
 }
 .harness-settings-container .toggle input:checked + .slider { background: var(--accent); }
@@ -129,6 +140,8 @@
   transform: translateX(16px); background: #fff;
 }
 .agent-panel-a .harness-settings-container .toggle input:checked + .slider { background: var(--red); }
+/* Ensure opt-row toggles align vertically */
+.harness-settings-container .opt-row { display: flex; align-items: center; }
 
 .agent-header {
   display: flex; align-items: center; gap: 10px; padding: 12px 14px;

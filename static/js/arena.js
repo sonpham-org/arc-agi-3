@@ -3993,9 +3993,38 @@ function arenaRenderPipeline(schema, containerId) {
   const nodes = schema.pipeline;
   const edges = schema.edges || [];
 
-  // Agent Spawn: skip complex layout, show simple text
+  // Agent Spawn: compact 3-row layout (Orchestrator → agents → memory)
   if (schema.id === 'agent_spawn') {
-    container.innerHTML = `<div style="font-size:10px;color:var(--text-dim);padding:4px 0;">Pipeline: ${nodes.map(n => n.label).join(' → ')}</div>`;
+    const agentIds = ['explorer', 'theorist', 'tester', 'solver'];
+    const agentNodes = nodes.filter(n => agentIds.includes(n.id));
+    const orchNode = nodes.find(n => n.id === 'orchestrator');
+    const memNode = nodes.find(n => n.id === 'memory');
+    const aW = 80, aH = 22, aGap = 6, orchW = 120, orchH = 26, memW = 120, memH = 22;
+    const totalAgentW = agentNodes.length * aW + (agentNodes.length - 1) * aGap;
+    const svgW = Math.max(totalAgentW, orchW, memW) + 30;
+    const cx = svgW / 2;
+    const r1Y = 8, r2Y = 58, r3Y = 108;
+    const nodePos = {};
+    if (orchNode) nodePos[orchNode.id] = { x: cx - orchW / 2, y: r1Y, w: orchW, h: orchH };
+    const agentStartX = cx - totalAgentW / 2;
+    agentNodes.forEach((n, i) => { nodePos[n.id] = { x: agentStartX + i * (aW + aGap), y: r2Y, w: aW, h: aH }; });
+    if (memNode) nodePos[memNode.id] = { x: cx - memW / 2, y: r3Y, w: memW, h: memH };
+    const svgH = r3Y + memH + 8;
+    let svg = `<svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">`;
+    svg += '<defs><marker id="arrowA" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 3.5 L0 7 z" fill="var(--text-dim)"/></marker></defs>';
+    for (const an of agentNodes) {
+      const op = nodePos['orchestrator'], ap = nodePos[an.id];
+      if (op && ap) { svg += `<line x1="${op.x+op.w/2}" y1="${op.y+op.h}" x2="${ap.x+ap.w/2}" y2="${ap.y}" stroke="var(--text-dim)" stroke-width="1" marker-end="url(#arrowA)" opacity="0.4"/>`; }
+      const mp = nodePos['memory'];
+      if (ap && mp) { svg += `<line x1="${ap.x+ap.w/2}" y1="${ap.y+ap.h}" x2="${mp.x+mp.w/2}" y2="${mp.y}" stroke="var(--text-dim)" stroke-width="1" marker-end="url(#arrowA)" opacity="0.4"/>`; }
+    }
+    for (const node of nodes) {
+      const p = nodePos[node.id]; if (!p) continue;
+      svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="5" fill="none" stroke="${node.color}" stroke-width="1.5"/>`;
+      svg += `<text x="${p.x+p.w/2}" y="${p.y+p.h/2+1}" font-size="${agentIds.includes(node.id)?8:9}" fill="${node.color}" text-anchor="middle" dominant-baseline="middle" font-weight="600">${node.label}</text>`;
+    }
+    svg += '</svg>';
+    container.innerHTML = svg;
     return;
   }
 
