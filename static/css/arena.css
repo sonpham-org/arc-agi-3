@@ -248,23 +248,7 @@
   margin-top: 4px; font-size: 10px;
 }
 
-/* Toggle switch (reused from main.css) */
-.harness-settings-container .toggle {
-  position: relative; display: inline-block; width: 32px; height: 18px; margin: 0;
-}
-.harness-settings-container .toggle input { opacity: 0; width: 0; height: 0; }
-.harness-settings-container .toggle .slider {
-  position: absolute; cursor: pointer; inset: 0; background: var(--border);
-  border-radius: 18px; transition: 0.2s;
-}
-.harness-settings-container .toggle .slider::before {
-  content: ''; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px;
-  background: var(--text-dim); border-radius: 50%; transition: 0.2s;
-}
-.harness-settings-container .toggle input:checked + .slider { background: var(--accent); }
-.harness-settings-container .toggle input:checked + .slider::before {
-  transform: translateX(14px); background: #fff;
-}
+/* Toggle switch — defined once at line 124 (Toggle fix section), not duplicated here */
 
 /* Radio switches (quadswitch, triswitch) */
 .harness-settings-container .quadswitch,
