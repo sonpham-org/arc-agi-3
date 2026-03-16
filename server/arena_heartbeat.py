@@ -1,12 +1,13 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-16 14:00
-# PURPOSE: Server-side arena heartbeat — runs evolution + tournament continuously.
+# Date: 2026-03-16 16:30
+# PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
+#   Supports snake + chess960 (Fischer Random). Game engines dispatched via _ACTIVE_GAMES.
 #   Uses ARENA_CLAUDE_KEY env var (Anthropic API key or OAuth token) for agent evolution.
 #   Uses server/arena_tool_runner.py for LLM tool-calling loops (no external deps).
-#   Runs in two daemon threads: tournament (continuous) + evolution (5-min cycle).
-#   Sets monitor context before each evolution cycle for LLM call tracking.
+#   Runs in two daemon threads: tournament (continuous) + evolution (round-robin games).
+#   Chess960 uses random position each match (time-seeded for true randomization).
 #   Monitor via /api/arena/heartbeat/status endpoint.
-# SRP/DRY check: Pass — reuses existing db_arena functions, snake engine, arena_tool_runner
+# SRP/DRY check: Pass — reuses existing db_arena functions, game engines, arena_tool_runner
 
 import json
 import math
@@ -85,17 +86,29 @@ _live_lock = threading.Lock()
 #   Default Program.md
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _load_default_program():
-    """Load default_program.md from bundled seeds."""
-    path = os.path.join(_SEEDS_DIR, 'default_program.md')
+_GAME_PROGRAM_FILES = {
+    'snake': 'default_program.md',
+    'chess960': 'chess960_program.md',
+}
+
+_GAME_PROGRAM_FALLBACKS = {
+    'snake': "Create snake agents with a get_move(state) function.",
+    'chess960': "Create chess960 agents with a get_move(state) function that returns a legal move string.",
+}
+
+
+def _load_default_program(game_id='snake'):
+    """Load default program.md from bundled seeds for the given game."""
+    filename = _GAME_PROGRAM_FILES.get(game_id, 'default_program.md')
+    path = os.path.join(_SEEDS_DIR, filename)
     if os.path.exists(path):
         with open(path) as f:
             return f.read()
-    return "Create snake agents with a get_move(state) function."
+    return _GAME_PROGRAM_FALLBACKS.get(game_id, "Create agents with a get_move(state) function.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#   Snake Engine
+#   Game Engines
 # ═══════════════════════════════════════════════════════════════════════════
 
 try:
@@ -104,6 +117,16 @@ try:
 except ImportError:
     _HAS_SNAKE_ENGINE = False
     _SnakeGameBase = None
+
+try:
+    from server.chess960_engine import Chess960Game as _Chess960GameBase
+    _HAS_CHESS960_ENGINE = True
+except ImportError:
+    _HAS_CHESS960_ENGINE = False
+    _Chess960GameBase = None
+
+# Active arena games — both tournament + evolution loops iterate these
+_ACTIVE_GAMES = ['snake', 'chess960']
 
 
 def _run_snake_match(code_a, code_b):
@@ -128,6 +151,39 @@ def _run_snake_match(code_a, code_b):
         }
     except Exception as exc:
         return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': str(exc)}
+
+
+def _run_chess960_match(code_a, code_b):
+    """Run a headless Chess960 match. Random position each game (time-seeded).
+    Returns winner/turns/scores/history."""
+    if not _HAS_CHESS960_ENGINE:
+        return {'winner': None, 'turns': 0, 'scores': [0, 0], 'history': [], 'error': 'No chess960 engine'}
+
+    fn_a = _load_agent_fn(code_a)
+    fn_b = _load_agent_fn(code_b)
+    if not fn_a or not fn_b:
+        return {'winner': None, 'turns': 0, 'scores': [0, 0], 'history': [], 'error': 'Agent load failed'}
+
+    # Random Fischer Random position — seeded from time for true randomization
+    position_id = int(time.time() * 1000000) % 960
+    game = _Chess960GameBase(position_id=position_id)
+    try:
+        result = game.run(fn_a, fn_b)
+        return {
+            'winner': result['winner'],
+            'turns': result['turns'],
+            'scores': result['scores'],
+            'history': result.get('history', []),
+        }
+    except Exception as exc:
+        return {'winner': None, 'turns': 0, 'scores': [0, 0], 'history': [], 'error': str(exc)}
+
+
+def _run_match(game_id, code_a, code_b):
+    """Dispatch match to the correct game engine."""
+    if game_id == 'chess960':
+        return _run_chess960_match(code_a, code_b)
+    return _run_snake_match(code_a, code_b)
 
 
 def _push_live_match(a1, a2, winner_name, history, game_id='snake'):
@@ -203,7 +259,8 @@ def _load_agent_fn(code):
                 'set': set, 'tuple': tuple, 'bool': bool, 'enumerate': enumerate,
                 'zip': zip, 'sorted': sorted, 'reversed': reversed, 'sum': sum,
                 'any': any, 'all': all, 'map': map, 'filter': filter,
-                'isinstance': isinstance, 'type': type, 'print': lambda *a, **k: None,
+                'isinstance': isinstance, 'type': type, 'ord': ord, 'chr': chr,
+                'print': lambda *a, **k: None,
                 'True': True, 'False': False, 'None': None,
             }
         }
@@ -328,7 +385,7 @@ def _run_evolution(api_key, game_id='snake'):
     print(f'[evolution] Gen {generation} using {model_label} ({model_id})')
 
     program_data = arena_get_program(game_id)
-    program_md = (program_data.get('content') if program_data else '') or _load_default_program()
+    program_md = (program_data.get('content') if program_data else '') or _load_default_program(game_id)
 
     agents = arena_get_leaderboard(game_id, limit=10)
     for a in agents[:1]:
@@ -419,7 +476,7 @@ def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_h
         code = args.get('code', '')
         if agent_name not in created_list:
             return json.dumps({'error': f"Can only edit agents created THIS round. '{agent_name}' was not."})
-        test_result = _validate_agent_code(code)
+        test_result = _validate_code(game_id, code)
         if test_result:
             return json.dumps({'error': test_result})
         agent = arena_get_agent_by_name(game_id, agent_name)
@@ -437,7 +494,7 @@ def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_h
         agent = arena_get_agent_by_name(game_id, agent_name)
         if not agent:
             return json.dumps({'error': f"Agent '{agent_name}' not found"})
-        error = _validate_agent_code(agent.get('code', ''))
+        error = _validate_code(game_id, agent.get('code', ''))
         if error:
             return json.dumps({'passed': False, 'details': error})
         return json.dumps({'passed': True, 'details': 'All 12 tests passed.'})
@@ -488,14 +545,27 @@ def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_h
         frames = []
         for i in range(start, end):
             frame = history[i]
-            frames.append({
-                'turn': frame.get('turn', i),
-                'scores': frame.get('scores'),
-                'alive': frame.get('alive'),
-                'snake1_head': frame['snakes'][0][0] if frame.get('snakes') and frame['snakes'][0] else None,
-                'snake2_head': frame['snakes'][1][0] if frame.get('snakes') and len(frame['snakes']) > 1 and frame['snakes'][1] else None,
-                'food': frame.get('food'),
-            })
+            if game_id == 'chess960':
+                # Chess960 replay: board state + last move + check info
+                frames.append({
+                    'turn': frame.get('turn', i),
+                    'scores': frame.get('scores'),
+                    'last_move': frame.get('last_move'),
+                    'white_to_move': frame.get('white_to_move'),
+                    'in_check': frame.get('in_check'),
+                    'game_over': frame.get('game_over'),
+                    'winner': frame.get('winner'),
+                })
+            else:
+                # Snake replay: snake positions + food
+                frames.append({
+                    'turn': frame.get('turn', i),
+                    'scores': frame.get('scores'),
+                    'alive': frame.get('alive'),
+                    'snake1_head': frame['snakes'][0][0] if frame.get('snakes') and frame['snakes'][0] else None,
+                    'snake2_head': frame['snakes'][1][0] if frame.get('snakes') and len(frame['snakes']) > 1 and frame['snakes'][1] else None,
+                    'food': frame.get('food'),
+                })
         return json.dumps({
             'game_id': match_id, 'p1': game.get('agent1_name'), 'p2': game.get('agent2_name'),
             'winner': game.get('winner_name'), 'total_turns': len(history),
@@ -511,7 +581,7 @@ def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_h
             return json.dumps({'error': f"Agent '{a1_name}' not found"})
         if not a2:
             return json.dumps({'error': f"Agent '{a2_name}' not found"})
-        result = _run_snake_match(a1.get('code', ''), a2.get('code', ''))
+        result = _run_match(game_id, a1.get('code', ''), a2.get('code', ''))
         winner_name = a1_name if result['winner'] == 0 else (a2_name if result['winner'] == 1 else 'Draw')
         return json.dumps({'winner': winner_name, 'turns': result['turns'], 'scores': result['scores']})
 
@@ -570,6 +640,93 @@ def _validate_agent_code(code):
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#   Chess960 Agent Validation — 12 scenarios (lazily built from engine)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_chess960_test_states_cache = None
+
+
+def _get_chess960_test_states():
+    """Build chess960 test states lazily using the engine."""
+    global _chess960_test_states_cache
+    if _chess960_test_states_cache is not None:
+        return _chess960_test_states_cache
+    if not _HAS_CHESS960_ENGINE:
+        return []
+
+    sequences = [
+        ('opening_white', 518, [], 'white'),
+        ('opening_black', 518, ['e2e4'], 'black'),
+        ('early_game', 518, ['e2e4', 'e7e5'], 'white'),
+        ('developed', 518, ['e2e4', 'e7e5', 'g1f3'], 'black'),
+        ('italian', 518, ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4'], 'black'),
+        ('sicilian', 518, ['e2e4', 'c7c5'], 'white'),
+        ('queens_pawn', 518, ['d2d4', 'd7d5', 'c2c4'], 'black'),
+        ('center_tension', 518, ['e2e4', 'e7e5', 'd2d4', 'e5d4', 'g1f3'], 'black'),
+        ('fischer_pos_42', 42, [], 'white'),
+        ('fischer_pos_777', 777, ['d2d4'], 'black'),
+        ('knights_out', 518, ['g1f3', 'b8c6', 'b1c3', 'g8f6'], 'white'),
+        ('fischer_pos_0', 0, [], 'white'),
+    ]
+
+    states = []
+    for name, pos_id, moves, color in sequences:
+        try:
+            game = _Chess960GameBase(position_id=pos_id)
+            game.setup()
+            for m in moves:
+                game.step(m)
+            state = game.get_state(color)
+            if state.get('legal_moves'):
+                states.append((name, state))
+        except Exception:
+            pass
+    _chess960_test_states_cache = states
+    return states
+
+
+def _validate_chess960_code(code):
+    """Validate chess960 agent code against 12 game scenarios. Returns error string or None."""
+    forbidden = ['import os', 'import subprocess', 'import socket', 'import sys',
+                  'open(', '__import__', 'exec(', 'eval(']
+    for pat in forbidden:
+        if pat in code:
+            return f'Forbidden pattern: {pat}'
+
+    fn = _load_agent_fn(code)
+    if not fn:
+        return 'get_move function not found or syntax error.'
+
+    test_states = _get_chess960_test_states()
+    if not test_states:
+        return 'Chess960 engine not available for validation.'
+
+    failures = []
+    for scenario_name, state in test_states:
+        try:
+            start = time.time()
+            result = fn(state)
+            elapsed = time.time() - start
+            if elapsed > 0.1:
+                failures.append(f'{scenario_name}: too slow ({elapsed*1000:.0f}ms)')
+            elif not isinstance(result, str) or result not in state['legal_moves']:
+                failures.append(f"{scenario_name}: returned '{result}' (not a legal move)")
+        except Exception as exc:
+            failures.append(f'{scenario_name}: CRASH — {type(exc).__name__}: {exc}')
+
+    if failures:
+        return 'Test failures:\n  ' + '\n  '.join(failures)
+    return None
+
+
+def _validate_code(game_id, code):
+    """Dispatch validation to the correct game validator."""
+    if game_id == 'chess960':
+        return _validate_chess960_code(code)
+    return _validate_agent_code(code)
+
+
 def _tool_create_agent(args, game_id, agents, created_list, contributor='arena_heartbeat'):
     """Handle the create_agent tool call."""
     agent_name = args.get('name', '')
@@ -578,7 +735,7 @@ def _tool_create_agent(args, game_id, agents, created_list, contributor='arena_h
     if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', agent_name):
         return json.dumps({'error': 'Invalid name. Letters, digits, underscores only.'})
 
-    error = _validate_agent_code(code)
+    error = _validate_code(game_id, code)
     if error:
         return json.dumps({'error': f'Code validation failed: {error}'})
 
@@ -591,7 +748,7 @@ def _tool_create_agent(args, game_id, agents, created_list, contributor='arena_h
         test_note = ''
         if agents:
             opp = random.choice(agents[:5])
-            match_result = _run_snake_match(code, opp.get('code', ''))
+            match_result = _run_match(game_id, code, opp.get('code', ''))
             if match_result.get('winner') == 0:
                 test_note = f" Quick test vs {opp['name']}: WIN in {match_result['turns']} turns."
             elif match_result.get('winner') == 1:
@@ -662,7 +819,7 @@ def _run_tournament(game_id='snake', match_count=20):
         if not code1 or not code2:
             continue
 
-        result = _run_snake_match(code1, code2)
+        result = _run_match(game_id, code1, code2)
         if result.get('error'):
             continue
 
@@ -735,15 +892,19 @@ def _warm_live_buffer(game_id='snake'):
 
 
 def _tournament_loop():
-    print('[tournament] Continuous tournament runner started')
+    print(f'[tournament] Continuous tournament runner started (games: {_ACTIVE_GAMES})')
     time.sleep(5)
-    _warm_live_buffer('snake')
-    _seed_if_empty('snake')
+    for gid in _ACTIVE_GAMES:
+        _warm_live_buffer(gid)
+        _seed_if_empty(gid)
 
+    game_idx = 0
     consecutive_zeros = 0
     while _heartbeat_state['running']:
+        game_id = _ACTIVE_GAMES[game_idx % len(_ACTIVE_GAMES)]
+        game_idx += 1
         try:
-            games = _run_tournament(game_id='snake', match_count=1)
+            games = _run_tournament(game_id=game_id, match_count=1)
             if games > 0:
                 _heartbeat_state['games_played'] += games
                 consecutive_zeros = 0
@@ -752,18 +913,32 @@ def _tournament_loop():
             else:
                 consecutive_zeros += 1
                 if consecutive_zeros == 1:
-                    agents = arena_get_leaderboard('snake', limit=10)
-                    _heartbeat_state['last_error'] = f'tournament: 0 games, {len(agents)} agents loaded'
-                    print(f'[tournament] No games played ({len(agents)} agents). Retrying in 10s...')
+                    agents = arena_get_leaderboard(game_id, limit=10)
+                    _heartbeat_state['last_error'] = f'tournament({game_id}): 0 games, {len(agents)} agents'
+                    print(f'[tournament] No {game_id} games ({len(agents)} agents). Retrying in 10s...')
                 time.sleep(10)
                 continue
         except Exception as e:
-            _heartbeat_state['last_error'] = f'tournament: {e}'
-            print(f'[tournament] Error: {e}')
+            _heartbeat_state['last_error'] = f'tournament({game_id}): {e}'
+            print(f'[tournament] Error ({game_id}): {e}')
             traceback.print_exc()
             time.sleep(10)
             continue
         time.sleep(MATCH_DELAY)
+
+
+_GAME_SEEDS = {
+    'snake': {
+        'seed_random': 'random_agent.py',
+        'seed_greedy': 'greedy_agent.py',
+        'seed_wall_avoider': 'wall_avoider.py',
+    },
+    'chess960': {
+        'chess960_seed_random': 'chess960_random_agent.py',
+        'chess960_seed_greedy': 'chess960_greedy_agent.py',
+        'chess960_seed_positional': 'chess960_positional_agent.py',
+    },
+}
 
 
 def _seed_if_empty(game_id):
@@ -771,72 +946,75 @@ def _seed_if_empty(game_id):
     if agents:
         return
     print(f'[tournament] No agents found for {game_id}, seeding baselines...')
-    seeds = {
-        'seed_random': os.path.join(_SEEDS_DIR, 'random_agent.py'),
-        'seed_greedy': os.path.join(_SEEDS_DIR, 'greedy_agent.py'),
-        'seed_wall_avoider': os.path.join(_SEEDS_DIR, 'wall_avoider.py'),
-    }
-    for name, path in seeds.items():
+    seeds = _GAME_SEEDS.get(game_id, {})
+    for name, filename in seeds.items():
+        path = os.path.join(_SEEDS_DIR, filename)
         if os.path.exists(path):
             with open(path) as f:
                 code = f.read()
             result = arena_submit_agent(game_id, name, code, generation=0,
                                        contributor='seed', is_anchor=1)
             if isinstance(result, dict):
-                print(f'[tournament] Seeded {name} (id={result["id"]})')
+                print(f'[tournament] Seeded {name} for {game_id} (id={result["id"]})')
             else:
-                print(f'[tournament] Seed {name} failed: {result}')
-    print(f'[tournament] Seeding complete')
+                print(f'[tournament] Seed {name} for {game_id} failed: {result}')
+    print(f'[tournament] Seeding complete for {game_id}')
 
 
 def _evolution_loop():
     _heartbeat_state['last_comment_check'] = time.time()
-    print('[evolution] Evolution heartbeat started (5min normal, 1min on feedback)')
+    print(f'[evolution] Evolution heartbeat started (games: {_ACTIVE_GAMES})')
     time.sleep(10)
 
+    evo_game_idx = 0
     while _heartbeat_state['running']:
         api_key = os.environ.get('ARENA_CLAUDE_KEY', '')
         if not api_key:
             time.sleep(HEARTBEAT_INTERVAL_NORMAL)
             continue
+
+        # Round-robin across active games
+        game_id = _ACTIVE_GAMES[evo_game_idx % len(_ACTIVE_GAMES)]
+        evo_game_idx += 1
+        created = []
+
         try:
             tick_start = time.time()
             _heartbeat_state['ticks'] += 1
-            has_feedback = _has_new_feedback('snake')
+            has_feedback = _has_new_feedback(game_id)
             if has_feedback:
-                print(f'[evolution] Tick #{_heartbeat_state["ticks"]} (FAST — new user feedback)')
+                print(f'[evolution] Tick #{_heartbeat_state["ticks"]} ({game_id} FAST — new user feedback)')
             else:
-                print(f'[evolution] Tick #{_heartbeat_state["ticks"]} starting...')
-            created = _run_evolution(api_key, game_id='snake')
+                print(f'[evolution] Tick #{_heartbeat_state["ticks"]} ({game_id}) starting...')
+            created = _run_evolution(api_key, game_id=game_id)
             _heartbeat_state['agents_created'] += len(created)
             if created:
-                print(f'[evolution] Created {len(created)} agent(s): {", ".join(created)}')
-                # Post to AI Heartbeat chat
+                print(f'[evolution] Created {len(created)} {game_id} agent(s): {", ".join(created)}')
                 try:
                     gen = _heartbeat_state['ticks']
                     msg = f"Gen {gen}: created {len(created)} new agent(s) — {', '.join(created)}"
-                    arena_post_comment('snake', 'ai-heartbeat', 'Heartbeat', msg,
+                    arena_post_comment(game_id, 'ai-heartbeat', 'Heartbeat', msg,
                                        comment_type='heartbeat')
                 except Exception:
-                    pass  # non-fatal
+                    pass
             elapsed = time.time() - tick_start
             _heartbeat_state['last_tick'] = time.time()
             _heartbeat_state['last_error'] = None
-            print(f'[evolution] Tick #{_heartbeat_state["ticks"]} done in {elapsed:.1f}s')
+            print(f'[evolution] Tick #{_heartbeat_state["ticks"]} ({game_id}) done in {elapsed:.1f}s')
         except Exception as e:
             _heartbeat_state['last_error'] = str(e)
-            print(f'[evolution] Tick error: {e}')
+            print(f'[evolution] Tick error ({game_id}): {e}')
             traceback.print_exc()
-        # Export after agent creation or on hourly schedule
+
         if created or time.time() - _last_export_time >= EXPORT_INTERVAL:
             try:
-                run_export('snake')
+                run_export(game_id)
             except Exception as exc:
                 print(f'[evolution] Export error (non-fatal): {exc}')
 
         # 2min until 100 agents, then 10min. 1min if new user feedback.
-        agent_count = len(arena_get_leaderboard('snake', limit=200))
-        if _has_new_feedback('snake'):
+        agent_count = len(arena_get_leaderboard(game_id, limit=200))
+        if _has_new_feedback(game_id):
             interval = HEARTBEAT_INTERVAL_FAST
         elif agent_count < 100:
             interval = HEARTBEAT_INTERVAL_FAST_FILL
@@ -915,7 +1093,7 @@ def run_export(game_id='snake'):
             json.dump({'game_id': game_id, 'exported_at': ts, 'count': len(game_data), 'games': game_data}, f, indent=1)
 
         program_data = arena_get_program(game_id)
-        program_content = (program_data.get('content') if program_data else '') or _load_default_program()
+        program_content = (program_data.get('content') if program_data else '') or _load_default_program(game_id)
         with open(os.path.join(snap_dir, 'program.md'), 'w') as f:
             f.write(program_content)
 
@@ -1002,4 +1180,6 @@ def get_heartbeat_status():
         'games_played': _heartbeat_state['games_played'],
         'has_api_key': bool(os.environ.get('ARENA_CLAUDE_KEY', '')),
         'snake_engine': _HAS_SNAKE_ENGINE,
+        'chess960_engine': _HAS_CHESS960_ENGINE,
+        'active_games': _ACTIVE_GAMES,
     }

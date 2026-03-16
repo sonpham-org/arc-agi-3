@@ -5,6 +5,31 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.8.0] — feat: Chess960 (Fischer Random) arena autoresearch game
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Added
+- **Chess960 Python engine** (`server/chess960_engine.py`) — full legal move generation, check/checkmate/stalemate detection, en passant, pawn promotion, 50-move rule, Fischer Random position generation (960 positions)
+- **Chess960 Program.md** (`server/arena_seeds/chess960_program.md`) — LLM evolution steering document for chess agent creation
+- **3 seed agents** — random, greedy-material, positional (piece-square tables) in `server/arena_seeds/chess960_*.py`
+- **12 chess validation scenarios** — generated lazily from engine, covering standard + Fischer Random positions, both colors, opening through middlegame
+- **Multi-game heartbeat** — tournament and evolution loops now round-robin across active games (snake + chess960)
+- **Chess960 match runner** — random Fischer Random position each game (time-seeded for true randomization)
+- **Game-aware dispatch** — `_run_match()`, `_validate_code()`, `_load_default_program()` now dispatch by game_id
+- **`ord`/`chr` in agent sandbox** — added to builtins for chess agents that need coordinate parsing
+- **Chess960 enabled in frontend** — added to `ARENA_ENABLED_IDS`, config uses `Date.now() % 960` for random positions per match
+
+### Changed
+- **Tournament loop** warms live buffer and seeds baselines for all active games, not just snake
+- **Evolution loop** alternates between active games on each tick
+- **Tool handlers** (`test_match`, `run_test`, `edit_current_agent`, `create_agent`) use game-specific validation and match runners
+- **`get_game_replay`** returns chess-specific frame data (last_move, in_check, white_to_move) for chess960 games
+- **Heartbeat status** now includes `chess960_engine` flag and `active_games` list
+- **Chess960 JS config** — maxMoves raised to 200, seed is a function returning `Date.now() % 960`
+- **Chess preview** uses fixed seed 518 (standard chess) for consistent display
+
+---
+
 ## [1.7.8] — feat: Create New Agent & AI Heartbeat tabs
 *Author: Claude Opus 4.6 | 2026-03-16*
 

@@ -338,7 +338,8 @@ class ChessGame {
     this.lastMove = null;
     this.enPassant = null;
     this.halfmoveClock = 0;
-    this._setupFischerRandom(config.seed || 42);
+    const seed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
+    this._setupFischerRandom(seed);
   }
 
   _setupFischerRandom(seed) {
@@ -679,7 +680,7 @@ function renderChessFrame(ctx, frame, size) {
 }
 
 function renderChessPreview(canvas, config) {
-  const game = new ChessGame(config);
+  const game = new ChessGame({...config, seed: 518});  // Standard position for preview
   const board = game.getBoard();
   const size = 120;
   canvas.width = size; canvas.height = size;
@@ -3146,7 +3147,7 @@ const _ALL_ARENA_GAMES = [
   { id: 'chess960', title: 'Fischer Random Chess', category: 'Board Games',
     desc: 'Chess960 — back rank pieces shuffled. Full chess with unique openings every game.',
     tags: ['Symbolic', 'Turn-based'],
-    config: { maxMoves: 80, seed: 42 },
+    config: { maxMoves: 200, seed: () => Date.now() % 960 },
     strategies: CHESS_STRATEGIES,
     run: runChessMatch, render: renderChessFrame, preview: renderChessPreview },
   { id: 'othello', title: 'Othello', category: 'Board Games',
@@ -3181,7 +3182,7 @@ const _ALL_ARENA_GAMES = [
     run: runPokerMatch, render: renderPokerFrame, preview: renderPokerPreview },
 ];
 
-const ARENA_ENABLED_IDS = new Set(['snake']);
+const ARENA_ENABLED_IDS = new Set(['snake', 'chess960']);
 const ARENA_GAMES = _ALL_ARENA_GAMES.filter(g => ARENA_ENABLED_IDS.has(g.id));
 
 

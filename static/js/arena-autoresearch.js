@@ -59,11 +59,16 @@ function getMove(state) {
 }`,
   chess960: `
 function getMove(state) {
-  // state.board: 8x8 (positive=white, negative=black, 1=pawn,2=knight,3=bishop,4=rook,5=queen,6=king)
-  // state.myColor: 'w'|'b', state.validMoves: [{from:'e2',to:'e4'},...],
-  // state.turn: int, state.memory: {}
-  // Return: {from: 'e2', to: 'e4'}
-  return state.validMoves[0];
+  // state.board: 8x8 int array (positive=white, negative=black)
+  //   1=pawn, 2=knight, 3=bishop, 4=rook, 5=queen, 6=king
+  //   Row 0=rank 8 (black back rank), Row 7=rank 1 (white back rank)
+  // state.my_color: 'white'|'black'
+  // state.legal_moves: ['e2e4','g1f3',...] — long algebraic notation
+  // state.opponent_last_move: 'e7e5' or null
+  // state.turn: int (half-moves), state.king_in_check: bool
+  // state.prev_moves: [] — mutable persistent memory
+  // Return: one of state.legal_moves (e.g. 'e2e4')
+  return state.legal_moves[0];
 }`,
   othello: `
 function getMove(state) {
