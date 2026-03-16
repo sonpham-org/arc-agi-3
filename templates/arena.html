@@ -225,19 +225,21 @@ const FEATURES = {{ features | tojson }};
             <button class="ar-btn ar-btn-accept" onclick="arProposeProgram()">Accept Changes</button>
             <button class="ar-btn ar-btn-xs" onclick="arCancelEdit()">Cancel</button>
           </div>
-          <div class="ar-create-agent-area" id="arCreateAgentArea">
-            <div class="ar-section-header"><span>Create New Code Agent</span></div>
-            <div class="ar-create-agent-controls">
-              <select id="arCreateModel" class="ar-small-select" style="flex:1"><option>Loading models...</option></select>
-              <input type="password" id="arCreateApiKey" class="ar-input" placeholder="API key" style="flex:1">
-              <button class="ar-btn ar-btn-primary" id="arCreateAgentBtn" onclick="arCreateAgentLocal()">Create Agent</button>
-            </div>
-            <div class="ar-create-agent-log" id="arCreateAgentLog" style="display:none;"></div>
-          </div>
         </div>
       </div>
 
-      <!-- Strategy Discussion — 1/3 height -->
+      <!-- Create New Code Agent -->
+      <div class="ar-create-agent-area" id="arCreateAgentArea">
+        <div class="ar-section-header"><span>Create New Code Agent</span></div>
+        <div class="ar-create-agent-controls">
+          <select id="arCreateModel" class="ar-small-select" style="flex:1"><option>Loading models...</option></select>
+          <input type="password" id="arCreateApiKey" class="ar-input" placeholder="API key" style="flex:1">
+          <button class="ar-btn ar-btn-primary" id="arCreateAgentBtn" onclick="arCreateAgentLocal()">Create Agent</button>
+        </div>
+        <div class="ar-create-agent-log" id="arCreateAgentLog" style="display:none;"></div>
+      </div>
+
+      <!-- Strategy Discussion -->
       <div class="ar-discussion-area" id="arDiscussionArea">
         <div class="ar-section-header">
           <span>Strategy Discussion</span>

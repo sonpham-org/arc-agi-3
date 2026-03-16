@@ -839,7 +839,7 @@
 
 /* ── Create Agent Area ── */
 .ar-create-agent-area {
-  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  flex-shrink: 0; padding: 6px 10px; border-top: 1px solid var(--border);
 }
 .ar-create-agent-controls {
   display: flex; gap: 4px; align-items: center; padding: 4px 0;
