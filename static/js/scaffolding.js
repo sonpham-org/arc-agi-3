@@ -47,6 +47,37 @@ async function saveArcApiKey() {
 // MODELS LIST
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Append model optgroups to a select WITHOUT clearing existing options.
+ *  Used for compact/interrupt selects that have static options (auto, same, etc.). */
+function _appendModelOptgroups(sel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder) {
+  for (const prov of providerOrder) {
+    const models = groups[prov];
+    if (!models?.length) continue;
+    const grp = document.createElement('optgroup');
+    grp.label = providerLabels[prov] || prov;
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = `${m.name} — ${m.price}`;
+      grp.appendChild(opt);
+    }
+    sel.appendChild(grp);
+  }
+  for (const prov of byokProviderOrder) {
+    const models = byokGroups[prov];
+    if (!models?.length) continue;
+    const grp = document.createElement('optgroup');
+    grp.label = `${prov} (BYOK)`;
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = `${m.name} — ${m.price}`;
+      grp.appendChild(opt);
+    }
+    sel.appendChild(grp);
+  }
+}
+
 function _populateSubModelSelect(sel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, savedVal) {
   sel.innerHTML = '';
   for (const prov of providerOrder) {
@@ -214,22 +245,24 @@ function _populateAllModelSelects() {
   if (!sel.options.length) sel.innerHTML = '<option value="">No models</option>';
   } // end main select block
 
-  // Populate compact model selector — keep default options, add all models
+  // Populate compact model selector — keep default options, add all models.
+  // Cannot use _populateSubModelSelect here because it clears innerHTML,
+  // which would wipe the static options (auto, auto-fastest, same).
   const csel = document.getElementById('compactModelSelectTop');
   if (!csel) { /* compact select not in current scaffolding */ } else {
   const savedVal = csel.value;
-  // Remove all optgroups (keep the static <option>s)
   csel.querySelectorAll('optgroup').forEach(g => g.remove());
-  // Add available models grouped by provider
-  _populateSubModelSelect(csel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, savedVal);
+  _appendModelOptgroups(csel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder);
+  if (savedVal && [...csel.options].some(o => o.value === savedVal)) csel.value = savedVal;
   } // end compact select block
 
-  // Populate interrupt model selector — same pattern
+  // Populate interrupt model selector — same pattern (has static options too)
   const isel = document.getElementById('interruptModelSelect');
   if (!isel) { /* interrupt select not in current scaffolding */ } else {
   const iSavedVal = isel.value;
   isel.querySelectorAll('optgroup').forEach(g => g.remove());
-  _populateSubModelSelect(isel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, iSavedVal);
+  _appendModelOptgroups(isel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder);
+  if (iSavedVal && [...isel.options].some(o => o.value === iSavedVal)) isel.value = iSavedVal;
   } // end interrupt select block
 
   // Populate RLM model selects if they exist
