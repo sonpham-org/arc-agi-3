@@ -77,7 +77,7 @@ _heartbeat_state = {
 
 # Ring buffer of recent matches for live tournament canvases.
 # Kept in-memory only — no DB bloat. Max 4 entries.
-_LIVE_BUFFER_SIZE = 8  # 4 per game × 2 games
+_LIVE_BUFFER_SIZE = 12  # 4 per game × 3 games
 _live_matches = []
 _live_lock = threading.Lock()
 
@@ -89,11 +89,13 @@ _live_lock = threading.Lock()
 _GAME_PROGRAM_FILES = {
     'snake': 'default_program.md',
     'chess960': 'chess960_program.md',
+    'othello': 'othello_program.md',
 }
 
 _GAME_PROGRAM_FALLBACKS = {
     'snake': "Create snake agents with a get_move(state) function.",
     'chess960': "Create chess960 agents with a get_move(state) function that returns a legal move string.",
+    'othello': "Create othello agents with a get_move(state) function that returns [row, col].",
 }
 
 
@@ -125,8 +127,15 @@ except ImportError:
     _HAS_CHESS960_ENGINE = False
     _Chess960GameBase = None
 
+try:
+    from server.othello_engine import OthelloGame as _OthelloGameBase
+    _HAS_OTHELLO_ENGINE = True
+except ImportError:
+    _HAS_OTHELLO_ENGINE = False
+    _OthelloGameBase = None
+
 # Active arena games — both tournament + evolution loops iterate these
-_ACTIVE_GAMES = ['snake', 'chess960']
+_ACTIVE_GAMES = ['snake', 'chess960', 'othello']
 
 
 def _run_snake_match(code_a, code_b):
@@ -179,10 +188,35 @@ def _run_chess960_match(code_a, code_b):
         return {'winner': None, 'turns': 0, 'scores': [0, 0], 'history': [], 'error': str(exc)}
 
 
+def _run_othello_match(code_a, code_b):
+    """Run a headless Othello match. Returns winner/turns/scores/history."""
+    if not _HAS_OTHELLO_ENGINE:
+        return {'winner': None, 'turns': 0, 'scores': [2, 2], 'history': [], 'error': 'No othello engine'}
+
+    fn_a = _load_agent_fn(code_a)
+    fn_b = _load_agent_fn(code_b)
+    if not fn_a or not fn_b:
+        return {'winner': None, 'turns': 0, 'scores': [2, 2], 'history': [], 'error': 'Agent load failed'}
+
+    game = _OthelloGameBase()
+    try:
+        result = game.run(fn_a, fn_b)
+        return {
+            'winner': result['winner'],
+            'turns': result['turns'],
+            'scores': result['scores'],
+            'history': result.get('history', []),
+        }
+    except Exception as exc:
+        return {'winner': None, 'turns': 0, 'scores': [2, 2], 'history': [], 'error': str(exc)}
+
+
 def _run_match(game_id, code_a, code_b):
     """Dispatch match to the correct game engine."""
     if game_id == 'chess960':
         return _run_chess960_match(code_a, code_b)
+    if game_id == 'othello':
+        return _run_othello_match(code_a, code_b)
     return _run_snake_match(code_a, code_b)
 
 
@@ -557,6 +591,16 @@ def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_h
                     'game_over': frame.get('game_over'),
                     'winner': frame.get('winner'),
                 })
+            elif game_id == 'othello':
+                # Othello replay: board + last move + scores
+                frames.append({
+                    'turn': frame.get('turn', i),
+                    'scores': frame.get('scores'),
+                    'last_move': frame.get('last_move'),
+                    'current_player': frame.get('current_player'),
+                    'game_over': frame.get('game_over'),
+                    'winner': frame.get('winner'),
+                })
             else:
                 # Snake replay: snake positions + food
                 frames.append({
@@ -721,10 +765,95 @@ def _validate_chess960_code(code):
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#   Othello Agent Validation — 12 scenarios (lazily built from engine)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_othello_test_states_cache = None
+
+
+def _get_othello_test_states():
+    """Build Othello test states lazily using the engine."""
+    global _othello_test_states_cache
+    if _othello_test_states_cache is not None:
+        return _othello_test_states_cache
+    if not _HAS_OTHELLO_ENGINE:
+        return []
+
+    # Play through specific move sequences to create interesting board states
+    sequences = [
+        ('opening_black', [], 1),                           # standard opening
+        ('opening_white', [[3, 2]], -1),                    # after 1 move
+        ('early_game', [[3, 2], [2, 2]], 1),                # after 2 moves
+        ('developing', [[3, 2], [2, 2], [1, 2]], -1),      # after 3 moves
+        ('mid_game', [[3, 2], [2, 2], [1, 2], [4, 2], [5, 3]], -1),
+        ('edge_play', [[3, 2], [2, 4], [5, 3], [4, 2], [5, 4], [2, 2]], 1),
+        ('corner_area', [[3, 2], [2, 4], [5, 3], [4, 2], [5, 4], [2, 2], [1, 2]], -1),
+        ('complex', [[3, 2], [2, 2], [1, 2], [4, 2], [5, 3], [5, 4], [5, 5]], -1),
+        ('black_mid', [[3, 2], [2, 4], [5, 3], [4, 2]], 1),
+        ('white_mid', [[3, 2], [2, 4], [5, 3]], -1),
+        ('many_moves', [[3, 2], [2, 2], [1, 2], [4, 2], [5, 3], [5, 4], [5, 5], [2, 4]], 1),
+        ('late_opening', [[3, 2], [2, 2], [1, 2], [4, 2], [5, 3], [5, 2]], 1),
+    ]
+
+    states = []
+    for name, moves, color in sequences:
+        try:
+            game = _OthelloGameBase()
+            game.setup()
+            for m in moves:
+                game.step(m)
+            state = game.get_state(color)
+            if state.get('legal_moves'):
+                states.append((name, state))
+        except Exception:
+            pass
+    _othello_test_states_cache = states
+    return states
+
+
+def _validate_othello_code(code):
+    """Validate Othello agent code against 12 game scenarios. Returns error string or None."""
+    forbidden = ['import os', 'import subprocess', 'import socket', 'import sys',
+                  'open(', '__import__', 'exec(', 'eval(']
+    for pat in forbidden:
+        if pat in code:
+            return f'Forbidden pattern: {pat}'
+
+    fn = _load_agent_fn(code)
+    if not fn:
+        return 'get_move function not found or syntax error.'
+
+    test_states = _get_othello_test_states()
+    if not test_states:
+        return 'Othello engine not available for validation.'
+
+    failures = []
+    for scenario_name, state in test_states:
+        try:
+            start = time.time()
+            result = fn(state)
+            elapsed = time.time() - start
+            if elapsed > 0.1:
+                failures.append(f'{scenario_name}: too slow ({elapsed*1000:.0f}ms)')
+            elif not isinstance(result, (list, tuple)) or len(result) != 2:
+                failures.append(f"{scenario_name}: returned '{result}' (must be [row, col])")
+            elif [int(result[0]), int(result[1])] not in state['legal_moves']:
+                failures.append(f"{scenario_name}: returned {list(result)} (not a legal move)")
+        except Exception as exc:
+            failures.append(f'{scenario_name}: CRASH — {type(exc).__name__}: {exc}')
+
+    if failures:
+        return 'Test failures:\n  ' + '\n  '.join(failures)
+    return None
+
+
 def _validate_code(game_id, code):
     """Dispatch validation to the correct game validator."""
     if game_id == 'chess960':
         return _validate_chess960_code(code)
+    if game_id == 'othello':
+        return _validate_othello_code(code)
     return _validate_agent_code(code)
 
 
@@ -938,6 +1067,11 @@ _GAME_SEEDS = {
         'chess960_seed_random': 'chess960_random_agent.py',
         'chess960_seed_greedy': 'chess960_greedy_agent.py',
         'chess960_seed_positional': 'chess960_positional_agent.py',
+    },
+    'othello': {
+        'othello_seed_random': 'othello_random_agent.py',
+        'othello_seed_greedy': 'othello_greedy_agent.py',
+        'othello_seed_positional': 'othello_positional_agent.py',
     },
 }
 
@@ -1182,5 +1316,6 @@ def get_heartbeat_status():
         'has_api_key': bool(os.environ.get('ARENA_CLAUDE_KEY', '')),
         'snake_engine': _HAS_SNAKE_ENGINE,
         'chess960_engine': _HAS_CHESS960_ENGINE,
+        'othello_engine': _HAS_OTHELLO_ENGINE,
         'active_games': _ACTIVE_GAMES,
     }

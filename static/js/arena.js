@@ -3216,7 +3216,7 @@ const _ALL_ARENA_GAMES = [
     run: runPokerMatch, render: renderPokerFrame, preview: renderPokerPreview },
 ];
 
-const ARENA_ENABLED_IDS = new Set(['snake', 'chess960']);
+const ARENA_ENABLED_IDS = new Set(['snake', 'chess960', 'othello']);
 const ARENA_GAMES = _ALL_ARENA_GAMES.filter(g => ARENA_ENABLED_IDS.has(g.id));
 
 

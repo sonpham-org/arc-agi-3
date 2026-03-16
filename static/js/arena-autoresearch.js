@@ -72,11 +72,15 @@ function getMove(state) {
   return state.legal_moves[0];
 }`,
   othello: `
-function getMove(state) {
-  // state.board: 8x8 (0=empty, 1=me, 2=opponent)
-  // state.validMoves: [{row,col},...], state.turn: int, state.memory: {}
-  // Return: {row, col}
-  return state.validMoves[0];
+function get_move(state) {
+  // state.board: 8x8 int array (1=black, -1=white, 0=empty)
+  // state.my_color: 1 (black) or -1 (white)
+  // state.legal_moves: [[row,col], ...] — pre-computed legal moves
+  // state.opponent_last_move: [row,col] or null
+  // state.turn: int (half-moves), state.scores: {black, white, empty}
+  // state.prev_moves: [] — mutable persistent memory
+  // Return: [row, col] from state.legal_moves
+  return state.legal_moves[0];
 }`,
   go9: `
 function getMove(state) {
@@ -1588,6 +1592,64 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
       ctx.lineWidth = 0.5;
       ctx.strokeText(String(frame.scoreB || 0), w - 3, h - 3);
       ctx.fillText(String(frame.scoreB || 0), w - 3, h - 3);
+    }
+    return;
+  }
+
+  // Othello: green board with black/white discs
+  if (gameId === 'othello' && frame.board) {
+    const board = frame.board;
+    const sq = w / 8;
+    const radius = sq * 0.40;
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        // Green board
+        ctx.fillStyle = '#2E7D32';
+        ctx.fillRect(c * sq, r * sq, sq, sq);
+        ctx.strokeStyle = '#1B5E20';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(c * sq, r * sq, sq, sq);
+
+        const piece = board[r][c];
+        if (piece !== 0) {
+          const cx = c * sq + sq / 2, cy = r * sq + sq / 2;
+          const isLast = frame.last_move && frame.last_move[0] === r && frame.last_move[1] === c;
+          // Shadow
+          ctx.beginPath();
+          ctx.arc(cx + 0.8, cy + 0.8, radius, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          ctx.fill();
+          // Disc
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fillStyle = piece === 1 ? '#111111' : '#F5F5F5';
+          ctx.fill();
+          // Last move ring
+          if (isLast) {
+            ctx.strokeStyle = '#FFDC00';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Scores at bottom
+    if (frame.scores) {
+      const scores = frame.scores;
+      const bk = typeof scores === 'object' && !Array.isArray(scores) ? scores.black || scores[0] : scores[0];
+      const wt = typeof scores === 'object' && !Array.isArray(scores) ? scores.white || scores[1] : scores[1];
+      ctx.font = `bold ${Math.max(9, sq * 0.55 | 0)}px monospace`;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#111';
+      ctx.fillText(String(bk || 0), 3, h - 3);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#F5F5F5';
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 0.5;
+      ctx.strokeText(String(wt || 0), w - 3, h - 3);
+      ctx.fillText(String(wt || 0), w - 3, h - 3);
     }
     return;
   }

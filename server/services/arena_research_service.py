@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 ARENA_GAME_IDS = {
     "snake",
     "chess960",
+    "othello",
 }
 _ALL_ARENA_GAME_IDS = {
     "snake", "tron", "connect4", "chess960",
