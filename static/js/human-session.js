@@ -230,7 +230,7 @@ function _humanStopLive() {
     clearInterval(_humanLiveInterval);
     _humanLiveInterval = null;
   }
-  _humanLiveHeldAction = 6;
+  _humanLiveHeldAction = _humanLiveIdleAction;
 }
 
 function humanSetLiveFps(val) {

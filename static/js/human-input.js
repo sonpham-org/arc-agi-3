@@ -118,7 +118,7 @@ function _setupHumanKeyboard() {
     if (!_humanLiveMode) return;
     const action = keyMap[e.key];
     if (action !== undefined && _humanLiveHeldAction === action) {
-      _humanLiveHeldAction = 6; // release → back to no-op tick
+      _humanLiveHeldAction = _humanLiveIdleAction; // release → back to idle tick
     }
   });
 }

@@ -28,7 +28,8 @@ let _humanLiveMode = false;    // true when playing in live mode
 let _humanLiveInterval = null; // interval handle for live mode auto-tick
 let _humanLiveFps = 10;        // tick rate for live mode (user-adjustable, default 10)
 let _humanGameHasLive = false; // true if current game supports live mode
-let _humanLiveHeldAction = 6;  // currently held action in live mode (6 = no-op tick)
+let _humanLiveIdleAction = 6;  // idle tick action for live mode (7 for ACT7-only games, 6 otherwise)
+let _humanLiveHeldAction = 6;  // currently held action in live mode (reset to idle on key release)
 
 const _humanCanvas = () => document.getElementById('humanCanvas');
 const _humanCtx = () => _humanCanvas()?.getContext('2d');
@@ -113,6 +114,10 @@ async function _humanSelectGame(gameId) {
   _humanDuration = 0;
   _humanAvailableActions = data.available_actions || [];
   _humanAction6Mode = _humanAvailableActions.includes(6);
+  // Games with ACT7 but no d-pad (1-4) use ACT7 as the live idle tick (e.g. mr01)
+  const _hasDpad = [1,2,3,4].some(a => _humanAvailableActions.includes(a));
+  _humanLiveIdleAction = (!_hasDpad && _humanAvailableActions.includes(7)) ? 7 : 6;
+  _humanLiveHeldAction = _humanLiveIdleAction;
 
   // Check if game supports live mode
   const gameMeta = _humanGames.find(g => g.game_id === gameId || g.game_id.split('-')[0] === gameId.split('-')[0]);
