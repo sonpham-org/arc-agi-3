@@ -5,6 +5,63 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.7.8] — feat: Create New Agent & AI Heartbeat tabs
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Changed
+- **Center column refactor** — replaced the stacked "Create New Code Agent" + "Strategy Discussion" sections with a tabbed lower panel containing two tabs:
+  - **Create New Agent** — BYOK model/key inputs, inline program.md editor with live diff, and Create Agent button. Submits program.md changes before spawning the agent locally via LLM tool-calling loop, then sends to server.
+  - **AI Heartbeat** — community + AI chat feed. Users can chat; the server-side evolution heartbeat auto-posts agent creation updates. Stored as `comment_type='heartbeat'` in `arena_comments` table.
+- **Program.md viewer** is now read-only in the top area; editing happens in the Create New Agent tab
+- **Comments API** (`GET /api/arena/comments/<game_id>`) now accepts `?type=` query param to filter by `comment_type`
+- **`arena_get_comments()`** DB function accepts optional `comment_type` filter
+- **Server heartbeat** posts AI status messages to the heartbeat chat when new agents are created
+
+---
+
+## [1.7.7] — feat: Agent profile view + leaderboard top-50 cap
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Added
+- **Agent profile view** — click any leaderboard row to see an agent's profile in the right column, with 2 games vs higher-ELO opponents and 2 games vs lower-ELO opponents rendered as animated canvas replays
+- **`GET /api/arena/agents/<game_id>/<agent_id>/games`** API endpoint — returns agent info + recent games with opponent ELO and frame history for replay
+- **`arena_get_agent_games_for_profile()`** DB function — fetches agent games with opponent ELO, parses history JSON server-side
+
+### Changed
+- **Leaderboard capped at top 50** — "Show all (N)" link at the bottom expands to the full list; toggles back to "Show top 50"
+- **Leaderboard rows are clickable** — clicking selects agent and opens profile view; re-clicking deselects and returns to Live Tournament
+- **Right column toggles** between Live Tournament and Agent View — Back button and re-click restore the original view with live canvases
+
+---
+
+## [1.7.6] — feat: Arena LLM call monitoring dashboard
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Added
+- **`arena_llm_calls` DB table** — logs every Anthropic API call from arena evolution (model, status, HTTP code, tokens, cost, latency, auth type)
+- **Monitoring dashboard** at `/arena/monitor` — dark terminal-style page showing success/failure rates (1h/24h/all-time), per-model breakdown, auth type stats, recent errors, and full call log
+- **Admin access control** via `ARENA_ADMIN_KEY` env var — pass `?key=<secret>` to access; open in local dev when not configured
+- **Auto-refresh** every 30s on the dashboard
+- **API endpoint** `/api/arena/monitor/stats` returns all monitoring data as JSON
+- Cost calculation per call based on model pricing (Haiku/Sonnet/Opus)
+
+### Changed
+- `arena_tool_runner.py` — instruments `_call_with_retry()` to log every API attempt (success, error, rate-limit, retry) with latency and token counts
+- `arena_heartbeat.py` — sets monitor context (game_id, generation) before each evolution cycle
+
+---
+
+## [1.7.5] — feat: Arena ELO chart improvements + Buy Me A Coffee
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Added
+- **Buy Me A Coffee** button in arena right column, below Live Tournament and above ELO Ratings
+
+### Changed
+- **ELO chart** — now shows all agents (was capped at 20), removed x-axis agent name labels for cleaner look, chart fills available vertical space with a minimum height of 160px
+
+---
+
 ## [1.7.4] — feat: Grid representation options + Anthropic prompt caching
 *Author: Claude Opus 4.6 | 2026-03-15*
 
@@ -192,11 +249,11 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
-## [1.3.0] — feat: ARC Arena — Agent vs Agent page
+## [1.3.0] — feat: AutoResearch Arena — Agent vs Agent page
 *Author: Claude Opus 4.6 | 2026-03-14*
 
 ### Added
-- **ARC Arena page** (`/arena`) — New standalone page for watching AI agents compete head-to-head in strategy games.
+- **AutoResearch Arena page** (`/arena`) — New standalone page for watching AI agents compete head-to-head in strategy games.
 - **Three-column layout** — Left panel (Agent A settings/logs), center (game canvas + scrubber), right panel (Agent B settings/logs). Side panels transition from settings mode (pre-match) to observatory mode (reasoning logs during match).
 - **Snake Battle game** — First AI vs AI game: two snakes on a 20x20 grid compete for food. Simultaneous moves, wall/body collisions, fully deterministic with seeded PRNG.
 - **Fischer Random Chess (Chess960)** — Full chess engine in JS: legal move generation, check/checkmate/stalemate detection, en passant, promotion. Fischer Random starting positions from seed. Two AI strategies using minimax with alpha-beta pruning (Tactician depth 3, Positional depth 2). Unicode piece rendering on ARC3-colored checkerboard. Turn-based match runner with alternating white/black moves.
@@ -206,7 +263,7 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 - **Match scrubber** — Scrubbing the timeline renders the game state AND auto-scrolls both reasoning logs to the matching turn with highlighting.
 - **Keyboard shortcuts** — Space (play/pause), arrows (step), Home/End (jump), Escape (back to setup).
 - **Arena logo** — Two blocks pulsing alternately to convey turn-by-turn action.
-- **Nav link** — "ARC Arena" link added to the main ARC Observatory top nav.
+- **Nav link** — "AutoResearch Arena" link added to the main ARC Observatory top nav.
 
 ---
 

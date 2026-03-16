@@ -1,9 +1,11 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-16 03:00
-// PURPOSE: ARC Arena — Agent vs Agent game engine, AI strategies, match runner,
+// Date: 2026-03-16 20:00
+// PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
 //   Supports Code mode (built-in AI) and Harness mode (LLM scaffolding settings).
+//   Lower panel uses tabs: "Create New Agent" (BYOK + program.md editor + spawn)
+//   and "AI Heartbeat" (community + AI chat, stored as heartbeat comments).
 //   Implements 9 games: Snake Battle, Tron, Connect Four, Fischer Random Chess,
 //   Othello, Go 9x9, Gomoku, Artillery, Poker. Each has engine, AI, rendering, match runner.
 //   Dispatcher pattern: ARENA_GAMES entries have run/render/preview functions.
@@ -4292,6 +4294,10 @@ const AR = {
   selectedGame: null,       // current game being researched
   pollTimer: null,
   localRunning: false,
+  selectedAgentId: null,    // currently selected agent for profile view
+  lbShowAll: false,         // leaderboard show-all toggle
+  lbAgents: [],             // cached leaderboard agents for re-render
+  agentViewTimers: [],      // canvas animation timers for agent view
 };
 
 function switchArenaMode(mode, skipHash) {
@@ -4414,20 +4420,30 @@ function arRenderResearch(gameId, data) {
   const game = ARENA_GAMES.find(g => g.id === gameId);
   const title = game ? game.title : gameId;
 
+  // Deselect agent when refreshing research (game switch or poll)
+  if (AR.selectedAgentId) arDeselectAgent();
+
   // Status bar
   document.getElementById('arStatusText').textContent =
     `${title} | Gen ${data.generation} | ${data.agent_count} agents | ${data.game_count} games` +
     (data.best_agent ? ` | Best: ${data.best_agent} (${data.best_elo})` : '');
 
-  // Program.md
+  // Program.md (read-only viewer + editable textarea in Create tab)
   arRenderProgram(data.program);
+  const progTa = document.getElementById('arProgramTextarea');
+  if (progTa) {
+    const content = data.program?.content || _AR_DEFAULT_PROGRAM;
+    progTa.value = content;
+    AR._lastProgramContent = content;
+  }
 
   // Leaderboard
+  AR.lbShowAll = false;
   arRenderLeaderboard(gameId, data.leaderboard || []);
   document.getElementById('arAgentCount').textContent = `${data.agent_count} agents`;
 
-  // Comments (load separately for freshness)
-  arLoadComments(gameId);
+  // AI Heartbeat chat (load separately for freshness)
+  arLoadHeartbeat(gameId);
 
   // Recent games
   arLoadRecentGames(gameId);
@@ -4524,40 +4540,14 @@ function arRenderProgram(program) {
 
   view.innerHTML = `<div class="ar-markdown">${arSimpleMarkdown(content)}</div>`;
 
-  // Hide edit view, show rendered
-  const editEl = document.getElementById('arProgramEdit');
-  if (editEl) editEl.style.display = 'none';
-  view.style.display = '';
-
   // Populate model select for agent creation
   _arPopulateCreateModels();
-}
 
-function arToggleEdit() {
-  const view = document.getElementById('arProgramView');
-  const edit = document.getElementById('arProgramEdit');
+  // Set up live diff on the Create tab textarea
   const textarea = document.getElementById('arProgramTextarea');
-  const diff = document.getElementById('arProgramDiff');
-  if (!edit || !view) return;
-
-  if (edit.style.display === 'none') {
-    // Switch to edit mode
-    textarea.value = _arProgramOriginal;
-    edit.style.display = 'flex';
-    view.style.display = 'none';
-    if (diff) diff.style.display = 'none';
-    // Live diff on input
+  if (textarea) {
     textarea.oninput = () => arUpdateDiff();
-  } else {
-    arCancelEdit();
   }
-}
-
-function arCancelEdit() {
-  const view = document.getElementById('arProgramView');
-  const edit = document.getElementById('arProgramEdit');
-  if (edit) edit.style.display = 'none';
-  if (view) view.style.display = '';
 }
 
 function arUpdateDiff() {
@@ -4632,19 +4622,25 @@ function _arInlineMarkdown(text) {
 }
 
 function arRenderLeaderboard(gameId, agents) {
+  AR.lbAgents = agents;
   const tbody = document.getElementById('arLeaderboardBody');
   if (!agents.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="ar-no-data">No agents yet</td></tr>';
     return;
   }
-  tbody.innerHTML = agents.map((a, i) => {
+  const CAP = 50;
+  const showAll = AR.lbShowAll;
+  const visible = showAll ? agents : agents.slice(0, CAP);
+
+  let html = visible.map((a, i) => {
     const eloClass = a.elo >= 1200 ? 'ar-elo-high' : a.elo < 1000 ? 'ar-elo-low' : '';
     const humanBadge = a.is_human ? ' <span class="ar-badge-human">H</span>' : '';
     const anchorBadge = a.is_anchor ? ' <span class="ar-badge-anchor">⚓</span>' : '';
-    return `<tr class="ar-lb-row" data-agent-id="${a.id}">
+    const selectedClass = AR.selectedAgentId === a.id ? ' ar-lb-selected' : '';
+    return `<tr class="ar-lb-row${selectedClass}" data-agent-id="${a.id}" onclick="arSelectAgent('${gameId}',${a.id})" style="cursor:pointer">
       <td>${i + 1}</td>
       <td>
-        <span class="ar-agent-name" onclick="arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">${escHtml(a.name)}</span>
+        <span class="ar-agent-name">${escHtml(a.name)}</span>
         ${humanBadge}${anchorBadge}
       </td>
       <td class="ar-elo ${eloClass}">${Math.round(a.elo)}</td>
@@ -4652,37 +4648,222 @@ function arRenderLeaderboard(gameId, agents) {
       <td>${a.games_played}</td>
       <td class="ar-contributor">${escHtml(a.contributor || '—')}</td>
       <td style="white-space:nowrap">
-        <button class="ar-btn ar-btn-xs" onclick="arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">Code</button>
-        ${a.is_human ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
+        <button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">Code</button>
+        ${a.is_human ? '' : `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
       </td>
     </tr>`;
   }).join('');
+
+  if (agents.length > CAP) {
+    const label = showAll ? 'Show top 50' : `Show all (${agents.length})`;
+    html += `<tr class="ar-lb-show-more"><td colspan="7"><a href="#" onclick="event.preventDefault();AR.lbShowAll=!AR.lbShowAll;arRenderLeaderboard('${gameId}',AR.lbAgents)">${label}</a></td></tr>`;
+  }
+  tbody.innerHTML = html;
 }
 
-async function arLoadComments(gameId) {
+
+/* ── Agent Profile View ── */
+
+function arSelectAgent(gameId, agentId) {
+  if (AR.selectedAgentId === agentId) {
+    arDeselectAgent();
+    return;
+  }
+  AR.selectedAgentId = agentId;
+
+  // Highlight row
+  document.querySelectorAll('.ar-lb-row').forEach(r => {
+    r.classList.toggle('ar-lb-selected', parseInt(r.dataset.agentId) === agentId);
+  });
+
+  // Fetch agent profile games
+  arLoadAgentView(gameId, agentId);
+}
+
+function arDeselectAgent() {
+  AR.selectedAgentId = null;
+  // Clear row highlights
+  document.querySelectorAll('.ar-lb-row').forEach(r => r.classList.remove('ar-lb-selected'));
+  // Stop agent view animations
+  for (const t of AR.agentViewTimers) clearInterval(t);
+  AR.agentViewTimers = [];
+  // Hide agent view, restore live tournament
+  const agentView = document.getElementById('arAgentView');
+  if (agentView) agentView.style.display = 'none';
+  const rightCol = document.getElementById('arRightCol');
+  rightCol.querySelectorAll('.ar-right-live-content').forEach(el => el.style.display = '');
+  // Restore header
+  const header = rightCol.querySelector('.ar-section-header');
+  if (header) header.innerHTML = '<span>Live Tournament</span>';
+}
+
+async function arLoadAgentView(gameId, agentId) {
+  // Stop any prior agent view animations
+  for (const t of AR.agentViewTimers) clearInterval(t);
+  AR.agentViewTimers = [];
+
+  const rightCol = document.getElementById('arRightCol');
+
+  // Hide live tournament content
+  rightCol.querySelectorAll('.ar-right-live-content').forEach(el => el.style.display = 'none');
+
+  // Update header
+  const header = rightCol.querySelector('.ar-section-header');
+  if (header) {
+    header.innerHTML = '<button class="ar-btn ar-btn-xs" onclick="arDeselectAgent()" style="margin-right:6px">Back</button><span>View Agent</span>';
+  }
+
+  // Show/create agent view container
+  let agentView = document.getElementById('arAgentView');
+  if (!agentView) {
+    agentView = document.createElement('div');
+    agentView.id = 'arAgentView';
+    agentView.className = 'ar-agent-view';
+    rightCol.appendChild(agentView);
+  }
+  agentView.style.display = 'flex';
+  agentView.innerHTML = '<div class="ar-no-data">Loading agent profile...</div>';
+
   try {
-    const comments = await fetch(`/api/arena/comments/${gameId}`).then(r => r.json());
-    const container = document.getElementById('arCommentsList');
-    if (!comments.length) {
-      container.innerHTML = '<div class="ar-no-data">No discussion yet. Be the first!</div>';
+    const data = await fetch(`/api/arena/agents/${gameId}/${agentId}/games`).then(r => r.json());
+    if (data.error) {
+      agentView.innerHTML = `<div class="ar-no-data">${escHtml(data.error)}</div>`;
       return;
     }
-    container.innerHTML = comments.map(c => `
-      <div class="ar-comment">
-        <div class="ar-comment-header">
-          <span class="ar-comment-author">${escHtml(c.username)}</span>
-          <span class="ar-comment-time">${arTimeAgo(c.created_at)}</span>
-          <span class="ar-comment-votes">
-            <button class="ar-vote-btn" onclick="arVoteComment(${c.id},1)">▲ ${c.upvotes}</button>
-            <button class="ar-vote-btn" onclick="arVoteComment(${c.id},-1)">▼ ${c.downvotes}</button>
-          </span>
-        </div>
-        <div class="ar-comment-body">${escHtml(c.content)}</div>
-      </div>
-    `).join('');
+    // Check we're still on this agent
+    if (AR.selectedAgentId !== agentId) return;
+    arRenderAgentView(agentView, gameId, data.agent, data.games);
   } catch (e) {
-    // Silently fail
+    agentView.innerHTML = '<div class="ar-no-data">Failed to load agent</div>';
   }
+}
+
+function arRenderAgentView(container, gameId, agent, games) {
+  const agentElo = agent.elo;
+
+  // Partition games by opponent ELO
+  const higherElo = [];
+  const lowerElo = [];
+  for (const g of games) {
+    const isAgent1 = g.agent1_id === agent.id;
+    const oppElo = isAgent1 ? g.agent2_elo : g.agent1_elo;
+    if (oppElo >= agentElo) {
+      higherElo.push(g);
+    } else {
+      lowerElo.push(g);
+    }
+  }
+
+  // Prefer games with history (for replay); take up to 2 each
+  const pickWithHistory = (arr, n) => {
+    const withH = arr.filter(g => g.history && g.history.length > 0);
+    const without = arr.filter(g => !g.history || g.history.length === 0);
+    return [...withH, ...without].slice(0, n);
+  };
+  const topHigher = pickWithHistory(higherElo, 2);
+  const topLower = pickWithHistory(lowerElo, 2);
+
+  const wld = `${agent.wins}/${agent.losses}/${agent.draws}`;
+  let html = `
+    <div class="ar-agent-view-header">
+      <div class="ar-agent-view-name">${escHtml(agent.name)}</div>
+      <div class="ar-agent-view-stats">
+        <span class="ar-elo ar-elo-big">${Math.round(agent.elo)}</span>
+        <span>W/L/D: ${wld}</span>
+        <span>Games: ${agent.games_played}</span>
+      </div>
+      <div class="ar-agent-view-meta">
+        ${agent.contributor ? `By: ${escHtml(agent.contributor)}` : ''}
+        ${agent.generation ? ` &middot; Gen ${agent.generation}` : ''}
+      </div>
+      <div style="margin-top:4px">
+        <button class="ar-btn ar-btn-xs" onclick="arShowAgentCode('${gameId}',${agent.id},'${escHtml(agent.name)}')">View Code</button>
+        ${agent.is_human ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${agent.id},'${escHtml(agent.name)}',${Math.round(agent.elo)})">Play ▶</button>`}
+      </div>
+    </div>`;
+
+  _arAgentViewSection._idx = 0;  // reset canvas ID counter
+  html += _arAgentViewSection('vs Higher ELO', topHigher, agent, gameId);
+  html += _arAgentViewSection('vs Lower ELO', topLower, agent, gameId);
+
+  if (!topHigher.length && !topLower.length) {
+    html += '<div class="ar-no-data" style="padding:12px">No games recorded yet</div>';
+  }
+
+  container.innerHTML = html;
+
+  // Animate canvases that have history
+  const allGames = [...topHigher, ...topLower];
+  for (let i = 0; i < allGames.length; i++) {
+    const g = allGames[i];
+    if (!g.history || !g.history.length) continue;
+    const canvas = document.getElementById(`arAgentCanvas${i}`);
+    if (!canvas) continue;
+    _arAnimateAgentCanvas(canvas, gameId, g.history);
+  }
+}
+
+function _arAgentViewSection(title, games, agent, gameId) {
+  if (!games.length) {
+    return `<div class="ar-agent-view-section">${title}</div>
+            <div class="ar-no-data" style="padding:4px 8px;font-size:11px">No games</div>`;
+  }
+  let html = `<div class="ar-agent-view-section">${title}</div><div class="ar-agent-view-games">`;
+  // Calculate the global index offset for canvas IDs
+  // We'll use a closure trick — store current canvas count on the function
+  if (!_arAgentViewSection._idx) _arAgentViewSection._idx = 0;
+
+  for (const g of games) {
+    const idx = _arAgentViewSection._idx++;
+    const isAgent1 = g.agent1_id === agent.id;
+    const oppName = isAgent1 ? g.agent2_name : g.agent1_name;
+    const oppElo = isAgent1 ? g.agent2_elo : g.agent1_elo;
+    const isWin = g.winner_id === agent.id;
+    const isDraw = g.winner_id === null;
+    const result = isDraw ? 'Draw' : isWin ? 'Win' : 'Loss';
+    const resultClass = isDraw ? 'ar-draw' : isWin ? 'ar-result-win' : 'ar-result-loss';
+    const hasHistory = g.history && g.history.length > 0;
+
+    html += `<div class="ar-agent-view-cell">`;
+    if (hasHistory) {
+      html += `<canvas id="arAgentCanvas${idx}" width="400" height="400"></canvas>`;
+    } else {
+      html += `<div class="ar-agent-view-no-replay">No replay</div>`;
+    }
+    html += `<div class="ar-agent-view-info">
+        <span class="${resultClass}">${result}</span> vs ${escHtml(oppName)}
+        <span style="color:#555">${Math.round(oppElo)}</span>
+        <span style="color:var(--text-dim)">${g.turns}t</span>
+      </div>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function _arAnimateAgentCanvas(canvas, gameId, history) {
+  let frameIdx = 0;
+  let freezeCount = 0;
+  const FREEZE_FRAMES = 25;
+
+  const renderFrame = () => {
+    if (freezeCount > 0) {
+      freezeCount--;
+      if (freezeCount === 0) frameIdx = 0;
+      return;
+    }
+    const frame = history[frameIdx];
+    if (!frame) return;
+    _arRenderMiniFrame(canvas, gameId, frame);
+    frameIdx++;
+    if (frameIdx >= history.length) {
+      freezeCount = FREEZE_FRAMES;
+    }
+  };
+
+  renderFrame();
+  const timer = setInterval(renderFrame, 120);
+  AR.agentViewTimers.push(timer);
 }
 
 async function arLoadRecentGames(gameId) {
@@ -4732,26 +4913,81 @@ async function arShowAgentCode(gameId, agentId, name) {
 }
 
 
-/* ── Comments ── */
+/* ── Lower Tab Switching ── */
 
-async function arPostComment() {
-  if (!AR.selectedGame) return;
-  const text = document.getElementById('arCommentText').value.trim();
-  if (!text) return;
+function arSwitchLowerTab(tab) {
+  const createTab = document.getElementById('arTabCreate');
+  const heartbeatTab = document.getElementById('arTabHeartbeat');
+  const createContent = document.getElementById('arTabCreateContent');
+  const heartbeatContent = document.getElementById('arTabHeartbeatContent');
+  if (!createTab || !heartbeatTab) return;
+
+  if (tab === 'create') {
+    createTab.classList.add('active');
+    heartbeatTab.classList.remove('active');
+    createContent.style.display = '';
+    heartbeatContent.style.display = 'none';
+  } else {
+    createTab.classList.remove('active');
+    heartbeatTab.classList.add('active');
+    createContent.style.display = 'none';
+    heartbeatContent.style.display = '';
+    // Refresh heartbeat on tab switch
+    if (AR.selectedGame) arLoadHeartbeat(AR.selectedGame);
+  }
+}
+
+
+/* ── AI Heartbeat (community + AI chat) ── */
+
+async function arLoadHeartbeat(gameId) {
   try {
-    await fetch(`/api/arena/comments/${AR.selectedGame}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ content: text }),
-    });
-    document.getElementById('arCommentText').value = '';
-    arLoadComments(AR.selectedGame);
+    const comments = await fetch(`/api/arena/comments/${gameId}?type=heartbeat`).then(r => r.json());
+    const container = document.getElementById('arHeartbeatList');
+    if (!container) return;
+    if (!comments.length) {
+      container.innerHTML = '<div class="ar-no-data">No messages yet. Say hello!</div>';
+      return;
+    }
+    container.innerHTML = comments.map(c => {
+      const isAI = c.username === 'AI' || c.username === 'Heartbeat';
+      return `<div class="ar-hb-msg ${isAI ? 'ar-hb-ai' : 'ar-hb-human'}">
+        <div class="ar-hb-meta">
+          <span class="ar-hb-author ${isAI ? 'ar-hb-ai-author' : ''}">${isAI ? '\u{1F916} ' : ''}${escHtml(c.username)}</span>
+          <span class="ar-hb-time">${arTimeAgo(c.created_at)}</span>
+          <span class="ar-hb-votes">
+            <button class="ar-vote-btn" onclick="arVoteHeartbeat(${c.id},1)">\u25B2 ${c.upvotes}</button>
+            <button class="ar-vote-btn" onclick="arVoteHeartbeat(${c.id},-1)">\u25BC ${c.downvotes}</button>
+          </span>
+        </div>
+        <div class="ar-hb-body">${escHtml(c.content)}</div>
+      </div>`;
+    }).join('');
+    container.scrollTop = container.scrollHeight;
   } catch (e) {
     // Silently fail
   }
 }
 
-async function arVoteComment(commentId, vote) {
+async function arPostHeartbeat() {
+  if (!AR.selectedGame) return;
+  const ta = document.getElementById('arHeartbeatText');
+  const text = ta.value.trim();
+  if (!text) return;
+  try {
+    await fetch(`/api/arena/comments/${AR.selectedGame}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ content: text, type: 'heartbeat' }),
+    });
+    ta.value = '';
+    arLoadHeartbeat(AR.selectedGame);
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+async function arVoteHeartbeat(commentId, vote) {
   if (!AR.selectedGame) return;
   try {
     await fetch(`/api/arena/comments/${AR.selectedGame}/${commentId}/vote`, {
@@ -4759,11 +4995,14 @@ async function arVoteComment(commentId, vote) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ vote }),
     });
-    arLoadComments(AR.selectedGame);
+    arLoadHeartbeat(AR.selectedGame);
   } catch (e) {
     // Silently fail
   }
 }
+
+// Legacy alias — old code that calls arLoadComments now loads heartbeat
+async function arLoadComments(gameId) { return arLoadHeartbeat(gameId); }
 
 
 /* ── Program.md ── */
@@ -4779,14 +5018,11 @@ async function arProposeProgram() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ content, change_summary: summary }),
     });
-    document.getElementById('arProgramEdit').style.display = 'none';
     arSelectGame(AR.selectedGame, AR.mode);
   } catch (e) {
     // Silently fail
   }
 }
-
-// (Program edit/diff wired via onclick in HTML — arToggleEdit, arCancelEdit, arUpdateDiff)
 
 
 /* ── Human vs AI Dialog ── */

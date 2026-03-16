@@ -1,9 +1,10 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-15 22:00
+# Date: 2026-03-16 19:00
 # PURPOSE: Database operations for Arena Auto Research. Manages arena_agents,
 #   arena_games, arena_research, arena_comments, arena_program_versions,
-#   arena_votes, and arena_human_sessions tables. Handles ELO calculations,
-#   agent pruning, game storage limits, and upset detection.
+#   arena_votes, arena_human_sessions, and arena_llm_calls tables. Handles ELO
+#   calculations, agent pruning, game storage limits, upset detection, and LLM
+#   call monitoring/stats.
 # SRP/DRY check: Pass — arena-specific DB ops only, follows db_sessions/db_auth pattern
 """Arena Auto Research database operations."""
 
@@ -198,6 +199,41 @@ def arena_get_agent_games(game_id, agent_id, limit=5):
             ORDER BY g.created_at DESC LIMIT ?
         """, (game_id, agent_id, agent_id, limit)).fetchall()
         return [dict(r) for r in rows]
+
+
+def arena_get_agent_games_for_profile(game_id, agent_id, limit=20):
+    """Get an agent's recent games with opponent ELO for profile view.
+
+    Returns games with history (for replay) where available, plus opponent
+    ELO fields so the client can partition into 'vs higher' and 'vs lower'.
+    """
+    with _db() as conn:
+        rows = conn.execute("""
+            SELECT g.id, g.agent1_id, g.agent2_id, g.winner_id,
+                   g.agent1_score, g.agent2_score, g.turns, g.is_upset,
+                   g.history, g.created_at,
+                   a1.name as agent1_name, a1.elo as agent1_elo,
+                   a1.wins as agent1_wins, a1.losses as agent1_losses,
+                   a2.name as agent2_name, a2.elo as agent2_elo,
+                   a2.wins as agent2_wins, a2.losses as agent2_losses,
+                   CASE WHEN g.winner_id IS NULL THEN 'Draw'
+                        WHEN g.winner_id = g.agent1_id THEN a1.name
+                        ELSE a2.name END as winner_name
+            FROM arena_games g
+            JOIN arena_agents a1 ON g.agent1_id = a1.id
+            JOIN arena_agents a2 ON g.agent2_id = a2.id
+            WHERE g.game_id = ? AND (g.agent1_id = ? OR g.agent2_id = ?)
+            ORDER BY g.created_at DESC LIMIT ?
+        """, (game_id, agent_id, agent_id, limit)).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d['history'] = json.loads(d['history']) if d['history'] else []
+            except (json.JSONDecodeError, TypeError):
+                d['history'] = []
+            results.append(d)
+        return results
 
 
 def arena_prune_weak_agents(game_id, count=10):
@@ -436,14 +472,21 @@ def arena_get_game(game_id, match_id):
 # COMMENTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-def arena_get_comments(game_id, limit=100):
-    """Get strategy comments for a game."""
+def arena_get_comments(game_id, limit=100, comment_type=None):
+    """Get comments for a game, optionally filtered by comment_type."""
     with _db() as conn:
-        rows = conn.execute("""
-            SELECT * FROM arena_comments
-            WHERE game_id = ?
-            ORDER BY created_at DESC LIMIT ?
-        """, (game_id, limit)).fetchall()
+        if comment_type:
+            rows = conn.execute("""
+                SELECT * FROM arena_comments
+                WHERE game_id = ? AND comment_type = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (game_id, comment_type, limit)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT * FROM arena_comments
+                WHERE game_id = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (game_id, limit)).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -690,3 +733,144 @@ def arena_strip_excess_history(game_id=None):
                        WHERE id <= ? AND is_upset = 0 AND history != '[]'""",
                     (row['id'],)
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LLM CALL MONITORING
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Model cost per 1M tokens (input, output) in USD
+_MODEL_COSTS = {
+    'claude-haiku-4-5-20251001': (0.80, 4.00),
+    'claude-sonnet-4-6': (3.00, 15.00),
+    'claude-opus-4-6': (15.00, 75.00),
+}
+
+
+def arena_log_llm_call(game_id, generation, model, status, http_status,
+                        input_tokens=0, output_tokens=0, latency_ms=0,
+                        error_message=None, auth_type=None):
+    """Log an Anthropic API call from arena evolution."""
+    input_cost_per_m, output_cost_per_m = _MODEL_COSTS.get(model, (3.0, 15.0))
+    cost_usd = (input_tokens * input_cost_per_m + output_tokens * output_cost_per_m) / 1_000_000
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO arena_llm_calls
+               (game_id, generation, model, status, http_status,
+                input_tokens, output_tokens, cost_usd, latency_ms,
+                error_message, auth_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (game_id, generation, model, status, http_status,
+             input_tokens, output_tokens, cost_usd, latency_ms,
+             error_message, auth_type)
+        )
+
+
+def arena_get_llm_monitor_stats():
+    """Get aggregated LLM call stats for the monitoring dashboard."""
+    now = time.time()
+    hour_ago = now - 3600
+    day_ago = now - 86400
+
+    with _db() as conn:
+        def _counts(since=None):
+            where = f"WHERE created_at >= {since}" if since else ""
+            row = conn.execute(f"""
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+                       SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors,
+                       SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited,
+                       SUM(CASE WHEN status = 'retry' THEN 1 ELSE 0 END) as retries,
+                       SUM(input_tokens) as total_input_tokens,
+                       SUM(output_tokens) as total_output_tokens,
+                       SUM(cost_usd) as total_cost,
+                       AVG(CASE WHEN status = 'success' THEN latency_ms END) as avg_latency
+                FROM arena_llm_calls {where}
+            """).fetchone()
+            return dict(row)
+
+        stats = {
+            'last_hour': _counts(hour_ago),
+            'last_24h': _counts(day_ago),
+            'all_time': _counts(),
+        }
+
+        # Per-model breakdown
+        model_rows = conn.execute("""
+            SELECT model,
+                   COUNT(*) as calls,
+                   SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+                   SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END) as failures,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens,
+                   SUM(cost_usd) as cost,
+                   AVG(CASE WHEN status = 'success' THEN latency_ms END) as avg_latency
+            FROM arena_llm_calls
+            GROUP BY model ORDER BY calls DESC
+        """).fetchall()
+        stats['by_model'] = [dict(r) for r in model_rows]
+
+        # Auth type breakdown
+        auth_rows = conn.execute("""
+            SELECT auth_type,
+                   COUNT(*) as calls,
+                   SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+                   SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END) as failures
+            FROM arena_llm_calls
+            GROUP BY auth_type
+        """).fetchall()
+        stats['by_auth'] = [dict(r) for r in auth_rows]
+
+        # Hourly cost buckets (last 72 hours) for burn rate + projection
+        hourly_rows = conn.execute("""
+            SELECT CAST((created_at / 3600) AS INTEGER) * 3600 as hour_ts,
+                   SUM(cost_usd) as cost,
+                   COUNT(*) as calls,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens
+            FROM arena_llm_calls
+            WHERE created_at >= ? AND status = 'success'
+            GROUP BY hour_ts ORDER BY hour_ts
+        """, (now - 72 * 3600,)).fetchall()
+        stats['hourly_costs'] = [dict(r) for r in hourly_rows]
+
+        # Daily cost buckets (all time) for the daily chart
+        daily_rows = conn.execute("""
+            SELECT CAST((created_at / 86400) AS INTEGER) * 86400 as day_ts,
+                   SUM(cost_usd) as cost,
+                   COUNT(*) as calls,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens,
+                   SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success
+            FROM arena_llm_calls
+            GROUP BY day_ts ORDER BY day_ts
+        """).fetchall()
+        stats['daily_costs'] = [dict(r) for r in daily_rows]
+
+        # First call timestamp (for "running since")
+        first_row = conn.execute(
+            "SELECT MIN(created_at) as first_call FROM arena_llm_calls"
+        ).fetchone()
+        stats['first_call_at'] = first_row['first_call'] if first_row else None
+
+        # Recent errors (last 50)
+        error_rows = conn.execute("""
+            SELECT id, model, status, http_status, error_message, auth_type,
+                   latency_ms, created_at
+            FROM arena_llm_calls
+            WHERE status != 'success'
+            ORDER BY created_at DESC LIMIT 50
+        """).fetchall()
+        stats['recent_errors'] = [dict(r) for r in error_rows]
+
+        # Recent calls (last 100)
+        recent_rows = conn.execute("""
+            SELECT id, game_id, generation, model, status, http_status,
+                   input_tokens, output_tokens, cost_usd, latency_ms,
+                   error_message, auth_type, created_at
+            FROM arena_llm_calls
+            ORDER BY created_at DESC LIMIT 100
+        """).fetchall()
+        stats['recent_calls'] = [dict(r) for r in recent_rows]
+
+        return stats

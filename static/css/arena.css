@@ -1,12 +1,12 @@
 /* Author: Claude Opus 4.6
-   Date: 2026-03-16 03:00
-   PURPOSE: Styles for ARC Arena — Agent vs Agent page. Three-column layout with
+   Date: 2026-03-16 20:00
+   PURPOSE: Styles for AutoResearch Arena — Agent vs Agent page. Three-column layout with
    side panels (agent settings/logs) and center panel (game selection/match canvas).
    Supports Code mode (built-in AI strategies) and Harness mode (LLM scaffolding).
    Includes arena observatory overlay for per-agent observability.
-   Auto Research: three-column layout — left (game list with canvas thumbnails),
-   center (program.md editor with diff, strategy discussion, model/key),
-   right (leaderboard, recent games, live tournament at 25% width).
+   Auto Research: four-column layout — left (game list with canvas thumbnails),
+   center (program.md viewer + tabbed panel: Create New Agent / AI Heartbeat),
+   mid (leaderboard, recent games), right (live tournament, ELO chart).
    Local config dialog, human vs AI play dialog.
    SRP/DRY check: Pass — arena-specific styles only, no overlap with main.css components */
 
@@ -699,28 +699,16 @@
   color: var(--accent); font-weight: 600;
 }
 
-/* Program.md — takes 2/3 of center height */
+/* Program.md — takes top portion of center */
 .ar-program-area {
-  flex: 2; display: flex; flex-direction: column;
+  flex: 1 1 40%; display: flex; flex-direction: column;
   overflow: hidden; border-bottom: 1px solid var(--border);
-  min-height: 0;
+  min-height: 80px;
 }
 .ar-program-controls { display: flex; gap: 6px; align-items: center; }
 .ar-program-view {
   flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 13px;
   line-height: 1.7; color: var(--text);
-}
-.ar-program-edit {
-  flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px;
-  overflow: hidden;
-}
-.ar-program-edit textarea {
-  flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
-  border-radius: 6px; padding: 10px; font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px; resize: none; min-height: 100px;
-}
-.ar-program-edit-actions {
-  display: flex; gap: 6px; align-items: center; flex-shrink: 0;
 }
 /* Diff view */
 .ar-program-diff {
@@ -758,12 +746,45 @@
   font-size: 11px; color: #ffaa00; font-weight: 600;
 }
 
-/* Discussion — takes 1/3 of center height */
-.ar-discussion-area {
-  flex: 1; display: flex; flex-direction: column;
-  overflow: hidden; min-height: 0;
+/* ── Lower Tabbed Panel ── */
+.ar-lower-panel {
+  flex: 1 1 60%; display: flex; flex-direction: column;
+  overflow: hidden; min-height: 120px;
 }
-.ar-comments-list {
+.ar-tab-bar {
+  display: flex; flex-shrink: 0; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.ar-tab {
+  padding: 7px 16px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); cursor: pointer; font-family: inherit;
+  transition: all 0.15s;
+}
+.ar-tab:hover { color: var(--text); }
+.ar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.ar-tab-content {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+}
+
+/* Create New Agent tab */
+.ar-create-program-wrap {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  padding: 0 10px; gap: 4px; min-height: 0;
+}
+.ar-create-program-wrap textarea {
+  flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px; font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px; resize: none; min-height: 60px;
+}
+.ar-create-bottom-bar {
+  display: flex; gap: 4px; align-items: center; padding: 6px 10px;
+  flex-shrink: 0; border-top: 1px solid var(--border); background: var(--surface);
+}
+
+/* AI Heartbeat tab */
+.ar-heartbeat-list {
   flex: 1; overflow-y: auto; padding: 6px 10px;
 }
 .ar-comment-input {
@@ -775,7 +796,15 @@
   border-radius: 4px; padding: 6px 8px; font-family: inherit; font-size: 12px;
   resize: none;
 }
-/* (model/key inputs removed — server-side ARENA_CLAUDE_KEY handles evolution) */
+.ar-hb-msg { padding: 6px 8px; margin-bottom: 4px; border-radius: 6px; border: 1px solid var(--border); }
+.ar-hb-msg.ar-hb-ai { background: color-mix(in srgb, var(--accent) 6%, var(--bg)); border-color: color-mix(in srgb, var(--accent) 20%, var(--border)); }
+.ar-hb-msg.ar-hb-human { background: var(--bg); }
+.ar-hb-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.ar-hb-author { font-size: 11px; font-weight: 600; color: var(--accent); }
+.ar-hb-author.ar-hb-ai-author { color: #4FCC30; }
+.ar-hb-time { font-size: 9px; color: var(--text-dim); }
+.ar-hb-body { font-size: 12px; line-height: 1.5; color: var(--text); white-space: pre-wrap; }
+.ar-hb-votes { margin-left: auto; display: flex; gap: 2px; }
 
 /* ── Col 3: Leaderboard + Recent Games (narrow ~10%) ── */
 .ar-mid-col {
@@ -829,20 +858,92 @@
 }
 
 
+/* ── Buy Me A Coffee ── */
+.ar-bmac-wrap {
+  padding: 8px 6px; flex-shrink: 0; text-align: center;
+  border-top: 1px solid var(--border);
+}
+.ar-bmac-link { display: inline-block; }
+.ar-bmac-img { height: 36px; border-radius: 6px; }
+
 /* ── ELO Chart ── */
 .ar-elo-chart-wrap {
-  padding: 6px; flex-shrink: 0; height: 180px; position: relative;
+  padding: 6px; flex: 1 1 auto; min-height: 160px; position: relative;
 }
 .ar-elo-chart-wrap canvas {
   width: 100%; height: 100%; display: block; border-radius: 3px;
 }
 
-/* ── Create Agent Area ── */
-.ar-create-agent-area {
-  flex-shrink: 0; padding: 6px 10px; border-top: 1px solid var(--border);
+/* ── Leaderboard Show More ── */
+.ar-lb-show-more td {
+  text-align: center; padding: 6px;
 }
+.ar-lb-show-more a {
+  color: var(--accent); font-size: 11px; text-decoration: none;
+}
+.ar-lb-show-more a:hover { text-decoration: underline; }
+
+/* ── Leaderboard Selected Row ── */
+.ar-lb-row.ar-lb-selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+}
+.ar-lb-row.ar-lb-selected td { color: var(--text); }
+
+/* ── Agent Profile View ── */
+.ar-agent-view {
+  display: flex; flex-direction: column; flex: 1;
+  overflow-y: auto; padding: 0;
+}
+.ar-agent-view-header {
+  padding: 10px 10px 6px; border-bottom: 1px solid var(--border);
+}
+.ar-agent-view-name {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  margin-bottom: 2px;
+}
+.ar-agent-view-stats {
+  display: flex; gap: 10px; align-items: center;
+  font-size: 12px; color: var(--text-dim);
+}
+.ar-elo-big { font-size: 18px; font-weight: 700; color: var(--accent); }
+.ar-agent-view-meta {
+  font-size: 11px; color: var(--text-dim); margin-top: 2px;
+}
+.ar-agent-view-section {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-dim);
+  padding: 8px 10px 4px; border-top: 1px solid var(--border);
+}
+.ar-agent-view-games {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; padding: 4px 6px;
+}
+.ar-agent-view-cell {
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--bg); border-radius: 4px; padding: 4px;
+  border: 1px solid var(--border);
+}
+.ar-agent-view-cell canvas {
+  width: 100%; aspect-ratio: 1; border-radius: 3px; display: block;
+}
+.ar-agent-view-no-replay {
+  width: 100%; aspect-ratio: 1; display: flex;
+  align-items: center; justify-content: center;
+  background: #0c0c18; border-radius: 3px;
+  color: #555; font-size: 11px;
+}
+.ar-agent-view-info {
+  font-size: 9px; color: var(--text-dim); text-align: center;
+  margin-top: 2px; width: 100%; line-height: 1.3;
+  display: flex; gap: 4px; justify-content: center; flex-wrap: wrap;
+}
+.ar-result-win { color: #4FCC30; font-weight: 600; }
+.ar-result-loss { color: #F93C31; font-weight: 600; }
+
+/* ── Create Agent Controls ── */
 .ar-create-agent-controls {
-  display: flex; gap: 4px; align-items: center; padding: 4px 0;
+  display: flex; gap: 4px; align-items: center; padding: 6px 10px;
+  flex-shrink: 0; border-bottom: 1px solid var(--border);
 }
 .ar-create-agent-controls select, .ar-create-agent-controls input {
   font-size: 11px; padding: 4px 6px;

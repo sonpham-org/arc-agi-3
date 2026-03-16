@@ -349,6 +349,25 @@ def _init_db():
             created_at REAL DEFAULT (unixepoch('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_ahs_game ON arena_human_sessions(game_id);
+
+        -- Arena LLM call monitoring (every Anthropic API call from evolution)
+        CREATE TABLE IF NOT EXISTS arena_llm_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT DEFAULT 'snake',
+            generation INTEGER,
+            model TEXT,
+            status TEXT,
+            http_status INTEGER,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
+            latency_ms REAL DEFAULT 0,
+            error_message TEXT,
+            auth_type TEXT,
+            created_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_alc_created ON arena_llm_calls(created_at);
+        CREATE INDEX IF NOT EXISTS idx_alc_status ON arena_llm_calls(status);
     """)
 
     conn.commit()

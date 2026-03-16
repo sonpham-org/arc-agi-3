@@ -1,10 +1,11 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-15 22:00
+# Date: 2026-03-16 14:00
 # PURPOSE: Generic Anthropic tool-calling loop for arena evolution.
 #   Replaces external snake_autoresearch/llm_client.py dependency.
 #   Uses httpx directly (same approach as llm_providers_anthropic.py).
 #   Supports both API keys (x-api-key) and OAuth tokens (Bearer).
 #   Reuses auth header logic from llm_providers_anthropic.py.
+#   Instruments every API call for monitoring (success/failure/tokens/latency).
 # SRP/DRY check: Pass — reuses _anthropic_auth_headers, no other tool loop exists server-side
 
 import json
@@ -12,7 +13,7 @@ import time
 
 import httpx
 
-from llm_providers_anthropic import _anthropic_auth_headers
+from llm_providers_anthropic import _anthropic_auth_headers, _is_oauth_token
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -21,6 +22,18 @@ DEFAULT_MAX_ROUNDS = 6
 REQUEST_TIMEOUT = 120.0
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 5
+
+# Thread-local-ish context for monitoring — set by caller before run_tool_loop
+_monitor_ctx = {
+    'game_id': 'snake',
+    'generation': 0,
+}
+
+
+def set_monitor_context(game_id='snake', generation=0):
+    """Set context for LLM call monitoring. Called by arena_heartbeat before each evolution."""
+    _monitor_ctx['game_id'] = game_id
+    _monitor_ctx['generation'] = generation
 
 
 def run_tool_loop(
@@ -58,6 +71,7 @@ def run_tool_loop(
         for t in tools
     ]
 
+    auth_type = 'oauth' if _is_oauth_token(api_key) else 'api_key'
     messages = [{"role": "user", "content": user_message}]
     headers = _anthropic_auth_headers(api_key)
 
@@ -73,7 +87,7 @@ def run_tool_loop(
         }
 
         try:
-            raw = _call_with_retry(headers, body)
+            raw = _call_with_retry(headers, body, model=model, auth_type=auth_type)
         except Exception as exc:
             conversation_log.append({"type": "error", "content": str(exc)})
             print(f"    [arena-tool] API error on round {round_num + 1}: {exc}")
@@ -137,17 +151,69 @@ def run_tool_loop(
     return conversation_log
 
 
-def _call_with_retry(headers: dict, body: dict) -> dict:
+def _log_call(model, status, http_status, input_tokens=0, output_tokens=0,
+              latency_ms=0, error_message=None, auth_type=None):
+    """Log an API call to the monitoring table. Non-blocking, never raises."""
+    try:
+        from db_arena import arena_log_llm_call
+        arena_log_llm_call(
+            game_id=_monitor_ctx.get('game_id', 'snake'),
+            generation=_monitor_ctx.get('generation', 0),
+            model=model,
+            status=status,
+            http_status=http_status,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            error_message=error_message,
+            auth_type=auth_type,
+        )
+    except Exception as exc:
+        print(f"    [arena-monitor] Log failed (non-fatal): {exc}")
+
+
+def _call_with_retry(headers: dict, body: dict, model: str = '', auth_type: str = '') -> dict:
     """POST to Anthropic API with exponential backoff on 429/5xx."""
     backoff = INITIAL_BACKOFF
     last_status = 0
     for attempt in range(MAX_RETRIES + 1):
-        resp = httpx.post(
-            ANTHROPIC_API_URL, headers=headers, json=body, timeout=REQUEST_TIMEOUT,
-        )
+        start_ms = time.time() * 1000
+        try:
+            resp = httpx.post(
+                ANTHROPIC_API_URL, headers=headers, json=body, timeout=REQUEST_TIMEOUT,
+            )
+        except Exception as exc:
+            latency = time.time() * 1000 - start_ms
+            _log_call(model, 'error', 0, latency_ms=latency,
+                      error_message=str(exc)[:500], auth_type=auth_type)
+            raise
+
+        latency = time.time() * 1000 - start_ms
+
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            usage = data.get('usage', {})
+            _log_call(
+                model, 'success', 200,
+                input_tokens=usage.get('input_tokens', 0),
+                output_tokens=usage.get('output_tokens', 0),
+                latency_ms=latency, auth_type=auth_type,
+            )
+            return data
+
         last_status = resp.status_code
+
+        if resp.status_code == 429:
+            log_status = 'rate_limited'
+        elif resp.status_code in (500, 502, 503, 529) and attempt < MAX_RETRIES:
+            log_status = 'retry'
+        else:
+            log_status = 'error'
+
+        error_text = resp.text[:500] if resp.text else ''
+        _log_call(model, log_status, resp.status_code, latency_ms=latency,
+                  error_message=error_text, auth_type=auth_type)
+
         if resp.status_code in (429, 500, 502, 503, 529) and attempt < MAX_RETRIES:
             retry_after = resp.headers.get("retry-after")
             if retry_after and retry_after.isdigit():
@@ -159,6 +225,7 @@ def _call_with_retry(headers: dict, body: dict) -> dict:
             time.sleep(wait)
             backoff = min(backoff * 2, 300)
             continue
+
         raise Exception(f"Anthropic API error {resp.status_code}: {resp.text[:300]}")
     raise Exception(f"Anthropic API: max retries exceeded (last status {last_status})")
 

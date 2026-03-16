@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arena LLM Monitor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Courier New', monospace; background: #0a0a0a; color: #e0e0e0; padding: 20px; }
+  h1 { color: #4FCC30; margin-bottom: 4px; font-size: 20px; }
+  h2 { color: #88D8F1; margin: 18px 0 8px; font-size: 15px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+  .subtitle { color: #666; font-size: 12px; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .card { background: #151515; border: 1px solid #2a2a2a; border-radius: 6px; padding: 14px; }
+  .card-title { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .big-num { font-size: 28px; font-weight: bold; }
+  .green { color: #4FCC30; }
+  .red { color: #F93C31; }
+  .yellow { color: #FFDC00; }
+  .blue { color: #1E93FF; }
+  .orange { color: #FF851B; }
+  .gray { color: #666; }
+  .row { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .stat { font-size: 13px; }
+  .stat span { color: #999; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: #888; padding: 6px 8px; border-bottom: 1px solid #333; font-weight: normal; }
+  td { padding: 5px 8px; border-bottom: 1px solid #1a1a1a; }
+  tr:hover td { background: #1a1a1a; }
+  .status-success { color: #4FCC30; }
+  .status-error { color: #F93C31; }
+  .status-rate_limited { color: #FFDC00; }
+  .status-retry { color: #FF851B; }
+  .refresh-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .refresh-bar button { background: #222; color: #e0e0e0; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  .refresh-bar button:hover { background: #333; }
+  .refresh-bar .auto { font-size: 11px; color: #666; }
+  .error-msg { color: #F93C31; font-size: 11px; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cost { color: #A356D6; }
+  .tokens { color: #88D8F1; font-size: 11px; }
+  #loading { color: #666; padding: 40px; text-align: center; }
+  .pct { font-size: 12px; color: #888; margin-left: 4px; }
+  .cost-section { margin-bottom: 16px; }
+  .cost-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .cost-card { background: #151515; border: 1px solid #2a2a2a; border-radius: 6px; padding: 14px; }
+  .cost-card .label { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .cost-card .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
+  .cost-card .sub { font-size: 11px; color: #666; margin-top: 2px; }
+  .chart-container { background: #151515; border: 1px solid #2a2a2a; border-radius: 6px; padding: 14px; margin-bottom: 12px; }
+  .chart-container canvas { width: 100%; height: 160px; }
+  .chart-label { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .warn { color: #F93C31; font-weight: bold; }
+  .ok { color: #4FCC30; }
+</style>
+</head>
+<body>
+
+<h1>Arena LLM Call Monitor</h1>
+<div class="subtitle">Claude OAuth / API Key usage for agent evolution</div>
+
+<div class="refresh-bar">
+  <button onclick="loadStats()">Refresh</button>
+  <label class="auto"><input type="checkbox" id="autoRefresh" checked> Auto-refresh 30s</label>
+  <span id="lastUpdate" class="gray"></span>
+</div>
+
+<div id="loading">Loading...</div>
+<div id="dashboard" style="display:none">
+
+  <!-- Summary cards -->
+  <h2>Overview</h2>
+  <div class="grid" id="summaryCards"></div>
+
+  <!-- Cost Monitor & Projections -->
+  <h2>Cost Monitor & Projections</h2>
+  <div class="cost-grid" id="costCards"></div>
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+    <div class="chart-container">
+      <div class="chart-label">Hourly cost (last 72h)</div>
+      <canvas id="hourlyChart" height="160"></canvas>
+    </div>
+    <div class="chart-container">
+      <div class="chart-label">Daily cost (all time)</div>
+      <canvas id="dailyChart" height="160"></canvas>
+    </div>
+  </div>
+
+  <!-- By Model -->
+  <h2>By Model</h2>
+  <table id="modelTable">
+    <thead><tr><th>Model</th><th>Calls</th><th>Success</th><th>Failures</th><th>Input Tok</th><th>Output Tok</th><th>Cost</th><th>Avg Latency</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- By Auth Type -->
+  <h2>By Auth Type</h2>
+  <table id="authTable">
+    <thead><tr><th>Auth Type</th><th>Calls</th><th>Success</th><th>Failures</th><th>Success Rate</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Recent Errors -->
+  <h2>Recent Errors</h2>
+  <table id="errorTable">
+    <thead><tr><th>Time</th><th>Model</th><th>Status</th><th>HTTP</th><th>Auth</th><th>Latency</th><th>Error</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Recent Calls -->
+  <h2>Recent Calls (last 100)</h2>
+  <table id="callTable">
+    <thead><tr><th>Time</th><th>Gen</th><th>Model</th><th>Status</th><th>HTTP</th><th>In/Out Tok</th><th>Cost</th><th>Latency</th><th>Auth</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+</div>
+
+<script>
+const ADMIN_KEY = '{{ admin_key }}';
+const API_URL = '/api/arena/monitor/stats' + (ADMIN_KEY ? '?key=' + encodeURIComponent(ADMIN_KEY) : '');
+
+function fmt(n, dec=0) {
+  if (n == null) return '-';
+  return Number(n).toLocaleString(undefined, {minimumFractionDigits: dec, maximumFractionDigits: dec});
+}
+function fmtCost(n) { return n != null ? '$' + Number(n).toFixed(4) : '-'; }
+function fmtMs(n) { return n != null ? fmt(n, 0) + 'ms' : '-'; }
+function fmtTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString() + ' ' + d.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+}
+function shortModel(m) { return (m||'').replace('claude-', '').replace('-20251001', ''); }
+function pct(a, b) { return b > 0 ? (a/b*100).toFixed(1) + '%' : '-'; }
+
+function fmtCostBig(n) { return n != null ? '$' + Number(n).toFixed(2) : '$0.00'; }
+function fmtDuration(seconds) {
+  if (!seconds || seconds < 60) return '<1m';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 24) { const d = Math.floor(h / 24); return d + 'd ' + (h % 24) + 'h'; }
+  if (h > 0) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
+function renderCostCards(stats) {
+  const now = Date.now() / 1000;
+  const allTime = stats.all_time || {};
+  const last24h = stats.last_24h || {};
+  const lastHour = stats.last_hour || {};
+  const totalCost = allTime.total_cost || 0;
+  const cost24h = last24h.total_cost || 0;
+  const costHour = lastHour.total_cost || 0;
+
+  // Burn rate: cost per hour based on last 24h
+  const hourlyBurn = cost24h / 24;
+  // Burn rate from last hour (more recent signal)
+  const recentBurn = costHour;
+
+  // Use weighted average: 60% recent hour, 40% 24h average (if both exist)
+  const effectiveBurn = (costHour > 0 && cost24h > 0)
+    ? recentBurn * 0.6 + hourlyBurn * 0.4
+    : (costHour > 0 ? recentBurn : hourlyBurn);
+
+  // Projections
+  const projDaily = effectiveBurn * 24;
+  const projWeekly = projDaily * 7;
+  const projMonthly = projDaily * 30;
+
+  // Running since
+  const runningSince = stats.first_call_at ? fmtDuration(now - stats.first_call_at) : '-';
+
+  // Cost per agent (if agents_created data available from heartbeat)
+  const totalCalls = allTime.total || 0;
+
+  // Budget thresholds
+  const dailyWarn = projDaily > 5;
+  const monthlyWarn = projMonthly > 50;
+
+  let html = '';
+
+  html += `<div class="cost-card">
+    <div class="label">Total Spend</div>
+    <div class="value cost">${fmtCostBig(totalCost)}</div>
+    <div class="sub">across ${fmt(totalCalls)} calls &middot; running ${runningSince}</div>
+  </div>`;
+
+  html += `<div class="cost-card">
+    <div class="label">Last Hour</div>
+    <div class="value cost">${fmtCostBig(costHour)}</div>
+    <div class="sub">${fmt(lastHour.total || 0)} calls &middot; ${fmt(lastHour.total_input_tokens)} in / ${fmt(lastHour.total_output_tokens)} out</div>
+  </div>`;
+
+  html += `<div class="cost-card">
+    <div class="label">Last 24h</div>
+    <div class="value cost">${fmtCostBig(cost24h)}</div>
+    <div class="sub">${fmt(last24h.total || 0)} calls &middot; avg ${fmtCostBig(hourlyBurn)}/hr</div>
+  </div>`;
+
+  html += `<div class="cost-card">
+    <div class="label">Burn Rate</div>
+    <div class="value ${dailyWarn ? 'warn' : 'cost'}">${fmtCostBig(effectiveBurn)}/hr</div>
+    <div class="sub">${fmtCostBig(projDaily)}/day${dailyWarn ? ' ⚠' : ''}</div>
+  </div>`;
+
+  html += `<div class="cost-card">
+    <div class="label">Projected Weekly</div>
+    <div class="value cost">${fmtCostBig(projWeekly)}</div>
+    <div class="sub">at current burn rate</div>
+  </div>`;
+
+  html += `<div class="cost-card">
+    <div class="label">Projected Monthly</div>
+    <div class="value ${monthlyWarn ? 'warn' : 'cost'}">${fmtCostBig(projMonthly)}</div>
+    <div class="sub">${monthlyWarn ? 'above $50 threshold' : 'within budget'}</div>
+  </div>`;
+
+  document.getElementById('costCards').innerHTML = html;
+}
+
+function drawBarChart(canvasId, labels, values, color = '#A356D6') {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 160 * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const H = 160;
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (!values.length) {
+    ctx.fillStyle = '#333';
+    ctx.font = '12px Courier New';
+    ctx.fillText('No data yet', W / 2 - 30, H / 2);
+    return;
+  }
+
+  const maxVal = Math.max(...values, 0.001);
+  const barW = Math.max(2, (W - 40) / values.length - 1);
+  const chartH = H - 30;
+  const offsetX = 35;
+
+  // Y-axis labels
+  ctx.fillStyle = '#555';
+  ctx.font = '10px Courier New';
+  ctx.textAlign = 'right';
+  ctx.fillText('$' + maxVal.toFixed(2), offsetX - 4, 12);
+  ctx.fillText('$0', offsetX - 4, chartH + 2);
+
+  // Grid line
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.moveTo(offsetX, chartH);
+  ctx.lineTo(W, chartH);
+  ctx.stroke();
+
+  // Bars
+  for (let i = 0; i < values.length; i++) {
+    const barH = (values[i] / maxVal) * (chartH - 10);
+    const x = offsetX + i * (barW + 1);
+    const y = chartH - barH;
+
+    ctx.fillStyle = values[i] > 0 ? color : '#1a1a1a';
+    ctx.fillRect(x, y, barW, barH);
+  }
+
+  // X-axis labels (first, middle, last)
+  ctx.fillStyle = '#555';
+  ctx.font = '9px Courier New';
+  ctx.textAlign = 'center';
+  if (labels.length > 0) {
+    ctx.fillText(labels[0], offsetX + barW / 2, H - 2);
+    if (labels.length > 2) {
+      const mid = Math.floor(labels.length / 2);
+      ctx.fillText(labels[mid], offsetX + mid * (barW + 1) + barW / 2, H - 2);
+    }
+    ctx.fillText(labels[labels.length - 1], offsetX + (labels.length - 1) * (barW + 1) + barW / 2, H - 2);
+  }
+}
+
+function renderCostCharts(stats) {
+  // Hourly chart (last 72h)
+  const hourly = stats.hourly_costs || [];
+  const hLabels = hourly.map(h => {
+    const d = new Date(h.hour_ts * 1000);
+    return d.getHours() + ':00';
+  });
+  const hValues = hourly.map(h => h.cost || 0);
+  drawBarChart('hourlyChart', hLabels, hValues, '#A356D6');
+
+  // Daily chart
+  const daily = stats.daily_costs || [];
+  const dLabels = daily.map(d => {
+    const dt = new Date(d.day_ts * 1000);
+    return (dt.getMonth() + 1) + '/' + dt.getDate();
+  });
+  const dValues = daily.map(d => d.cost || 0);
+  drawBarChart('dailyChart', dLabels, dValues, '#1E93FF');
+}
+
+function renderSummary(stats) {
+  const periods = [
+    {key: 'last_hour', label: 'Last Hour'},
+    {key: 'last_24h', label: 'Last 24h'},
+    {key: 'all_time', label: 'All Time'},
+  ];
+  let html = '';
+  for (const p of periods) {
+    const s = stats[p.key] || {};
+    const successRate = s.total > 0 ? (s.success / s.total * 100).toFixed(1) : '0';
+    html += `<div class="card">
+      <div class="card-title">${p.label}</div>
+      <div class="row">
+        <div class="big-num green">${fmt(s.success)}</div>
+        <div class="stat"><span>of</span> ${fmt(s.total)} <span>calls</span></div>
+        <div class="stat">(${successRate}%)</div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div class="stat red">${fmt(s.errors)} errors</div>
+        <div class="stat yellow">${fmt(s.rate_limited)} rate-limited</div>
+        <div class="stat orange">${fmt(s.retries)} retries</div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div class="stat tokens">In: ${fmt(s.total_input_tokens)} / Out: ${fmt(s.total_output_tokens)}</div>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <div class="stat cost">${fmtCost(s.total_cost)}</div>
+        <div class="stat gray">avg ${fmtMs(s.avg_latency)}</div>
+      </div>
+    </div>`;
+  }
+  document.getElementById('summaryCards').innerHTML = html;
+}
+
+function renderModelTable(models) {
+  const tbody = document.querySelector('#modelTable tbody');
+  tbody.innerHTML = (models || []).map(m => `<tr>
+    <td>${shortModel(m.model)}</td>
+    <td>${fmt(m.calls)}</td>
+    <td class="green">${fmt(m.success)}</td>
+    <td class="red">${fmt(m.failures)}</td>
+    <td class="tokens">${fmt(m.input_tokens)}</td>
+    <td class="tokens">${fmt(m.output_tokens)}</td>
+    <td class="cost">${fmtCost(m.cost)}</td>
+    <td>${fmtMs(m.avg_latency)}</td>
+  </tr>`).join('');
+}
+
+function renderAuthTable(auths) {
+  const tbody = document.querySelector('#authTable tbody');
+  tbody.innerHTML = (auths || []).map(a => `<tr>
+    <td>${a.auth_type || 'unknown'}</td>
+    <td>${fmt(a.calls)}</td>
+    <td class="green">${fmt(a.success)}</td>
+    <td class="red">${fmt(a.failures)}</td>
+    <td>${pct(a.success, a.calls)}</td>
+  </tr>`).join('');
+}
+
+function renderErrorTable(errors) {
+  const tbody = document.querySelector('#errorTable tbody');
+  tbody.innerHTML = (errors || []).map(e => `<tr>
+    <td>${fmtTime(e.created_at)}</td>
+    <td>${shortModel(e.model)}</td>
+    <td class="status-${e.status}">${e.status}</td>
+    <td>${e.http_status || '-'}</td>
+    <td>${e.auth_type || '-'}</td>
+    <td>${fmtMs(e.latency_ms)}</td>
+    <td class="error-msg" title="${(e.error_message||'').replace(/"/g,'&quot;')}">${e.error_message || '-'}</td>
+  </tr>`).join('');
+}
+
+function renderCallTable(calls) {
+  const tbody = document.querySelector('#callTable tbody');
+  tbody.innerHTML = (calls || []).map(c => `<tr>
+    <td>${fmtTime(c.created_at)}</td>
+    <td>${c.generation || '-'}</td>
+    <td>${shortModel(c.model)}</td>
+    <td class="status-${c.status}">${c.status}</td>
+    <td>${c.http_status || '-'}</td>
+    <td class="tokens">${fmt(c.input_tokens)}/${fmt(c.output_tokens)}</td>
+    <td class="cost">${fmtCost(c.cost_usd)}</td>
+    <td>${fmtMs(c.latency_ms)}</td>
+    <td>${c.auth_type || '-'}</td>
+  </tr>`).join('');
+}
+
+async function loadStats() {
+  try {
+    const resp = await fetch(API_URL);
+    if (!resp.ok) {
+      document.getElementById('loading').textContent = `Error: ${resp.status} ${resp.statusText}`;
+      document.getElementById('loading').style.display = '';
+      document.getElementById('dashboard').style.display = 'none';
+      return;
+    }
+    const stats = await resp.json();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('dashboard').style.display = '';
+    renderSummary(stats);
+    renderCostCards(stats);
+    renderCostCharts(stats);
+    renderModelTable(stats.by_model);
+    renderAuthTable(stats.by_auth);
+    renderErrorTable(stats.recent_errors);
+    renderCallTable(stats.recent_calls);
+    document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    document.getElementById('loading').textContent = 'Fetch error: ' + e.message;
+    document.getElementById('loading').style.display = '';
+  }
+}
+
+loadStats();
+setInterval(() => {
+  if (document.getElementById('autoRefresh').checked) loadStats();
+}, 30000);
+</script>
+</body>
+</html>

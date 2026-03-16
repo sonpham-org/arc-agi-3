@@ -1,9 +1,10 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-15 22:00
+# Date: 2026-03-16 14:00
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament continuously.
 #   Uses ARENA_CLAUDE_KEY env var (Anthropic API key or OAuth token) for agent evolution.
 #   Uses server/arena_tool_runner.py for LLM tool-calling loops (no external deps).
 #   Runs in two daemon threads: tournament (continuous) + evolution (5-min cycle).
+#   Sets monitor context before each evolution cycle for LLM call tracking.
 #   Monitor via /api/arena/heartbeat/status endpoint.
 # SRP/DRY check: Pass — reuses existing db_arena functions, snake engine, arena_tool_runner
 
@@ -35,6 +36,7 @@ from db_arena import (
     arena_increment_generation,
     arena_update_elo,
     arena_count_pair_games,
+    arena_post_comment,
     MAX_STORED_GAMES_PER_PAIR,
     _db,
 )
@@ -356,8 +358,9 @@ Create ONE agent. Name it gen{generation}_<strategy> (e.g. gen{generation}_flood
 Study the top agents and create a counter-strategy.
 Call create_agent with name and full Python code."""
 
-    from server.arena_tool_runner import run_tool_loop
+    from server.arena_tool_runner import run_tool_loop, set_monitor_context
 
+    set_monitor_context(game_id=game_id, generation=generation)
     created = []
 
     def tool_handler(name, args):
@@ -808,6 +811,14 @@ def _evolution_loop():
             _heartbeat_state['agents_created'] += len(created)
             if created:
                 print(f'[evolution] Created {len(created)} agent(s): {", ".join(created)}')
+                # Post to AI Heartbeat chat
+                try:
+                    gen = _heartbeat_state['ticks']
+                    msg = f"Gen {gen}: created {len(created)} new agent(s) — {', '.join(created)}"
+                    arena_post_comment('snake', 'ai-heartbeat', 'Heartbeat', msg,
+                                       comment_type='heartbeat')
+                except Exception:
+                    pass  # non-fatal
             elapsed = time.time() - tick_start
             _heartbeat_state['last_tick'] = time.time()
             _heartbeat_state['last_error'] = None

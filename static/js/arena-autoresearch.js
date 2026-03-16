@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-16 03:00
+// Date: 2026-03-16 20:00
 // PURPOSE: Arena Auto Research — in-browser evolution + tournament engine.
 //   Phase 2: headless match runner, per-game state adapters, live tournament canvases.
 //   Phase 4: human vs AI play mode — keyboard/click input, timed moves, result submission.
@@ -1557,8 +1557,8 @@ function arRenderEloChart(gameId, agents) {
   if (typeof Chart === 'undefined') return;
 
   // Sort by creation time (id is auto-increment, so lower id = created earlier)
-  const sorted = [...agents].sort((a, b) => a.id - b.id).slice(-20);
-  const labels = sorted.map(a => a.name.length > 14 ? a.name.slice(0, 13) + '…' : a.name);
+  const sorted = [...agents].sort((a, b) => a.id - b.id);
+  const labels = sorted.map((_, i) => i + 1);
   const data = sorted.map(a => Math.round(a.elo));
   const meta = sorted.map(a => ({
     name: a.name, elo: Math.round(a.elo),
@@ -1615,8 +1615,7 @@ function arRenderEloChart(gameId, agents) {
       },
       scales: {
         x: {
-          grid: { color: '#ffffff08' },
-          ticks: { color: '#666', font: { size: 8, family: 'monospace' }, maxRotation: 45, autoSkip: true, maxTicksLimit: 15 },
+          display: false,
         },
         y: {
           title: { display: true, text: 'ELO', color: '#888', font: { size: 10 } },
@@ -1711,9 +1710,28 @@ async function arCreateAgentLocal() {
   };
 
   try {
+    // Check if program.md was edited — propose changes first
+    const progTa = document.getElementById('arProgramTextarea');
+    const editedProgram = progTa ? progTa.value.trim() : '';
+    if (editedProgram && AR._lastProgramContent && editedProgram !== AR._lastProgramContent) {
+      _log('Submitting program.md changes...', '#ffdc00');
+      const summary = document.getElementById('arProgramSummary')?.value.trim() || 'Updated via Create Agent';
+      try {
+        await fetch(`/api/arena/program/${gameId}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ content: editedProgram, summary }),
+        });
+        AR._lastProgramContent = editedProgram;
+        _log('Program.md updated', '#4FCC30');
+      } catch (e) {
+        _log('Program.md update failed (continuing)', '#ff851b');
+      }
+    }
+
     // Load program.md + leaderboard
     const research = await fetch(`/api/arena/research/${gameId}`).then(r => r.json());
-    const programMd = research.program?.content || _AR_DEFAULT_PROGRAM;
+    const programMd = editedProgram || research.program?.content || _AR_DEFAULT_PROGRAM;
     const leaderboard = research.leaderboard || [];
 
     // Build leaderboard text

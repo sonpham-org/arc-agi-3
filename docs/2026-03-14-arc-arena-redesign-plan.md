@@ -1,4 +1,4 @@
-# ARC Arena Redesign Plan
+# AutoResearch Arena Redesign Plan
 
 **Date:** 2026-03-14
 **Author:** Claude Opus 4.6
@@ -6,7 +6,7 @@
 ## Scope
 
 **In:**
-- Rename page from "Agent vs Agent" → "ARC Arena"
+- Rename page from "Agent vs Agent" → "AutoResearch Arena"
 - New logo: two blocks facing each other with alternating turn-by-turn pulse animation
 - Full-screen layout (remove max-width constraints on game selection)
 - Split game selection view: left side = Agent A harness/settings, right side = Agent B harness/settings, center = game preview
@@ -43,7 +43,7 @@ SVG: Two `<rect>` outer frames + two `<rect>` inner fills + three small connecto
 ## TODOs
 
 1. Update logo SVG in `arena.html` — two-block design with alternating pulse
-2. Rename all "Agent vs Agent" references → "ARC Arena"
+2. Rename all "Agent vs Agent" references → "AutoResearch Arena"
 3. Redesign game selection view:
    - Left panel: Agent A settings (strategy picker, name)
    - Center: Game card/preview + "Start Match" button

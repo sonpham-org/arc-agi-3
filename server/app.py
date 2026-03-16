@@ -1,5 +1,5 @@
 # Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-15 00:00
+# Date: 2026-03-16 19:00
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
 #   session persistence (save/resume/branch via SQLite), game step proxying, model registry
 #   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
@@ -202,6 +202,7 @@ from db_arena import (
     arena_get_agent as _ar_get_agent,
     arena_get_recent_games as _ar_get_recent_games,
     arena_get_game as _ar_get_game,
+    arena_get_agent_games_for_profile as _ar_get_agent_profile_games,
 )
 
 
@@ -229,6 +230,15 @@ def arena_agent_detail(game_id, agent_id):
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     return jsonify(agent)
+
+
+@app.route("/api/arena/agents/<game_id>/<int:agent_id>/games")
+def arena_agent_profile_games(game_id, agent_id):
+    agent = _ar_get_agent(game_id, agent_id)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    games = _ar_get_agent_profile_games(game_id, agent_id, limit=20)
+    return jsonify({"agent": agent, "games": games})
 
 
 @app.route("/api/arena/agents/<game_id>", methods=["POST"])
@@ -286,7 +296,8 @@ def arena_comments_list(game_id):
     ok, err = _ar_svc.validate_game_id(game_id)
     if not ok:
         return jsonify({"error": err}), 400
-    comments = _ar_get_comments(game_id)
+    comment_type = request.args.get("type")
+    comments = _ar_get_comments(game_id, comment_type=comment_type)
     return jsonify(comments)
 
 
@@ -401,6 +412,39 @@ def arena_export_now(game_id):
     from server.arena_heartbeat import run_export
     run_export(game_id)
     return jsonify({"ok": True})
+
+
+# ── Arena LLM Call Monitoring (admin-only) ────────────────────────────────
+
+ARENA_ADMIN_KEY = os.environ.get("ARENA_ADMIN_KEY", "")
+
+
+def _require_arena_admin():
+    """Validate admin key for arena monitoring. Open in local dev if no key configured."""
+    if not ARENA_ADMIN_KEY:
+        return None  # no key = open access (local dev)
+    key = request.args.get("key", "")
+    if key != ARENA_ADMIN_KEY:
+        return jsonify({"error": "Unauthorized"}), 403
+    return None
+
+
+@app.route("/arena/monitor")
+def arena_monitor_page():
+    auth_err = _require_arena_admin()
+    if auth_err:
+        return auth_err
+    key = request.args.get("key", "")
+    return render_template("arena_monitor.html", admin_key=key)
+
+
+@app.route("/api/arena/monitor/stats")
+def arena_monitor_stats():
+    auth_err = _require_arena_admin()
+    if auth_err:
+        return auth_err
+    from db_arena import arena_get_llm_monitor_stats
+    return jsonify(arena_get_llm_monitor_stats())
 
 
 @app.route("/api/arena/elo-history/<game_id>")

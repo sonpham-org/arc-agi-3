@@ -4,7 +4,7 @@
 <script>((t)=>{if(t)document.documentElement.setAttribute('data-theme',t)})(localStorage.getItem('arc-theme'))</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ARC Arena</title>
+<title>AutoResearch Arena</title>
 <link rel="stylesheet" href="/static/css/main.css?v={{ static_v }}">
 <link rel="stylesheet" href="/static/css/arena.css?v={{ static_v }}">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -43,7 +43,7 @@ const FEATURES = {{ features | tojson }};
           <animate attributeName="opacity" values="0.12;0.12;0.12;1;1;0.12;0.12;0.12" keyTimes="0;0.15;0.3;0.45;0.55;0.7;0.85;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
       </svg>
-      <span class="app-title-text">ARC Arena<a class="logo-sub-link to-obs" href="/obs">&#8594; to Observatory</a></span>
+      <span class="app-title-text">AutoResearch Arena<a class="logo-sub-link to-obs" href="/obs">&#8594; to Observatory</a></span>
     </span>
     <a class="nav-link active" id="modeBtnResearch" href="#autoresearch" onclick="switchArenaMode('research');return false;">Auto Research</a>
     <a class="nav-link" id="modeBtnMatch" href="#matchup" onclick="switchArenaMode('match');return false;">Create Match-up</a>
@@ -206,48 +206,52 @@ const FEATURES = {{ features | tojson }};
       <div class="ar-game-list" id="arGameList"></div>
     </div>
 
-    <!-- Col 2: Program MD (2/3) + Strategy Discussion (1/3) -->
+    <!-- Col 2: Program MD (top) + Tabbed Panel (bottom) -->
     <div class="ar-center" id="arCenter">
-      <!-- Program.md viewer/editor — 2/3 height -->
+      <!-- Program.md viewer — read-only, top area -->
       <div class="ar-program-area" id="arProgramArea">
         <div class="ar-section-header">
           <span>program.md</span>
-          <button class="ar-btn ar-btn-xs" id="arProgramEditBtn" onclick="arToggleEdit()">Edit</button>
         </div>
         <div class="ar-program-view" id="arProgramView">
           <div class="ar-no-data">Select a game to view its evolution program</div>
         </div>
-        <div class="ar-program-edit" id="arProgramEdit" style="display:none;">
-          <div class="ar-program-diff" id="arProgramDiff"></div>
-          <textarea id="arProgramTextarea" placeholder="Write program.md content..."></textarea>
-          <div class="ar-program-edit-actions">
-            <input type="text" id="arProgramSummary" placeholder="Change summary..." class="ar-input">
-            <button class="ar-btn ar-btn-accept" onclick="arProposeProgram()">Accept Changes</button>
-            <button class="ar-btn ar-btn-xs" onclick="arCancelEdit()">Cancel</button>
+      </div>
+
+      <!-- Tabbed lower panel: Create New Agent | AI Heartbeat -->
+      <div class="ar-lower-panel" id="arLowerPanel">
+        <div class="ar-tab-bar">
+          <button class="ar-tab active" id="arTabCreate" onclick="arSwitchLowerTab('create')">Create New Agent</button>
+          <button class="ar-tab" id="arTabHeartbeat" onclick="arSwitchLowerTab('heartbeat')">AI Heartbeat</button>
+        </div>
+
+        <!-- Tab: Create New Agent -->
+        <div class="ar-tab-content" id="arTabCreateContent">
+          <!-- Model + API key -->
+          <div class="ar-create-agent-controls">
+            <select id="arCreateModel" class="ar-small-select" style="flex:1"><option>Loading models...</option></select>
+            <input type="password" id="arCreateApiKey" class="ar-input" placeholder="API key" style="flex:1">
           </div>
+          <!-- Program.md editor (inline) -->
+          <div class="ar-create-program-wrap" id="arCreateProgramWrap">
+            <div class="ar-program-diff" id="arProgramDiff"></div>
+            <textarea id="arProgramTextarea" placeholder="Edit program.md to guide agent creation..."></textarea>
+          </div>
+          <!-- Create button + summary -->
+          <div class="ar-create-bottom-bar">
+            <input type="text" id="arProgramSummary" placeholder="Change summary (optional)..." class="ar-input" style="flex:1">
+            <button class="ar-btn ar-btn-primary" id="arCreateAgentBtn" onclick="arCreateAgentLocal()">Create Agent</button>
+          </div>
+          <div class="ar-create-agent-log" id="arCreateAgentLog" style="display:none;"></div>
         </div>
-      </div>
 
-      <!-- Create New Code Agent -->
-      <div class="ar-create-agent-area" id="arCreateAgentArea">
-        <div class="ar-section-header"><span>Create New Code Agent</span></div>
-        <div class="ar-create-agent-controls">
-          <select id="arCreateModel" class="ar-small-select" style="flex:1"><option>Loading models...</option></select>
-          <input type="password" id="arCreateApiKey" class="ar-input" placeholder="API key" style="flex:1">
-          <button class="ar-btn ar-btn-primary" id="arCreateAgentBtn" onclick="arCreateAgentLocal()">Create Agent</button>
-        </div>
-        <div class="ar-create-agent-log" id="arCreateAgentLog" style="display:none;"></div>
-      </div>
-
-      <!-- Strategy Discussion -->
-      <div class="ar-discussion-area" id="arDiscussionArea">
-        <div class="ar-section-header">
-          <span>Strategy Discussion</span>
-        </div>
-        <div class="ar-comments-list" id="arCommentsList"></div>
-        <div class="ar-comment-input">
-          <textarea id="arCommentText" placeholder="Discuss strategies..." rows="2"></textarea>
-          <button class="ar-btn ar-btn-primary" onclick="arPostComment()">Post</button>
+        <!-- Tab: AI Heartbeat -->
+        <div class="ar-tab-content" id="arTabHeartbeatContent" style="display:none;">
+          <div class="ar-heartbeat-list" id="arHeartbeatList"></div>
+          <div class="ar-comment-input">
+            <textarea id="arHeartbeatText" placeholder="Chat with the community & AI..." rows="2"></textarea>
+            <button class="ar-btn ar-btn-primary" onclick="arPostHeartbeat()">Send</button>
+          </div>
         </div>
       </div>
     </div>
@@ -280,14 +284,21 @@ const FEATURES = {{ features | tojson }};
     <!-- Col 4: Live Tournament (30%) — 4 games, 2 per row -->
     <div class="ar-right-col" id="arRightCol">
       <div class="ar-section-header"><span>Live Tournament</span></div>
-      <div class="ar-live-games" id="arLiveGames">
+      <div class="ar-live-games ar-right-live-content" id="arLiveGames">
         <div class="ar-live-cell"><canvas id="arLive0" width="400" height="400"></canvas><div class="ar-live-info" id="arLiveInfo0"></div></div>
         <div class="ar-live-cell"><canvas id="arLive1" width="400" height="400"></canvas><div class="ar-live-info" id="arLiveInfo1"></div></div>
         <div class="ar-live-cell"><canvas id="arLive2" width="400" height="400"></canvas><div class="ar-live-info" id="arLiveInfo2"></div></div>
         <div class="ar-live-cell"><canvas id="arLive3" width="400" height="400"></canvas><div class="ar-live-info" id="arLiveInfo3"></div></div>
       </div>
-      <div class="ar-section-header"><span>ELO Ratings</span></div>
-      <div class="ar-elo-chart-wrap">
+      <!-- Buy Me A Coffee -->
+      <div class="ar-bmac-wrap ar-right-live-content">
+        <a href="https://buymeacoffee.com/sonpham" target="_blank" rel="noopener" class="ar-bmac-link">
+          <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" class="ar-bmac-img">
+        </a>
+      </div>
+
+      <div class="ar-section-header ar-right-live-content"><span>ELO Ratings</span></div>
+      <div class="ar-elo-chart-wrap ar-right-live-content">
         <canvas id="arEloChart" width="400" height="200"></canvas>
       </div>
     </div>

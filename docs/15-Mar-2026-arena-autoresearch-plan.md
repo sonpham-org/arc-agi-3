@@ -8,7 +8,7 @@
 
 ## Goal
 
-Add an **Auto Research** tab to the ARC Arena where:
+Add an **Auto Research** tab to the AutoResearch Arena where:
 1. Users can run **Local Auto Research** per-game using their own resources (BYOK + local compute)
 2. A **Community Auto Research** mode lets everyone contribute agents to a shared genome pool with ELO-rated tournaments run on our server
 3. Users can **play against AI agents** from the leaderboard with configurable time delays, tracked as `human-{delay}ms` in ELO
