@@ -1337,7 +1337,10 @@ function arShowLocalAgentCode(name) {
   const agent = LocalResearch.agents.find(a => a.name === name);
   if (!agent) return;
   document.getElementById('arCodeModalTitle').textContent = `${name} — Code`;
-  document.getElementById('arCodeModalCode').textContent = agent.code;
+  const codeEl = document.getElementById('arCodeModalCode');
+  codeEl.textContent = agent.code;
+  codeEl.classList.remove('hljs');
+  if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl);
   document.getElementById('arCodeModal').style.display = 'flex';
 }
 

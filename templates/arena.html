@@ -8,6 +8,9 @@
 <link rel="stylesheet" href="/static/css/main.css?v={{ static_v }}">
 <link rel="stylesheet" href="/static/css/arena.css?v={{ static_v }}">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/python.min.js"></script>
 </head>
 <body>
 <!-- Template globals required by scaffolding-schemas.js -->
@@ -346,7 +349,7 @@ const FEATURES = {{ features | tojson }};
         <h3 id="arCodeModalTitle">Agent Code</h3>
         <button class="ar-btn" onclick="document.getElementById('arCodeModal').style.display='none'">&times;</button>
       </div>
-      <pre class="ar-code-view" id="arCodeModalCode"></pre>
+      <pre class="ar-code-view"><code class="language-python" id="arCodeModalCode"></code></pre>
     </div>
   </div>
 

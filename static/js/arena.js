@@ -4721,7 +4721,10 @@ async function arShowAgentCode(gameId, agentId, name) {
   try {
     const agent = await fetch(`/api/arena/agents/${gameId}/${agentId}`).then(r => r.json());
     document.getElementById('arCodeModalTitle').textContent = `${name} — Code`;
-    document.getElementById('arCodeModalCode').textContent = agent.code || '(no code)';
+    const codeEl = document.getElementById('arCodeModalCode');
+    codeEl.textContent = agent.code || '(no code)';
+    codeEl.classList.remove('hljs');
+    if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl);
     document.getElementById('arCodeModal').style.display = 'flex';
   } catch (e) {
     // Silently fail
