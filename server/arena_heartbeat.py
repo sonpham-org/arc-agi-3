@@ -44,7 +44,8 @@ from db_arena import (
 #   Config
 # ═══════════════════════════════════════════════════════════════════════════
 
-HEARTBEAT_INTERVAL_NORMAL = 2 * 60   # 2 minutes
+HEARTBEAT_INTERVAL_FAST_FILL = 2 * 60   # 2 minutes until 100 agents
+HEARTBEAT_INTERVAL_NORMAL = 10 * 60    # 10 minutes after 100 agents
 HEARTBEAT_INTERVAL_FAST = 60         # 1 minute when new user feedback exists
 TOURNAMENT_GAMES_PER_TICK = 20
 EVOLUTION_AGENTS_PER_TICK = 1
@@ -815,7 +816,14 @@ def _evolution_loop():
             _heartbeat_state['last_error'] = str(e)
             print(f'[evolution] Tick error: {e}')
             traceback.print_exc()
-        interval = HEARTBEAT_INTERVAL_FAST if _has_new_feedback('snake') else HEARTBEAT_INTERVAL_NORMAL
+        # 2min until 100 agents, then 10min. 1min if new user feedback.
+        agent_count = len(arena_get_leaderboard('snake', limit=200))
+        if _has_new_feedback('snake'):
+            interval = HEARTBEAT_INTERVAL_FAST
+        elif agent_count < 100:
+            interval = HEARTBEAT_INTERVAL_FAST_FILL
+        else:
+            interval = HEARTBEAT_INTERVAL_NORMAL
         time.sleep(interval)
 
 
