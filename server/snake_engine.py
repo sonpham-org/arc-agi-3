@@ -246,7 +246,7 @@ _DIR_OPPOSITE_IDX = [2, 3, 0, 1]
 class SnakeRandomGame(SnakeGame):
     """2-player snake with procedural wall clusters. Extends SnakeGame."""
 
-    def __init__(self, width=20, height=20, max_turns=200, food_count=8, seed=42):
+    def __init__(self, width=20, height=20, max_turns=350, food_count=8, seed=42):
         super().__init__(width=width, height=height, max_turns=max_turns, food_count=food_count)
         self._seed = seed
 
@@ -606,9 +606,11 @@ class SnakeGame4P:
                     deaths[i] = True
                     deaths[j] = True
 
+        # Clear body on death so dead snakes are walkable
         for i, dead in enumerate(deaths):
             if dead:
                 self.snakes[i].alive = False
+                self.snakes[i].body = []
 
         # Food consumption
         for snake in self.snakes:

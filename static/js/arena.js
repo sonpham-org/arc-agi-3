@@ -6,7 +6,7 @@
 //   Supports Code mode (built-in AI) and Harness mode (LLM scaffolding settings).
 //   Lower panel uses tabs: "Create New Agent" (BYOK + program.md editor + spawn)
 //   and "AI Heartbeat" (community + AI chat, stored as heartbeat comments).
-//   Implements 12 games: Snake Battle, Snake Random Maps, Snake Battle Royale (4P),
+//   Implements 12 games: Snake Battle, Snake Random Walls, Snake Battle Royale (4P),
 //   Snake 2v2 Teams (4P), Tron, Connect Four, Fischer Random Chess,
 //   Othello, Go 9x9, Gomoku, Artillery, Poker. Each has engine, AI, rendering, match runner.
 //   Dispatcher pattern: ARENA_GAMES entries have run/render/preview functions.
@@ -309,7 +309,7 @@ const AI_STRATEGIES = {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Snake: Random Maps Game Engine
+   Snake: Random Walls Game Engine
    ═══════════════════════════════════════════════════════════════════════════ */
 
 class SnakeRandomGame extends SnakeGame {
@@ -538,7 +538,7 @@ class SnakeRandomGame extends SnakeGame {
 }
 
 
-/* ── Snake Random Maps: AI helpers ─────────────────────────────────────── */
+/* ── Snake Random Walls: AI helpers ─────────────────────────────────────── */
 
 function isSafeRandom(x, y, state, me, other) {
   if (x <= 0 || x >= state.width - 1 || y <= 0 || y >= state.height - 1) return false;
@@ -657,7 +657,7 @@ const AI_STRATEGIES_RANDOM = {
 };
 
 
-/* ── Snake Random Maps: Match Runner ───────────────────────────────────── */
+/* ── Snake Random Walls: Match Runner ───────────────────────────────────── */
 
 function runSnakeRandomMatch(config, strategyA, strategyB) {
   const resolvedSeed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
@@ -695,7 +695,7 @@ function runSnakeRandomMatch(config, strategyA, strategyB) {
 }
 
 
-/* ── Snake Random Maps: Rendering ──────────────────────────────────────── */
+/* ── Snake Random Walls: Rendering ──────────────────────────────────────── */
 
 function renderSnakeRandomFrame(ctx, frame, size) {
   // Grid already includes walls as C.WALL cells
@@ -927,9 +927,12 @@ class SnakeGame4P {
       }
     }
 
-    // Apply deaths
+    // Apply deaths — clear body so dead snakes are walkable and disappear
     for (let i = 0; i < 4; i++) {
-      if (dead[i]) this.snakes[i].alive = false;
+      if (dead[i]) {
+        this.snakes[i].alive = false;
+        this.snakes[i].body = [];
+      }
     }
 
     // Move alive snakes and check food
@@ -4162,10 +4165,10 @@ const _ALL_ARENA_GAMES = [
     config: { width: 20, height: 20, maxTurns: 350, seed: 42 },
     strategies: AI_STRATEGIES,
     run: runMatch, render: renderSnakeFrame, preview: renderSnakePreview },
-  { id: 'snake_random', title: 'Snake: Random Maps', category: 'ARC-style',
-    desc: 'Two snakes on a procedurally generated map. New walls every match.',
+  { id: 'snake_random', title: 'Snake: Random Walls', category: 'ARC-style',
+    desc: 'Two snakes battle with random wall clusters. New layout every match.',
     tags: ['Territorial', 'Simultaneous', 'Adaptive'],
-    config: { width: 20, height: 20, maxTurns: 200, seed: () => Date.now() },
+    config: { width: 20, height: 20, maxTurns: 350, seed: () => Date.now() },
     strategies: AI_STRATEGIES_RANDOM,
     run: runSnakeRandomMatch, render: renderSnakeRandomFrame, preview: renderSnakeRandomPreview },
   { id: 'snake_royale', title: 'Snake: Battle Royale', category: 'ARC-style',
@@ -5411,7 +5414,7 @@ const _GAME_TAB_ICONS = {
 const _SNAKE_VARIANT_IDS = new Set(['snake', 'snake_random', 'snake_royale', 'snake_2v2']);
 const _SNAKE_VARIANTS = [
   { id: 'snake', label: 'Classic' },
-  { id: 'snake_random', label: 'Random Maps' },
+  { id: 'snake_random', label: 'Random Walls' },
   { id: 'snake_royale', label: 'Battle Royale' },
   { id: 'snake_2v2', label: '2v2 Teams' },
 ];
@@ -5841,7 +5844,7 @@ function arRenderLeaderboard(gameId, agents) {
       <td class="ar-contributor">${escHtml(a.contributor || '—')}</td>
       <td style="white-space:nowrap">
         <button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">Code</button>
-        ${a.is_human ? '' : `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
+        ${(a.is_human || gameId === 'snake_2v2') ? '' : `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
       </td>
     </tr>`;
   }).join('');
@@ -5970,7 +5973,7 @@ function arRenderAgentView(container, gameId, agent, games) {
       </div>
       <div style="margin-top:4px">
         <button class="ar-btn ar-btn-xs" onclick="arShowAgentCode('${gameId}',${agent.id},'${escHtml(agent.name)}')">View Code</button>
-        ${agent.is_human ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${agent.id},'${escHtml(agent.name)}',${Math.round(agent.elo)})">Play ▶</button>`}
+        ${(agent.is_human || gameId === 'snake_2v2') ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${agent.id},'${escHtml(agent.name)}',${Math.round(agent.elo)})">Play ▶</button>`}
       </div>
     </div>`;
 

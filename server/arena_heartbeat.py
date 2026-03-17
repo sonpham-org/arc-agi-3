@@ -88,12 +88,18 @@ _live_lock = threading.Lock()
 
 _GAME_PROGRAM_FILES = {
     'snake': 'default_program.md',
+    'snake_random': 'snake_random_program.md',
+    'snake_royale': 'snake_royale_program.md',
+    'snake_2v2': 'snake_2v2_program.md',
     'chess960': 'chess960_program.md',
     'othello': 'othello_program.md',
 }
 
 _GAME_PROGRAM_FALLBACKS = {
     'snake': "Create snake agents with a get_move(state) function.",
+    'snake_random': "Create snake agents with a get_move(state) function. state['walls'] contains wall positions.",
+    'snake_royale': "Create 4-player snake agents with a get_move(state) function. state['snakes'] has all 4 snakes.",
+    'snake_2v2': "Create 2v2 team snake agents with a get_move(state) function. state['ally_snake'] and state['enemies'] available.",
     'chess960': "Create chess960 agents with a get_move(state) function that returns a legal move string.",
     'othello': "Create othello agents with a get_move(state) function that returns [row, col].",
 }

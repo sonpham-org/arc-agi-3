@@ -1,7 +1,7 @@
-# Snake Random Maps Agent Evolution Program
+# Snake Random Walls Agent Evolution Program
 
 ## Objective
-Create snake agents that win competitive 2-player snake games on a 20x20 grid with **randomly generated wall layouts**. Maps change every match (seeded by millisecond timestamp), so agents must handle varied obstacle configurations.
+Create snake agents that win competitive 2-player snake games on a 20x20 grid with **randomly generated wall clusters**. Wall layouts change every match (seeded by timestamp), so agents must handle varied obstacle configurations — pathfinding around walls is essential.
 
 ## Agent Interface
 Each agent is a standalone Python file with ONE function:
