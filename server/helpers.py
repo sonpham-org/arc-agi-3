@@ -12,22 +12,9 @@ from typing import Optional
 import arc_agi
 from flask import request
 
-from server.state import arcade_instance, DEV_SECRET
+from server.state import arcade_instance, DEV_SECRET, FEATURES, HIDDEN_GAMES
 from constants import ACTION_NAMES
 from db import verify_auth_token
-
-# Feature flags and config
-FEATURES = {
-    "copilot":       {"staging": False,  "prod": False},
-    "server_llm":    {"staging": False,  "prod": False},
-    "puter_js":      {"staging": True,   "prod": True},
-    "byok":          {"staging": True,   "prod": True},
-    "session_db":    {"staging": True,   "prod": True},
-    "memory_md":     {"staging": True,   "prod": False},
-    "pyodide_game":  {"staging": True,   "prod": True},
-}
-
-HIDDEN_GAMES = ["ab", "fd", "fy", "mr", "mw", "pt", "sh"]
 
 
 def get_mode() -> str:

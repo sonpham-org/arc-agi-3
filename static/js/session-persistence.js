@@ -1,3 +1,9 @@
+// Author: Claude Opus 4.6 (1M context)
+// Date: 2026-03-15 00:00
+// PURPOSE: Session persistence — session recording, upload, sharing, restoration,
+//   Turnstile verification, Puter.kv persistence, auto-upload, share links,
+//   resume detection, and renderRestoredReasoning() for displaying persisted history.
+// SRP/DRY check: Pass — session persistence isolated from game logic and UI rendering
 // ═══════════════════════════════════════════════════════════════════════════
 // SESSION PERSISTENCE — Session recording, upload, sharing, and restoration
 // ═══════════════════════════════════════════════════════════════════════════
@@ -186,7 +192,7 @@ async function autoUploadSession(ss) {
       // Also upload memory snapshots if available
       if (typeof _uploadMemorySnapshots === 'function') _uploadMemorySnapshots();
     }
-  } catch {} // fire-and-forget
+  } catch (e) { console.warn('[session] auto-upload error:', e.message); }
 }
 
 function uploadClosedSession(s) {

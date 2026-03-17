@@ -5,6 +5,61 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.9.1] — feat: APP_MODE split — Observatory & Arena as separate services
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Changed
+- **APP_MODE env var** — `APP_MODE=observatory` (default) serves Observatory at `/`, `APP_MODE=arena` serves Arena at `/`. Two Railway services from the same repo, each with its own domain (`arc3.sonpham.net` / `arena.sonpham.net`).
+- **Cross-links** — Observatory ↔ Arena navigation uses `OBSERVATORY_URL` / `ARENA_URL` env vars instead of hardcoded `/obs` / `/arena` paths. Works across domains in prod, falls back to old paths in local dev.
+- **Temporary aliases** — `/obs` and `/arena` still work as 302 redirects for backward compatibility.
+- **Arena Monitor** — Now accessible at `/monitor` (on arena service). `/arena/monitor` redirects.
+- **Heartbeat safety** — Arena heartbeat background thread only starts when `APP_MODE=arena`, preventing duplicate evolution cycles when both services share the same database.
+
+---
+
+## [1.9.0] — feat: Snake Battle variants (Random Maps, Battle Royale, 2v2 Teams)
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Added
+- **3 new Snake Battle variants** — each with its own game engine, Program.MD, leaderboard, ELO, games history, and live tournament:
+  - **Snake: Random Maps** (`snake_random`) — 1v1 on 20×20 with procedurally generated wall clusters. Maps regenerated each match using millisecond-precision seed for true randomness. Agents must adapt to varied terrain.
+  - **Snake: Battle Royale** (`snake_royale`) — 4-player free-for-all on 30×30 grid, 400 max turns, 12 food items. Last snake alive wins. Spawn in 4 corners.
+  - **Snake: 2v2 Teams** (`snake_2v2`) — 2v2 team mode on 24×24 grid, 300 max turns. Allied snakes (A+C vs B+D) can pass through each other. Team wins when all opponents are dead.
+- **4-player snake engine** — `SnakeGame4P` class (JS + Python) supporting royale and 2v2 modes with simultaneous 4-snake movement, ally pass-through, team win conditions
+- **Random map generator** — `SnakeRandomGame` class with seeded procedural wall generation using L/T-shaped clusters, flood-fill validation ensuring playability
+- **Agent lineage tracking** — New `program_version_id` column on `arena_agents` tracks which Program.MD version each agent was created under. Passed through heartbeat evolution, API submissions, and client-side creation flows.
+- **Loading overlay** — Game switch in Auto Research view now shows a spinner overlay, fires all fetches in parallel (`Promise.all`), and renders content only when fully loaded
+- **Sub-tab UI** — Snake Battle game card in Auto Research shows 4 inner variant tabs (Classic / Random Maps / Battle Royale / 2v2 Teams) under one parent card
+- **3 seed Program.MD files** — `snake_random_program.md`, `snake_royale_program.md`, `snake_2v2_program.md` with variant-specific agent interfaces and strategy guidance
+- **4-player mini-frame renderer** — Live tournament canvases render all 4 snakes with distinct color pairs for royale/2v2 matches
+- **4-player AI strategies** — Adapted greedy/aggressive/cautious strategies for 4-player games
+
+### Changed
+- **Arena heartbeat** — Temporarily disabled auto-start during snake variants implementation
+- **`arena.js`** — Updated ARENA_ENABLED_IDS to include all 4 snake variant IDs, `arBuildGameTabs()` groups snake variants into parent tab with sub-tabs, `arSelectGame()` shows loading overlay
+- **`arena-autoresearch.js`** — Added AGENT_INTERFACE entries for new variants, seed agent aliases, 4P state builder, updated mini-frame renderer for multi-snake rendering
+- **`db.py`** — Migration adds `program_version_id` column to `arena_agents`
+- **`db_arena.py`** — `arena_submit_agent()` accepts `program_version_id`, leaderboard query includes it
+- **`arena_research_service.py`** — Added `snake_random`, `snake_royale`, `snake_2v2` to valid game IDs and program file mappings
+- **`server/snake_engine.py`** — Added `SnakeGame4P` class for server-side 4-player matches
+
+---
+
+## [1.8.1] — feat: Account system shared with AutoResearch Arena
+*Author: Claude Opus 4.6 | 2026-03-16*
+
+### Added
+- **Shared auth module** (`static/js/auth.js`) — extracted login/logout/magic link/Google OAuth/user badge functions from `session.js` into a shared module used by both Observatory and Arena pages
+- **Arena login UI** — login button, user badge with dropdown, and login modal added to Arena top nav bar, matching the Observatory's account UX
+- **Arena auth init** — `checkAuthStatus()` called on Arena page load; logged-in users see their name badge and can log out
+- **Arena contributor attribution** — agent submissions from logged-in users now show their display name instead of generic labels
+
+### Changed
+- **`session.js`** — auth functions replaced with import of shared `auth.js`
+- **`server/app.py`** — arena route now passes `google_client_id` to template for conditional Google OAuth button
+
+---
+
 ## [1.8.0] — feat: Chess960 (Fischer Random) arena autoresearch game
 *Author: Claude Opus 4.6 | 2026-03-16*
 
@@ -230,6 +285,30 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 - **Text-based tool calling** — Tool use via `<tool_call>`/`<tool_result>` XML tags in prompt text, works with every model provider (Gemini, Groq, Mistral, LM Studio, Anthropic, OpenAI, etc.). No native tool_use API dependency.
 - **Files panel** — New Observatory panel (vertical split of the Memory area) showing the running game prompt log. Syntax-highlighted section markers, score lines, and analysis blocks. Scrubber support for stepping through log history.
 - **Action Queue** — Client-side port of RGB Agent's action_queue.py. Parses `[ACTIONS]` JSON plans, drains one per step, flushes on score change.
+
+---
+
+## [1.4.0] — refactor: Codebase quality + critical flow tests
+*Author: Claude Opus 4.6 | 2026-03-15*
+
+### Fixed
+- **HIDDEN_GAMES config drift** — Was defined in 3 places with inconsistent values (5 vs 7 items). Consolidated to single source of truth in `server/state.py`. `"mr"` and `"mw"` prefixes were missing from `helpers.py` and `app.py` copies.
+- **SQL injection guard** — `_db_update_session()` now validates column names against a whitelist. Previously built SQL from arbitrary kwargs keys.
+- **DB connection leaks** — Migrated `db_sessions.py`, `db_auth.py`, `db_llm.py`, `db_tools.py`, `db_exports.py` from manual `_get_db()`/`conn.close()` to `_db()` context manager with automatic rollback on exception.
+- **Missing DB indexes** — Added indexes on `session_actions(session_id)`, `sessions(user_id, created_at)`, `sessions(game_id)` for common query patterns.
+- **LM Studio throttle** — Added `lmstudio: 0.0` to `PROVIDER_MIN_DELAY` (was falling back to 1.0s default for a local model).
+- **Empty JS catch blocks** — Added `console.warn` to silent `catch {}` blocks in scaffolding.js, llm-config.js, session-persistence.js.
+
+### Changed
+- **Shared validators** — Created `server/services/validators.py` with `validate_game_id`, `validate_session_id`, `validate_action_id`, `validate_comment_body`, `validate_vote_direction`, `validate_comment_id`. Removed duplicate definitions from `game_service.py` and `social_service.py`.
+- **SYSTEM_MSG** — `models.py` now imports from `constants.py` instead of redefining.
+- **Provider dispatch** — Replaced if/elif chain in `llm_providers.py` with dispatch dictionary.
+- **Dead blueprint imports** — Removed unused blueprint imports and commented-out registration from `server/app.py`.
+
+### Added
+- `tests/test_critical_flows.py` — 24 tests: game start, step, undo, game listing, validators
+- `tests/test_db_safety.py` — 10 tests: SQL injection guard, context manager commit/rollback, action persistence
+- `tests/test_provider_routing.py` — 14 tests: provider dispatch, fallback, throttling, registry completeness
 
 ---
 

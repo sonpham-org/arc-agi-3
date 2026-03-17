@@ -1,8 +1,9 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-16 01:30
+# Date: 2026-03-16 12:00
 # PURPOSE: Service layer for Arena Auto Research. Validates inputs, orchestrates
 #   DB calls from db_arena.py, enforces rate limits and submission gates.
-#   Pure business logic — no Flask request/response objects.
+#   Pure business logic — no Flask request/response objects. Supports snake variant
+#   game IDs (snake_random, snake_royale, snake_2v2) with per-variant program.md seeds.
 # SRP/DRY check: Pass — validation/orchestration only, DB ops in db_arena.py
 """Arena Auto Research service — validation and orchestration."""
 
@@ -41,6 +42,9 @@ _SEEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'are
 
 _GAME_PROGRAM_FILES = {
     'snake': 'default_program.md',
+    'snake_random': 'snake_random_program.md',
+    'snake_royale': 'snake_royale_program.md',
+    'snake_2v2': 'snake_2v2_program.md',
     'chess960': 'chess960_program.md',
     'othello': 'othello_program.md',
 }
@@ -61,11 +65,15 @@ def _load_default_program(game_id):
 # Only snake enabled for now — re-enable others when ready
 ARENA_GAME_IDS = {
     "snake",
+    "snake_random",
+    "snake_royale",
+    "snake_2v2",
     "chess960",
     "othello",
 }
 _ALL_ARENA_GAME_IDS = {
-    "snake", "tron", "connect4", "chess960",
+    "snake", "snake_random", "snake_royale", "snake_2v2",
+    "tron", "connect4", "chess960",
     "othello", "go9", "gomoku", "artillery", "poker",
 }
 
@@ -160,7 +168,7 @@ def get_research_overview(game_id):
     }
 
 
-def submit_agent(game_id, name, code, contributor=None):
+def submit_agent(game_id, name, code, contributor=None, program_version_id=None):
     """Validate and submit an agent. Returns agent dict or error."""
     ok, err = validate_game_id(game_id)
     if not ok:
@@ -177,7 +185,8 @@ def submit_agent(game_id, name, code, contributor=None):
             return {"error": err}
 
     arena_get_or_create_research(game_id)
-    result = arena_submit_agent(game_id, name, code, contributor=contributor)
+    result = arena_submit_agent(game_id, name, code, contributor=contributor,
+                                program_version_id=program_version_id)
     if isinstance(result, str):
         return {"error": result}
 

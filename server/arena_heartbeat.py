@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-16 16:30
+# Date: 2026-03-16 23:30
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake + chess960 (Fischer Random). Game engines dispatched via _ACTIVE_GAMES.
 #   Uses ARENA_CLAUDE_KEY env var (Anthropic API key or OAuth token) for agent evolution.
@@ -135,7 +135,9 @@ except ImportError:
     _OthelloGameBase = None
 
 # Active arena games — both tournament + evolution loops iterate these
-_ACTIVE_GAMES = ['snake', 'chess960', 'othello']
+# Snake variants paused during snake variants implementation (2026-03-16)
+# Re-add 'snake' (and new variants) when ready to resume evolution
+_ACTIVE_GAMES = ['chess960', 'othello']
 
 
 def _run_snake_match(code_a, code_b):
@@ -455,8 +457,18 @@ Call create_agent with name and full Python code."""
     set_monitor_context(game_id=game_id, generation=generation)
     created = []
 
+    # Track program version for agent lineage
+    program_version_id = None
+    if program_data and program_data.get('versions'):
+        # Find the most recently applied version
+        for v in program_data['versions']:
+            if v.get('applied') == 1:
+                program_version_id = v['id']
+                break
+
     def tool_handler(name, args):
-        return _handle_tool(name, args, game_id, agents, created, contributor=model_label)
+        return _handle_tool(name, args, game_id, agents, created,
+                           contributor=model_label, program_version_id=program_version_id)
 
     try:
         run_tool_loop(
@@ -476,7 +488,8 @@ Call create_agent with name and full Python code."""
     return created
 
 
-def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_heartbeat'):
+def _handle_tool(name, args, game_id, agents, created_list,
+                  contributor='arena_heartbeat', program_version_id=None):
     """Handle tool calls during evolution. Supports all 8 tools."""
 
     if name == 'query_db':
@@ -504,7 +517,8 @@ def _handle_tool(name, args, game_id, agents, created_list, contributor='arena_h
         return agent.get('code', '(no code)')
 
     if name == 'create_agent':
-        return _tool_create_agent(args, game_id, agents, created_list, contributor=contributor)
+        return _tool_create_agent(args, game_id, agents, created_list,
+                                  contributor=contributor, program_version_id=program_version_id)
 
     if name == 'edit_current_agent':
         agent_name = args.get('name', '')
@@ -857,7 +871,8 @@ def _validate_code(game_id, code):
     return _validate_agent_code(code)
 
 
-def _tool_create_agent(args, game_id, agents, created_list, contributor='arena_heartbeat'):
+def _tool_create_agent(args, game_id, agents, created_list,
+                       contributor='arena_heartbeat', program_version_id=None):
     """Handle the create_agent tool call."""
     agent_name = args.get('name', '')
     code = args.get('code', '')
@@ -870,7 +885,8 @@ def _tool_create_agent(args, game_id, agents, created_list, contributor='arena_h
         return json.dumps({'error': f'Code validation failed: {error}'})
 
     try:
-        result = arena_submit_agent(game_id, agent_name, code, contributor=contributor)
+        result = arena_submit_agent(game_id, agent_name, code, contributor=contributor,
+                                    program_version_id=program_version_id)
         if isinstance(result, str):
             return json.dumps({'error': result})
         created_list.append(agent_name)

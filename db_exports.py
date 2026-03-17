@@ -1,9 +1,14 @@
 """Session export/import to self-contained per-session directories."""
+# Author: Claude Opus 4.6
+# Date: 2026-03-15 00:00
+# PURPOSE: Export/import sessions to self-contained per-session SQLite files.
+#   Uses _db() context manager for safe connection handling on source DB reads.
+# SRP/DRY check: Pass — export/import only
 import json
 import logging
 import sqlite3
 from pathlib import Path
-from db import _get_db, _DATA_DIR
+from db import _get_db, _db, _DATA_DIR
 
 log = logging.getLogger(__name__)
 
@@ -19,24 +24,22 @@ def _export_session_to_file(session_id: str) -> Path | None:
     Returns the directory path, or None on failure.
     """
     try:
-        conn = _get_db()
-        sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if not sess_row:
-            conn.close()
-            log.warning(f"_export_session_to_file: session {session_id} not found")
-            return None
-        sess = dict(sess_row)
+        with _db() as conn:
+            sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if not sess_row:
+                log.warning(f"_export_session_to_file: session {session_id} not found")
+                return None
+            sess = dict(sess_row)
 
-        actions = [dict(r) for r in conn.execute(
-            "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num", (session_id,),
-        ).fetchall()]
-        calls = [dict(r) for r in conn.execute(
-            "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY id", (session_id,),
-        ).fetchall()]
-        tool_execs = [dict(r) for r in conn.execute(
-            "SELECT * FROM tool_executions WHERE session_id = ? ORDER BY id", (session_id,),
-        ).fetchall()]
-        conn.close()
+            actions = [dict(r) for r in conn.execute(
+                "SELECT * FROM session_actions WHERE session_id = ? ORDER BY step_num", (session_id,),
+            ).fetchall()]
+            calls = [dict(r) for r in conn.execute(
+                "SELECT * FROM llm_calls WHERE session_id = ? ORDER BY id", (session_id,),
+            ).fetchall()]
+            tool_execs = [dict(r) for r in conn.execute(
+                "SELECT * FROM tool_executions WHERE session_id = ? ORDER BY id", (session_id,),
+            ).fetchall()]
 
         # Create directory
         out_dir = SESSIONS_DIR / session_id

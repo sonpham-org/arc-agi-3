@@ -1,10 +1,11 @@
 /* Author: Claude Opus 4.6
-   Date: 2026-03-16 22:00
+   Date: 2026-03-16 23:30
    PURPOSE: Styles for AutoResearch Arena — Agent vs Agent page. Three-column layout with
    side panels (agent settings/logs) and center panel (game selection/match canvas).
    Supports Code mode (built-in AI strategies) and Harness mode (LLM scaffolding).
    Includes arena observatory overlay for per-agent observability.
-   Auto Research: horizontal game tab bar at top, then three-column layout —
+   Auto Research: horizontal game tab bar at top with snake variant sub-tabs,
+   loading overlay on game switch, then three-column layout —
    center (program.md viewer + tabbed panel: Create New Agent / AI Heartbeat),
    mid (leaderboard, recent games), right (live tournament, ELO chart).
    Local config dialog, human vs AI play dialog.
@@ -697,6 +698,50 @@
   font-size: 8px; padding: 0 5px; border-radius: 6px;
   border: 1px solid var(--border); color: var(--text-dim); line-height: 1.6;
 }
+
+/* ── Snake variant sub-tabs inside game tab card ── */
+.ar-game-tab.has-subtabs {
+  flex-direction: column; align-items: stretch; gap: 6px; padding-bottom: 6px;
+}
+.ar-game-tab.has-subtabs .ar-game-tab-main {
+  display: flex; align-items: center; gap: 10px;
+}
+.ar-subtab-bar {
+  display: flex; gap: 0; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border); margin-left: 58px; /* align with text past preview */
+}
+.ar-subtab {
+  font-size: 9px; font-weight: 600; padding: 3px 10px;
+  cursor: pointer; color: var(--text-dim); background: var(--bg);
+  border-right: 1px solid var(--border); transition: all 0.12s;
+  white-space: nowrap;
+}
+.ar-subtab:last-child { border-right: none; }
+.ar-subtab:hover { color: var(--text); background: var(--surface2); }
+.ar-subtab.active {
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  font-weight: 700;
+}
+
+/* ── Loading Overlay ── */
+.ar-loading-overlay {
+  position: absolute; inset: 0; z-index: 50;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; backdrop-filter: blur(2px);
+}
+.ar-loading-spinner {
+  width: 32px; height: 32px; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: ar-spin 0.7s linear infinite;
+}
+@keyframes ar-spin { to { transform: rotate(360deg); } }
+.ar-loading-text {
+  font-size: 12px; color: var(--text-dim); font-weight: 600;
+}
+
+/* ar-content needs position:relative for overlay positioning */
+.ar-layout { position: relative; }
 
 /* ── Content area (3 columns row) ── */
 .ar-content {

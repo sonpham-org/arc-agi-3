@@ -50,6 +50,7 @@ PROVIDER_MIN_DELAY: dict[str, float] = {
     "cloudflare":  0.5,
     "copilot":     4.0,
     "ollama":      0.0,
+    "lmstudio":    0.0,
 }
 _provider_last_call: dict[str, float] = {}
 _throttle_lock = threading.Lock()
@@ -104,29 +105,30 @@ def _route_model_call(model_key: str, prompt: str, image_b64: str | None = None,
 
     img = image_b64 if info.get("capabilities", {}).get("image") else None
 
-    if provider == "gemini":
-        return _call_gemini(api_model, prompt, img,
-                            tools_enabled=tools_enabled,
-                            session_id=session_id,
-                            grid=grid, prev_grid=prev_grid,
-                            cached_content_name=cached_content_name,
-                            thinking_level=thinking_level,
-                            max_tokens=max_tokens)
-    if provider == "anthropic":
-        return _call_anthropic(api_model, prompt, img, max_tokens=max_tokens)
-    if provider == "openai":
-        return _call_openai(api_model, prompt, img, max_tokens=max_tokens)
-    if provider == "cloudflare":
-        return _call_cloudflare(api_model, prompt, img, max_tokens=max_tokens)
-    if provider == "copilot":
-        return _call_copilot(api_model, prompt, img)
-    if provider == "ollama":
-        return _call_ollama(api_model, prompt, img)
-    if provider == "lmstudio":
-        url = "http://localhost:1234/v1/chat/completions"
-        return _call_openai_compatible(url, "no-key-needed", api_model, prompt, img, max_tokens=max_tokens)
+    # Provider dispatch — direct handlers for providers with unique call signatures
+    PROVIDER_DISPATCH = {
+        "gemini": lambda: _call_gemini(api_model, prompt, img,
+                                       tools_enabled=tools_enabled,
+                                       session_id=session_id,
+                                       grid=grid, prev_grid=prev_grid,
+                                       cached_content_name=cached_content_name,
+                                       thinking_level=thinking_level,
+                                       max_tokens=max_tokens),
+        "anthropic": lambda: _call_anthropic(api_model, prompt, img, max_tokens=max_tokens),
+        "openai": lambda: _call_openai(api_model, prompt, img, max_tokens=max_tokens),
+        "cloudflare": lambda: _call_cloudflare(api_model, prompt, img, max_tokens=max_tokens),
+        "copilot": lambda: _call_copilot(api_model, prompt, img),
+        "ollama": lambda: _call_ollama(api_model, prompt, img),
+        "lmstudio": lambda: _call_openai_compatible(
+            "http://localhost:1234/v1/chat/completions", "no-key-needed",
+            api_model, prompt, img, max_tokens=max_tokens),
+    }
 
-    # OpenAI-compatible (Groq, Mistral, HuggingFace)
+    handler = PROVIDER_DISPATCH.get(provider)
+    if handler:
+        return handler()
+
+    # Fallback: OpenAI-compatible (Groq, Mistral, HuggingFace)
     api_key = os.environ.get(info.get("env_key", ""), "")
     url = info.get("url", "")
     return _call_openai_compatible(url, api_key, api_model, prompt, None, max_tokens=max_tokens)

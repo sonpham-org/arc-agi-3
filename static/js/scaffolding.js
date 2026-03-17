@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6 (1M context)
-// Date: 2026-03-15 18:00
+// Date: 2026-03-16 00:00
 // PURPOSE: Core scaffolding infrastructure for ARC-AGI-3 web UI. Handles API mode
 //   switching (local vs official), model discovery (loadModels + LM Studio via direct browser fetch),
 //   model select population, BYOK key management, LLM call routing (callLLM → _callLLMInner
@@ -284,7 +284,7 @@ function _populateAllModelSelects() {
         if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] localStorage restore RLM settings error:', e.message); }
 
   // Populate Three-System model selects if they exist
   for (const tsSelId of ['sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect']) {
@@ -309,7 +309,7 @@ function _populateAllModelSelects() {
         if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] localStorage restore Three-System settings error:', e.message); }
 
   // Populate Two-System model selects if they exist
   for (const tsSelId of ['sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect']) {
@@ -333,7 +333,7 @@ function _populateAllModelSelects() {
         if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] localStorage restore Two-System settings error:', e.message); }
 
   // Populate World Model harness model selects if they exist
   for (const wmSelId of ['sf_wm_agentModelSelect', 'sf_wm_wmModelSelect']) {
@@ -357,7 +357,7 @@ function _populateAllModelSelects() {
         if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] localStorage restore World Model settings error:', e.message); }
 
   // Populate Agent Spawn model selects if they exist
   for (const asSelId of ['sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect']) {
@@ -381,7 +381,7 @@ function _populateAllModelSelects() {
         if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] localStorage restore Agent Spawn settings error:', e.message); }
 
   // Populate RGB model selects if they exist
   for (const rgbSelId of ['sf_rgb_analyzerModelSelect']) {
@@ -601,7 +601,7 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
             const chunk = JSON.parse(line.slice(6));
             const text = chunk.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || '';
             if (text) { accumulated += text; onChunk(accumulated); }
-          } catch {}
+          } catch (e) { console.warn('[scaffolding] Gemini SSE JSON parse error:', e.message); }
         }
       }
       return accumulated;
@@ -868,7 +868,7 @@ async function copilotPollAuth() {
       copilotPollTimer = setInterval(() => copilotPollAuth(), (data.interval || 10) * 1000);
     }
     // 'pending' → keep polling
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] Copilot poll auth error:', e.message); }
 }
 
 async function checkCopilotStatus() {
@@ -879,6 +879,6 @@ async function checkCopilotStatus() {
       document.getElementById('copilotNotAuth').style.display = 'none';
       document.getElementById('copilotAuthed').style.display = 'block';
     }
-  } catch {}
+  } catch (e) { console.warn('[scaffolding] Copilot status check error:', e.message); }
 }
 

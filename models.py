@@ -13,10 +13,7 @@
 #   LMSTUDIO_CAPABILITIES intentionally duplicated client-side (see CLAUDE.md architecture)
 """Model registry and constants for ARC-AGI-3."""
 
-SYSTEM_MSG = (
-    "You are an expert puzzle-solving AI agent. Analyse game grids and output "
-    "ONLY valid JSON — no markdown, no explanation outside JSON."
-)
+from constants import SYSTEM_MSG  # Single source of truth — see constants.py
 
 THINKING_BUDGETS = {
     "off": 0,

@@ -1,5 +1,5 @@
 # Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-16 19:00
+# Date: 2026-03-16 23:45
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
 #   session persistence (save/resume/branch via SQLite), game step proxying, model registry
 #   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
@@ -35,7 +35,7 @@ from typing import Any, Optional
 
 import httpx as _httpx
 from dotenv import load_dotenv
-from flask import Flask, Response, abort, jsonify, make_response, render_template, request, session as flask_session
+from flask import Flask, Response, abort, jsonify, make_response, redirect, render_template, request, session as flask_session
 
 import arc_agi
 from arcengine import GameAction, GameState
@@ -105,22 +105,16 @@ app.logger.setLevel(logging.INFO)
 # NOTE: Route handlers remain in app.py for now (Phase 11 extraction).
 # Blueprints registered below but empty. Handlers will be moved in Phase 11.
 
-try:
-    from server.auth_routes import auth_bp
-    from server.game_routes import game_bp
-    from server.session_routes import session_bp
-    from server.social_routes import social_bp
-    from server.llm_admin_routes import llm_admin_bp
-    # app.register_blueprint(auth_bp)
-    # app.register_blueprint(game_bp)
-    # app.register_blueprint(session_bp)
-    # app.register_blueprint(social_bp)
-    # app.register_blueprint(llm_admin_bp)
-except ImportError as e:
-    app.logger.warning(f'Blueprint registration skipped: {e}')
+# NOTE: Blueprint modules exist but route handlers remain in app.py.
+# Blueprint migration was deferred — handlers will be moved if/when needed.
 
 
 DEV_SECRET = os.environ.get("DEV_SECRET", "arc-dev-2026")
+
+# ── APP_MODE: observatory (arc3.sonpham.net) or arena (arena.sonpham.net) ──
+APP_MODE = os.environ.get("APP_MODE", "observatory")
+OBSERVATORY_URL = os.environ.get("OBSERVATORY_URL", "/obs")
+ARENA_URL = os.environ.get("ARENA_URL", "/arena")
 
 # Will be set by CLI args; default to staging
 _server_mode = "staging"
@@ -180,12 +174,6 @@ def game_ab():
     return render_template("ab01.html")
 
 
-@app.route("/arena")
-def arena():
-    mode = get_mode()
-    return render_template("arena.html", static_v=_STATIC_VERSION, mode=mode, features=get_enabled_features())
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # ARENA AUTO RESEARCH API
 # ═══════════════════════════════════════════════════════════════════════════
@@ -232,6 +220,54 @@ def arena_agent_detail(game_id, agent_id):
     return jsonify(agent)
 
 
+# Cache compiled agent functions for human-vs-AI play
+_agent_fn_cache = {}
+
+@app.route("/api/arena/agent-move", methods=["POST"])
+def arena_agent_move():
+    """Execute an agent's get_move() with the given game state. Used by human-vs-AI play."""
+    from server.arena_heartbeat import _load_agent_fn
+
+    data = request.get_json(force=True)
+    agent_id = data.get("agent_id")
+    game_id = data.get("game_id")
+    state = data.get("state")
+    code = data.get("code")
+
+    if not game_id or state is None:
+        return jsonify({"error": "Missing game_id or state"}), 400
+    if not agent_id and not code:
+        return jsonify({"error": "Missing agent_id or code"}), 400
+
+    fn = None
+    if agent_id:
+        cache_key = f"{game_id}:{agent_id}"
+        fn = _agent_fn_cache.get(cache_key)
+        if not fn:
+            agent = _ar_get_agent(game_id, agent_id)
+            if not agent:
+                return jsonify({"error": "Agent not found"}), 404
+            agent_code = agent.get("code", "")
+            if not agent_code:
+                return jsonify({"error": "Agent has no code"}), 400
+            fn = _load_agent_fn(agent_code)
+            if not fn:
+                return jsonify({"error": "Failed to compile agent code"}), 400
+            _agent_fn_cache[cache_key] = fn
+            if len(_agent_fn_cache) > 100:
+                _agent_fn_cache.pop(next(iter(_agent_fn_cache)), None)
+    else:
+        fn = _load_agent_fn(code)
+        if not fn:
+            return jsonify({"error": "Failed to compile agent code"}), 400
+
+    try:
+        move = fn(state)
+        return jsonify({"move": move})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @app.route("/api/arena/agents/<game_id>/<int:agent_id>/games")
 def arena_agent_profile_games(game_id, agent_id):
     agent = _ar_get_agent(game_id, agent_id)
@@ -250,7 +286,9 @@ def arena_agent_submit(game_id):
     user = get_current_user()
     if user:
         contributor = contributor or user.get("id")
-    result = _ar_svc.submit_agent(game_id, name, code, contributor=contributor)
+    program_version_id = data.get("program_version_id")
+    result = _ar_svc.submit_agent(game_id, name, code, contributor=contributor,
+                                   program_version_id=program_version_id)
     if isinstance(result, dict) and "error" in result:
         return jsonify(result), 400
     return jsonify(result), 201
@@ -430,7 +468,17 @@ def _require_arena_admin():
 
 
 @app.route("/arena/monitor")
-def arena_monitor_page():
+def arena_monitor_legacy():
+    """Legacy path — redirect to /monitor on arena service, or cross-link."""
+    if APP_MODE == "arena":
+        qs = f"?key={request.args['key']}" if request.args.get("key") else ""
+        return redirect(f"/monitor{qs}", code=302)
+    key = request.args.get("key", "")
+    return redirect(f"{ARENA_URL}/monitor{'?key=' + key if key else ''}", code=302)
+
+
+@app.route("/monitor")
+def monitor_page():
     auth_err = _require_arena_admin()
     if auth_err:
         return auth_err
@@ -475,15 +523,8 @@ def arena_human_play(game_id):
     return jsonify(result or {"ok": True})
 
 
-@app.route("/")
-def root_redirect():
-    from flask import redirect
-    return redirect("/obs#human", code=302)
-
-
-@app.route("/obs")
-@bot_protection
-def index():
+def _render_observatory():
+    """Render the Observatory (index.html) page."""
     mode = get_mode()
     features = get_enabled_features()
     ts_key = TURNSTILE_SITE_KEY if mode == "prod" else ""
@@ -493,7 +534,43 @@ def index():
                            umami_url=UMAMI_URL, umami_website_id=UMAMI_WEBSITE_ID,
                            google_client_id=GOOGLE_CLIENT_ID,
                            prompts=_load_prompts(),
-                           static_v=_STATIC_VERSION)
+                           static_v=_STATIC_VERSION,
+                           arena_url=ARENA_URL)
+
+
+def _render_arena():
+    """Render the Arena (arena.html) page."""
+    mode = get_mode()
+    return render_template("arena.html", static_v=_STATIC_VERSION, mode=mode,
+                           features=get_enabled_features(),
+                           google_client_id=GOOGLE_CLIENT_ID,
+                           observatory_url=OBSERVATORY_URL)
+
+
+@app.route("/")
+@bot_protection
+def root_page():
+    """Serve the primary page based on APP_MODE."""
+    if APP_MODE == "arena":
+        return _render_arena()
+    return _render_observatory()
+
+
+@app.route("/obs")
+@bot_protection
+def obs_alias():
+    """Temporary alias — redirects based on APP_MODE."""
+    if APP_MODE == "observatory":
+        return redirect("/#human", code=302)
+    return redirect(OBSERVATORY_URL, code=302)
+
+
+@app.route("/arena")
+def arena_alias():
+    """Temporary alias — redirects based on APP_MODE."""
+    if APP_MODE == "arena":
+        return redirect("/", code=302)
+    return redirect(ARENA_URL, code=302)
 
 
 @app.route("/api/turnstile/verify", methods=["POST"])
@@ -1967,11 +2044,17 @@ def batch_status(batch_id):
 # ARENA HEARTBEAT — start background thread for server-side evolution
 # ═══════════════════════════════════════════════════════════════════════════
 
-try:
-    from server.arena_heartbeat import start_arena_heartbeat
-    start_arena_heartbeat()
-except Exception as _hb_err:
-    print(f"[arena] Heartbeat start failed (non-fatal): {_hb_err}")
+# Heartbeat only runs on the arena service to avoid duplicate evolution/ELO races
+if APP_MODE == "arena":
+    # HEARTBEAT DISABLED — paused during snake variants implementation (2026-03-16)
+    # try:
+    #     from server.arena_heartbeat import start_arena_heartbeat
+    #     start_arena_heartbeat()
+    # except Exception as _hb_err:
+    #     print(f"[arena] Heartbeat start failed (non-fatal): {_hb_err}")
+    print("[arena] Heartbeat auto-start DISABLED — re-enable after snake variants ship")
+else:
+    print(f"[app] APP_MODE={APP_MODE} — heartbeat skipped (arena-only)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

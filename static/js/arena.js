@@ -1,12 +1,13 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-16 22:00
+// Date: 2026-03-16 23:30
 // PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
 //   Supports Code mode (built-in AI) and Harness mode (LLM scaffolding settings).
 //   Lower panel uses tabs: "Create New Agent" (BYOK + program.md editor + spawn)
 //   and "AI Heartbeat" (community + AI chat, stored as heartbeat comments).
-//   Implements 9 games: Snake Battle, Tron, Connect Four, Fischer Random Chess,
+//   Implements 12 games: Snake Battle, Snake Random Maps, Snake Battle Royale (4P),
+//   Snake 2v2 Teams (4P), Tron, Connect Four, Fischer Random Chess,
 //   Othello, Go 9x9, Gomoku, Artillery, Poker. Each has engine, AI, rendering, match runner.
 //   Dispatcher pattern: ARENA_GAMES entries have run/render/preview functions.
 //   Arena Observatory: per-agent observability overlay (Agent A obs LEFT, Agent B obs RIGHT).
@@ -298,6 +299,988 @@ const AI_STRATEGIES = {
   cautious:   { name: 'Cautious',   fn: cautiousAI,   desc: 'Prefers open spaces, avoids traps',
                 personality: { aggression: 10, caution: 95, greed: 40 } },
 };
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Snake: Random Maps Game Engine
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+class SnakeRandomGame extends SnakeGame {
+  constructor(config = {}) {
+    super(config);
+    this.walls = new Set();
+    this._generateWalls();
+    // Re-spawn food since walls may overlap original food position
+    this.food = this._spawnFood();
+  }
+
+  _generateWalls() {
+    const seed = typeof this.seed === 'function' ? this.seed() : this.seed;
+    let rng = mulberry32(seed);
+    let attempt = 0;
+    const maxAttempts = 10;
+
+    while (attempt < maxAttempts) {
+      const candidateWalls = new Set();
+      const clusterCount = 4 + Math.floor(rng() * 5); // 4-8 clusters
+
+      for (let c = 0; c < clusterCount; c++) {
+        // Pick random interior point (avoid border and spawn zones)
+        const cx = 3 + Math.floor(rng() * (this.W - 6));
+        const cy = 3 + Math.floor(rng() * (this.H - 6));
+        const shapeType = rng() < 0.5 ? 'L' : 'T';
+        const cells = this._generateCluster(cx, cy, shapeType, rng);
+        for (const cell of cells) candidateWalls.add(cell);
+      }
+
+      // Validate: flood-fill from both spawn points must reach >60% of interior
+      const interiorSize = (this.W - 2) * (this.H - 2);
+      const threshold = Math.floor(interiorSize * 0.6);
+      const wallSet = new Set(candidateWalls);
+
+      const fillA = this._floodFillWalls(this.snakeA.body[0][0], this.snakeA.body[0][1], wallSet);
+      const fillB = this._floodFillWalls(this.snakeB.body[0][0], this.snakeB.body[0][1], wallSet);
+
+      if (fillA >= threshold && fillB >= threshold) {
+        this.walls = wallSet;
+        return;
+      }
+
+      attempt++;
+      // Increment seed for retry
+      rng = mulberry32(seed + attempt);
+    }
+
+    // Fallback: no extra walls (just borders from parent class)
+    this.walls = new Set();
+  }
+
+  _generateCluster(cx, cy, shapeType, rng) {
+    const cells = [];
+    const armLen = 2 + Math.floor(rng() * 4); // 2-5 arm length -> 3-7 total cells
+    const dir1 = Math.floor(rng() * 4); // primary direction
+    const dir2 = (dir1 + 1 + Math.floor(rng() * 2)) % 4; // perpendicular-ish
+
+    // Main arm
+    for (let i = 0; i < armLen; i++) {
+      const nx = cx + DX[dir1] * i;
+      const ny = cy + DY[dir1] * i;
+      if (nx > 0 && nx < this.W - 1 && ny > 0 && ny < this.H - 1) {
+        cells.push(`${nx},${ny}`);
+      }
+    }
+
+    // Branch arm (L or T shape)
+    const branchStart = Math.floor(rng() * Math.max(1, armLen - 1));
+    const bx = cx + DX[dir1] * branchStart;
+    const by = cy + DY[dir1] * branchStart;
+    const branchLen = 1 + Math.floor(rng() * 3); // 1-3
+
+    for (let i = 1; i <= branchLen; i++) {
+      const nx = bx + DX[dir2] * i;
+      const ny = by + DY[dir2] * i;
+      if (nx > 0 && nx < this.W - 1 && ny > 0 && ny < this.H - 1) {
+        cells.push(`${nx},${ny}`);
+      }
+    }
+
+    if (shapeType === 'T') {
+      // Add opposite branch for T-shape
+      const oppDir = OPPOSITE[dir2];
+      for (let i = 1; i <= branchLen; i++) {
+        const nx = bx + DX[oppDir] * i;
+        const ny = by + DY[oppDir] * i;
+        if (nx > 0 && nx < this.W - 1 && ny > 0 && ny < this.H - 1) {
+          cells.push(`${nx},${ny}`);
+        }
+      }
+    }
+
+    return cells;
+  }
+
+  _floodFillWalls(startX, startY, wallSet) {
+    let count = 0;
+    const visited = new Set([`${startX},${startY}`]);
+    const queue = [[startX, startY]];
+    while (queue.length) {
+      const [cx, cy] = queue.shift();
+      count++;
+      for (let d = 0; d < 4; d++) {
+        const nx = cx + DX[d], ny = cy + DY[d];
+        const key = `${nx},${ny}`;
+        if (nx > 0 && nx < this.W - 1 && ny > 0 && ny < this.H - 1 &&
+            !visited.has(key) && !wallSet.has(key)) {
+          visited.add(key);
+          queue.push([nx, ny]);
+        }
+      }
+    }
+    return count;
+  }
+
+  _spawnFood() {
+    const occupied = new Set();
+    for (const [x, y] of this.snakeA.body) occupied.add(`${x},${y}`);
+    for (const [x, y] of this.snakeB.body) occupied.add(`${x},${y}`);
+    const walls = this.walls || new Set(); // walls may not exist during super() construction
+    const cands = [];
+    for (let y = 1; y < this.H - 1; y++)
+      for (let x = 1; x < this.W - 1; x++)
+        if (!occupied.has(`${x},${y}`) && !walls.has(`${x},${y}`)) cands.push([x, y]);
+    if (!cands.length) return null;
+    return cands[Math.floor(this.rng() * cands.length)];
+  }
+
+  getGrid() {
+    const grid = super.getGrid();
+    // Draw walls on top of base grid
+    for (const key of this.walls) {
+      const [x, y] = key.split(',').map(Number);
+      grid[y][x] = C.WALL;
+    }
+    // Redraw snakes on top of walls (super may have drawn them before wall overlay)
+    const drawSnake = (snake, headColor, bodyColor) => {
+      if (!snake.alive) return;
+      for (let i = snake.body.length - 1; i >= 1; i--)
+        grid[snake.body[i][1]][snake.body[i][0]] = bodyColor;
+      grid[snake.body[0][1]][snake.body[0][0]] = headColor;
+    };
+    drawSnake(this.snakeA, C.A_HEAD, C.A_BODY);
+    drawSnake(this.snakeB, C.B_HEAD, C.B_BODY);
+    if (this.food) grid[this.food[1]][this.food[0]] = C.FOOD;
+    return grid;
+  }
+
+  getAIState() {
+    const state = super.getAIState();
+    state.walls = [...this.walls].map(k => k.split(',').map(Number));
+    return state;
+  }
+
+  step(moveA, moveB) {
+    if (this.over) return;
+    this.turn++;
+
+    // Prevent 180-degree reversal
+    if (moveA === OPPOSITE[this.snakeA.dir]) moveA = this.snakeA.dir;
+    if (moveB === OPPOSITE[this.snakeB.dir]) moveB = this.snakeB.dir;
+    this.snakeA.dir = moveA;
+    this.snakeB.dir = moveB;
+
+    const [ax, ay] = this.snakeA.body[0];
+    const nax = ax + DX[moveA], nay = ay + DY[moveA];
+    const [bx, by] = this.snakeB.body[0];
+    const nbx = bx + DX[moveB], nby = by + DY[moveB];
+
+    let aDead = false, bDead = false;
+
+    // Wall collision (border)
+    if (nax <= 0 || nax >= this.W - 1 || nay <= 0 || nay >= this.H - 1) aDead = true;
+    if (nbx <= 0 || nbx >= this.W - 1 || nby <= 0 || nby >= this.H - 1) bDead = true;
+
+    // Interior wall collision
+    if (this.walls.has(`${nax},${nay}`)) aDead = true;
+    if (this.walls.has(`${nbx},${nby}`)) bDead = true;
+
+    // Head-on collision
+    if (nax === nbx && nay === nby) { aDead = true; bDead = true; }
+
+    // Body collisions (self + opponent)
+    const inBody = (x, y, body) => body.some(([px, py]) => px === x && py === y);
+    if (inBody(nax, nay, this.snakeA.body)) aDead = true;
+    if (inBody(nax, nay, this.snakeB.body)) aDead = true;
+    if (inBody(nbx, nby, this.snakeB.body)) bDead = true;
+    if (inBody(nbx, nby, this.snakeA.body)) bDead = true;
+
+    if (aDead) this.snakeA.alive = false;
+    if (bDead) this.snakeB.alive = false;
+
+    let ateA = false, ateB = false;
+    if (this.snakeA.alive) {
+      this.snakeA.body.unshift([nax, nay]);
+      if (this.food && nax === this.food[0] && nay === this.food[1]) {
+        ateA = true; this.snakeA.score++;
+      } else this.snakeA.body.pop();
+    }
+    if (this.snakeB.alive) {
+      this.snakeB.body.unshift([nbx, nby]);
+      if (this.food && nbx === this.food[0] && nby === this.food[1]) {
+        ateB = true; this.snakeB.score++;
+      } else this.snakeB.body.pop();
+    }
+    if (ateA || ateB) this.food = this._spawnFood();
+
+    // Determine winner
+    if (!this.snakeA.alive && !this.snakeB.alive) { this.over = true; this.winner = 'draw'; }
+    else if (!this.snakeA.alive) { this.over = true; this.winner = 'B'; }
+    else if (!this.snakeB.alive) { this.over = true; this.winner = 'A'; }
+    else if (this.turn >= this.maxTurns) {
+      this.over = true;
+      if (this.snakeA.score > this.snakeB.score) this.winner = 'A';
+      else if (this.snakeB.score > this.snakeA.score) this.winner = 'B';
+      else this.winner = 'draw';
+    }
+  }
+}
+
+
+/* ── Snake Random Maps: AI helpers ─────────────────────────────────────── */
+
+function isSafeRandom(x, y, state, me, other) {
+  if (x <= 0 || x >= state.width - 1 || y <= 0 || y >= state.height - 1) return false;
+  const wallSet = state._wallSet || (state._wallSet = new Set(
+    (state.walls || []).map(([wx, wy]) => `${wx},${wy}`)
+  ));
+  if (wallSet.has(`${x},${y}`)) return false;
+  for (const [bx, by] of me.body) if (bx === x && by === y) return false;
+  for (const [bx, by] of other.body) if (bx === x && by === y) return false;
+  return true;
+}
+
+function floodFillRandom(startX, startY, state, me, other, limit) {
+  let count = 0;
+  const visited = new Set([`${startX},${startY}`]);
+  const queue = [[startX, startY]];
+  while (queue.length && count < limit) {
+    const [cx, cy] = queue.shift();
+    count++;
+    for (let d = 0; d < 4; d++) {
+      const nx = cx + DX[d], ny = cy + DY[d];
+      const key = `${nx},${ny}`;
+      if (!visited.has(key) && isSafeRandom(nx, ny, state, me, other)) {
+        visited.add(key); queue.push([nx, ny]);
+      }
+    }
+  }
+  return count;
+}
+
+function evaluateMovesRandom(state, player) {
+  const me = player === 'A' ? state.snakeA : state.snakeB;
+  const other = player === 'A' ? state.snakeB : state.snakeA;
+  const [hx, hy] = me.head;
+  const moves = [];
+  for (let d = 0; d < 4; d++) {
+    const nx = hx + DX[d], ny = hy + DY[d];
+    const safe = isSafeRandom(nx, ny, state, me, other);
+    const foodDist = state.food ? manhattan([nx, ny], state.food) : 999;
+    const oppDist = manhattan([nx, ny], other.head);
+    const space = safe ? floodFillRandom(nx, ny, state, me, other, 40) : 0;
+    moves.push({ dir: d, safe, foodDist, oppDist, space, nx, ny });
+  }
+  return { moves, me, other };
+}
+
+function greedyAIRandom(state, player) {
+  const { moves, me } = evaluateMovesRandom(state, player);
+  const lines = moves.map(m =>
+    `  ${DIR_NAME[m.dir]}: ${m.safe ? `safe, food ${m.foodDist}` : 'BLOCKED'}`
+  );
+  const safe = moves.filter(m => m.safe);
+  if (!safe.length) {
+    return { move: me.dir, reasoning: lines.join('\n') + `\nTrapped! Going ${DIR_NAME[me.dir]}` };
+  }
+  safe.sort((a, b) => a.foodDist - b.foodDist);
+  return {
+    move: safe[0].dir,
+    reasoning: lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (nearest food)`,
+  };
+}
+
+function aggressiveAIRandom(state, player) {
+  const { moves, me, other } = evaluateMovesRandom(state, player);
+  const lines = moves.map(m =>
+    `  ${DIR_NAME[m.dir]}: ${m.safe ? `safe, food ${m.foodDist}, opp ${m.oppDist}` : 'BLOCKED'}`
+  );
+  const safe = moves.filter(m => m.safe);
+  if (!safe.length) {
+    return { move: me.dir, reasoning: lines.join('\n') + `\nTrapped!` };
+  }
+  const hunt = me.length > other.length;
+  if (hunt) {
+    safe.sort((a, b) => a.oppDist - b.oppDist);
+    return {
+      move: safe[0].dir,
+      reasoning: `HUNT mode (len ${me.length} vs ${other.length})\n` +
+        lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (chase opponent)`,
+    };
+  }
+  safe.sort((a, b) => a.foodDist - b.foodDist);
+  return {
+    move: safe[0].dir,
+    reasoning: `FEED mode (len ${me.length} vs ${other.length})\n` +
+      lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (nearest food)`,
+  };
+}
+
+function cautiousAIRandom(state, player) {
+  const { moves, me } = evaluateMovesRandom(state, player);
+  const lines = moves.map(m =>
+    `  ${DIR_NAME[m.dir]}: ${m.safe ? `safe, food ${m.foodDist}, space ${m.space}` : 'BLOCKED'}`
+  );
+  const safe = moves.filter(m => m.safe);
+  if (!safe.length) {
+    return { move: me.dir, reasoning: lines.join('\n') + `\nTrapped!` };
+  }
+  safe.sort((a, b) => {
+    if (b.space !== a.space) return b.space - a.space;
+    return a.foodDist - b.foodDist;
+  });
+  return {
+    move: safe[0].dir,
+    reasoning: `CAUTIOUS (prefer space)\n` +
+      lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (space ${safe[0].space})`,
+  };
+}
+
+const AI_STRATEGIES_RANDOM = {
+  greedy:     { name: 'Greedy',     fn: greedyAIRandom,     desc: 'Chases food, avoids walls',
+                personality: { aggression: 20, caution: 40, greed: 90 } },
+  aggressive: { name: 'Aggressive', fn: aggressiveAIRandom, desc: 'Hunts when longer, navigates walls',
+                personality: { aggression: 80, caution: 30, greed: 50 } },
+  cautious:   { name: 'Cautious',   fn: cautiousAIRandom,   desc: 'Prefers open spaces around walls',
+                personality: { aggression: 10, caution: 95, greed: 40 } },
+};
+
+
+/* ── Snake Random Maps: Match Runner ───────────────────────────────────── */
+
+function runSnakeRandomMatch(config, strategyA, strategyB) {
+  const resolvedSeed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
+  const game = new SnakeRandomGame({ ...config, seed: resolvedSeed });
+  const fnA = AI_STRATEGIES_RANDOM[strategyA].fn;
+  const fnB = AI_STRATEGIES_RANDOM[strategyB].fn;
+  const history = [];
+
+  const snapSnake = s => ({ alive: s.alive, score: s.score, body: s.body.map(p => [...p]) });
+
+  history.push({
+    turn: 0, grid: game.getGrid(),
+    snakeA: snapSnake(game.snakeA), snakeB: snapSnake(game.snakeB),
+    food: game.food ? [...game.food] : null,
+    walls: [...game.walls].map(k => k.split(',').map(Number)),
+    agentA: null, agentB: null, winner: null,
+  });
+
+  while (!game.over) {
+    const aiState = game.getAIState();
+    const resultA = fnA(aiState, 'A');
+    const resultB = fnB(aiState, 'B');
+    game.step(resultA.move, resultB.move);
+    history.push({
+      turn: game.turn, grid: game.getGrid(),
+      snakeA: snapSnake(game.snakeA), snakeB: snapSnake(game.snakeB),
+      food: game.food ? [...game.food] : null,
+      walls: [...game.walls].map(k => k.split(',').map(Number)),
+      agentA: { move: DIR_NAME[resultA.move], reasoning: resultA.reasoning },
+      agentB: { move: DIR_NAME[resultB.move], reasoning: resultB.reasoning },
+      winner: game.winner,
+    });
+  }
+  return history;
+}
+
+
+/* ── Snake Random Maps: Rendering ──────────────────────────────────────── */
+
+function renderSnakeRandomFrame(ctx, frame, size) {
+  // Grid already includes walls as C.WALL cells
+  const grid = frame.grid;
+  const gridH = grid.length, gridW = grid[0].length;
+  const cellW = size / gridW, cellH = size / gridH;
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++) {
+      ctx.fillStyle = ARC3[grid[y][x]];
+      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+    }
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= gridW; x++) {
+    ctx.beginPath(); ctx.moveTo(x*cellW, 0); ctx.lineTo(x*cellW, size); ctx.stroke();
+  }
+  for (let y = 0; y <= gridH; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y*cellH); ctx.lineTo(size, y*cellH); ctx.stroke();
+  }
+}
+
+function renderSnakeRandomPreview(canvas, config) {
+  const resolvedSeed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
+  const g = new SnakeRandomGame({ ...config, seed: resolvedSeed });
+  const grid = g.getGrid();
+  const size = 120;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cellW = size / g.W, cellH = size / g.H;
+  for (let y = 0; y < g.H; y++)
+    for (let x = 0; x < g.W; x++) {
+      ctx.fillStyle = ARC3[grid[y][x]];
+      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+    }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Snake: 4-Player Game Engine (Battle Royale + 2v2)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const C4P = {
+  BG: 5, WALL: 3, FOOD: 11,
+  A_HEAD: 9,  A_BODY: 10,  // Blue head, LightBlue body
+  B_HEAD: 8,  B_BODY: 12,  // Red head, Orange body
+  C_HEAD: 14, C_BODY: 1,   // Green head, LightGray body
+  D_HEAD: 15, D_BODY: 7,   // Purple head, LightMagenta body
+  DEAD: 2,                  // Gray for dead snakes
+};
+
+const PLAYER_LABELS_4P = ['A', 'B', 'C', 'D'];
+const PLAYER_COLORS_4P = [
+  { head: C4P.A_HEAD, body: C4P.A_BODY },
+  { head: C4P.B_HEAD, body: C4P.B_BODY },
+  { head: C4P.C_HEAD, body: C4P.C_BODY },
+  { head: C4P.D_HEAD, body: C4P.D_BODY },
+];
+
+class SnakeGame4P {
+  constructor(config = {}) {
+    this.W = config.width || (config.mode === '2v2' ? 24 : 30);
+    this.H = config.height || (config.mode === '2v2' ? 24 : 30);
+    this.maxTurns = config.maxTurns || (config.mode === '2v2' ? 300 : 400);
+    this.mode = config.mode || 'royale';
+    const resolvedSeed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
+    this.seed = resolvedSeed;
+    this.rng = mulberry32(this.seed);
+    this.turn = 0;
+    this.over = false;
+    this.winner = null;
+
+    // Spawn positions: offset 4 from corners
+    this.snakes = [
+      { // A: top-left
+        body: [[4, 4], [3, 4], [2, 4]],
+        dir: DIR.RIGHT, alive: true, score: 0,
+      },
+      { // B: top-right
+        body: [[this.W - 5, 4], [this.W - 4, 4], [this.W - 3, 4]],
+        dir: DIR.LEFT, alive: true, score: 0,
+      },
+      { // C: bottom-left
+        body: [[4, this.H - 5], [3, this.H - 5], [2, this.H - 5]],
+        dir: DIR.RIGHT, alive: true, score: 0,
+      },
+      { // D: bottom-right
+        body: [[this.W - 5, this.H - 5], [this.W - 4, this.H - 5], [this.W - 3, this.H - 5]],
+        dir: DIR.LEFT, alive: true, score: 0,
+      },
+    ];
+
+    // Initial food: 12 for 30x30 royale, 10 for 24x24 2v2
+    const foodCount = this.W >= 30 ? 12 : 10;
+    this.foodList = [];
+    for (let i = 0; i < foodCount; i++) {
+      const f = this._spawnOneFood();
+      if (f) this.foodList.push(f);
+    }
+  }
+
+  _isOccupied(x, y) {
+    for (const s of this.snakes) {
+      for (const [bx, by] of s.body) {
+        if (bx === x && by === y) return true;
+      }
+    }
+    for (const [fx, fy] of this.foodList) {
+      if (fx === x && fy === y) return true;
+    }
+    return false;
+  }
+
+  _spawnOneFood() {
+    const cands = [];
+    for (let y = 1; y < this.H - 1; y++)
+      for (let x = 1; x < this.W - 1; x++)
+        if (!this._isOccupied(x, y)) cands.push([x, y]);
+    if (!cands.length) return null;
+    return cands[Math.floor(this.rng() * cands.length)];
+  }
+
+  getGrid() {
+    const grid = Array.from({ length: this.H }, () => Array(this.W).fill(C4P.BG));
+    // Border walls
+    for (let x = 0; x < this.W; x++) { grid[0][x] = C4P.WALL; grid[this.H - 1][x] = C4P.WALL; }
+    for (let y = 0; y < this.H; y++) { grid[y][0] = C4P.WALL; grid[y][this.W - 1] = C4P.WALL; }
+    // Food
+    for (const [fx, fy] of this.foodList) grid[fy][fx] = C4P.FOOD;
+    // Draw snakes (dead snakes in gray, alive in their colors)
+    for (let i = 0; i < 4; i++) {
+      const s = this.snakes[i];
+      const colors = PLAYER_COLORS_4P[i];
+      if (!s.alive) {
+        // Draw dead snake body in gray
+        for (let j = s.body.length - 1; j >= 0; j--)
+          grid[s.body[j][1]][s.body[j][0]] = C4P.DEAD;
+        continue;
+      }
+      for (let j = s.body.length - 1; j >= 1; j--)
+        grid[s.body[j][1]][s.body[j][0]] = colors.body;
+      grid[s.body[0][1]][s.body[0][0]] = colors.head;
+    }
+    return grid;
+  }
+
+  getAIState(playerIdx) {
+    const snap = s => ({
+      head: [...s.body[0]], body: s.body.map(p => [...p]),
+      dir: s.dir, alive: s.alive, score: s.score, length: s.body.length,
+    });
+    return {
+      width: this.W, height: this.H, turn: this.turn, maxTurns: this.maxTurns,
+      mode: this.mode, playerIdx: playerIdx,
+      food: this.foodList.map(f => [...f]),
+      snakes: this.snakes.map(snap),
+      // Convenience aliases for compatibility with 2P AI patterns
+      snakeA: snap(this.snakes[0]), snakeB: snap(this.snakes[1]),
+      snakeC: snap(this.snakes[2]), snakeD: snap(this.snakes[3]),
+    };
+  }
+
+  _areAllies(i, j) {
+    if (this.mode !== '2v2') return false;
+    // Team AC (indices 0,2) and Team BD (indices 1,3)
+    return (i % 2) === (j % 2);
+  }
+
+  step(moves) {
+    if (this.over) return;
+    this.turn++;
+
+    // Prevent 180-degree reversal for alive snakes
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive) continue;
+      if (moves[i] === OPPOSITE[this.snakes[i].dir]) moves[i] = this.snakes[i].dir;
+      this.snakes[i].dir = moves[i];
+    }
+
+    // Calculate new head positions
+    const newHeads = [];
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive) {
+        newHeads.push(null);
+        continue;
+      }
+      const [hx, hy] = this.snakes[i].body[0];
+      newHeads.push([hx + DX[moves[i]], hy + DY[moves[i]]]);
+    }
+
+    const dead = [false, false, false, false];
+
+    // Wall collision check
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive || !newHeads[i]) continue;
+      const [nx, ny] = newHeads[i];
+      if (nx <= 0 || nx >= this.W - 1 || ny <= 0 || ny >= this.H - 1) dead[i] = true;
+    }
+
+    // Self-collision check
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive || !newHeads[i] || dead[i]) continue;
+      const [nx, ny] = newHeads[i];
+      if (this.snakes[i].body.some(([bx, by]) => bx === nx && by === ny)) dead[i] = true;
+    }
+
+    // Body collision with other snakes
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive || !newHeads[i] || dead[i]) continue;
+      const [nx, ny] = newHeads[i];
+      for (let j = 0; j < 4; j++) {
+        if (i === j || !this.snakes[j].alive) continue;
+        // In 2v2, allies' bodies are passable
+        if (this._areAllies(i, j)) continue;
+        if (this.snakes[j].body.some(([bx, by]) => bx === nx && by === ny)) dead[i] = true;
+      }
+    }
+
+    // Head-on collision check
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive || !newHeads[i]) continue;
+      for (let j = i + 1; j < 4; j++) {
+        if (!this.snakes[j].alive || !newHeads[j]) continue;
+        if (newHeads[i][0] === newHeads[j][0] && newHeads[i][1] === newHeads[j][1]) {
+          // In 2v2, allies pass through on head-on
+          if (this._areAllies(i, j)) continue;
+          dead[i] = true;
+          dead[j] = true;
+        }
+      }
+    }
+
+    // Apply deaths
+    for (let i = 0; i < 4; i++) {
+      if (dead[i]) this.snakes[i].alive = false;
+    }
+
+    // Move alive snakes and check food
+    const eatenFoodIndices = new Set();
+    for (let i = 0; i < 4; i++) {
+      if (!this.snakes[i].alive || !newHeads[i]) continue;
+      const [nx, ny] = newHeads[i];
+      this.snakes[i].body.unshift([nx, ny]);
+      let ate = false;
+      for (let f = 0; f < this.foodList.length; f++) {
+        if (this.foodList[f][0] === nx && this.foodList[f][1] === ny) {
+          ate = true;
+          this.snakes[i].score++;
+          eatenFoodIndices.add(f);
+          break;
+        }
+      }
+      if (!ate) this.snakes[i].body.pop();
+    }
+
+    // Replace eaten food
+    if (eatenFoodIndices.size > 0) {
+      // Remove eaten food (reverse order to preserve indices)
+      const sorted = [...eatenFoodIndices].sort((a, b) => b - a);
+      for (const idx of sorted) this.foodList.splice(idx, 1);
+      // Spawn replacements
+      for (let i = 0; i < eatenFoodIndices.size; i++) {
+        const f = this._spawnOneFood();
+        if (f) this.foodList.push(f);
+      }
+    }
+
+    // Determine game over
+    this._checkGameOver();
+  }
+
+  _checkGameOver() {
+    const alive = this.snakes.map(s => s.alive);
+    const aliveCount = alive.filter(Boolean).length;
+
+    if (this.mode === 'royale') {
+      if (aliveCount <= 1 || this.turn >= this.maxTurns) {
+        this.over = true;
+        if (aliveCount === 1) {
+          this.winner = PLAYER_LABELS_4P[alive.indexOf(true)];
+        } else if (aliveCount === 0) {
+          // All died same turn: longest snake wins
+          let maxLen = -1, maxIdx = -1, tie = false;
+          for (let i = 0; i < 4; i++) {
+            const len = this.snakes[i].body.length;
+            if (len > maxLen) { maxLen = len; maxIdx = i; tie = false; }
+            else if (len === maxLen) tie = true;
+          }
+          this.winner = tie ? 'draw' : PLAYER_LABELS_4P[maxIdx];
+        } else {
+          // Timeout: longest alive snake wins
+          let maxLen = -1, maxIdx = -1, tie = false;
+          for (let i = 0; i < 4; i++) {
+            if (!alive[i]) continue;
+            const len = this.snakes[i].body.length;
+            if (len > maxLen) { maxLen = len; maxIdx = i; tie = false; }
+            else if (len === maxLen) tie = true;
+          }
+          this.winner = tie ? 'draw' : PLAYER_LABELS_4P[maxIdx];
+        }
+      }
+    } else {
+      // 2v2: Team AC (indices 0,2) vs Team BD (indices 1,3)
+      const teamAC_alive = alive[0] || alive[2];
+      const teamBD_alive = alive[1] || alive[3];
+
+      if (!teamAC_alive && !teamBD_alive) {
+        this.over = true;
+        this.winner = 'draw';
+      } else if (!teamAC_alive) {
+        this.over = true;
+        this.winner = 'teamBD';
+      } else if (!teamBD_alive) {
+        this.over = true;
+        this.winner = 'teamAC';
+      } else if (this.turn >= this.maxTurns) {
+        this.over = true;
+        const lenAC = this.snakes[0].body.length + this.snakes[2].body.length;
+        const lenBD = this.snakes[1].body.length + this.snakes[3].body.length;
+        if (lenAC > lenBD) this.winner = 'teamAC';
+        else if (lenBD > lenAC) this.winner = 'teamBD';
+        else this.winner = 'draw';
+      }
+    }
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4-Player AI Strategies
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function isSafe4P(x, y, state, meIdx) {
+  if (x <= 0 || x >= state.width - 1 || y <= 0 || y >= state.height - 1) return false;
+  const isTeam = state.mode === '2v2';
+  for (let i = 0; i < 4; i++) {
+    if (!state.snakes[i].alive) continue;
+    // In 2v2, allies' bodies are passable
+    if (isTeam && (i % 2) === (meIdx % 2) && i !== meIdx) continue;
+    for (const [bx, by] of state.snakes[i].body) {
+      if (bx === x && by === y) return false;
+    }
+  }
+  return true;
+}
+
+function floodFill4P(startX, startY, state, meIdx, limit) {
+  let count = 0;
+  const visited = new Set([`${startX},${startY}`]);
+  const queue = [[startX, startY]];
+  while (queue.length && count < limit) {
+    const [cx, cy] = queue.shift();
+    count++;
+    for (let d = 0; d < 4; d++) {
+      const nx = cx + DX[d], ny = cy + DY[d];
+      const key = `${nx},${ny}`;
+      if (!visited.has(key) && isSafe4P(nx, ny, state, meIdx)) {
+        visited.add(key); queue.push([nx, ny]);
+      }
+    }
+  }
+  return count;
+}
+
+function nearestFoodDist4P(nx, ny, foodList) {
+  if (!foodList || !foodList.length) return 999;
+  let best = 999;
+  for (const [fx, fy] of foodList) {
+    const d = Math.abs(nx - fx) + Math.abs(ny - fy);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function nearestEnemyDist4P(nx, ny, state, meIdx) {
+  let best = 999;
+  const isTeam = state.mode === '2v2';
+  for (let i = 0; i < 4; i++) {
+    if (i === meIdx || !state.snakes[i].alive) continue;
+    if (isTeam && (i % 2) === (meIdx % 2)) continue; // skip allies
+    const [ex, ey] = state.snakes[i].head;
+    const d = Math.abs(nx - ex) + Math.abs(ny - ey);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function evaluateMoves4P(state, playerIdx) {
+  const me = state.snakes[playerIdx];
+  const [hx, hy] = me.head;
+  const moves = [];
+  for (let d = 0; d < 4; d++) {
+    const nx = hx + DX[d], ny = hy + DY[d];
+    const safe = isSafe4P(nx, ny, state, playerIdx);
+    const foodDist = nearestFoodDist4P(nx, ny, state.food);
+    const enemyDist = nearestEnemyDist4P(nx, ny, state, playerIdx);
+    const space = safe ? floodFill4P(nx, ny, state, playerIdx, 40) : 0;
+    moves.push({ dir: d, safe, foodDist, enemyDist, space, nx, ny });
+  }
+  return { moves, me };
+}
+
+function greedy4P(state, playerLabel) {
+  const playerIdx = PLAYER_LABELS_4P.indexOf(playerLabel);
+  const { moves, me } = evaluateMoves4P(state, playerIdx);
+  const lines = moves.map(m =>
+    `  ${DIR_NAME[m.dir]}: ${m.safe ? `safe, food ${m.foodDist}` : 'BLOCKED'}`
+  );
+  const safe = moves.filter(m => m.safe);
+  if (!safe.length) {
+    return { move: me.dir, reasoning: lines.join('\n') + `\nTrapped! Going ${DIR_NAME[me.dir]}` };
+  }
+  safe.sort((a, b) => a.foodDist - b.foodDist);
+  return {
+    move: safe[0].dir,
+    reasoning: `[${playerLabel}] ` + lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (nearest food)`,
+  };
+}
+
+function aggressive4P(state, playerLabel) {
+  const playerIdx = PLAYER_LABELS_4P.indexOf(playerLabel);
+  const { moves, me } = evaluateMoves4P(state, playerIdx);
+  const lines = moves.map(m =>
+    `  ${DIR_NAME[m.dir]}: ${m.safe ? `safe, food ${m.foodDist}, enemy ${m.enemyDist}` : 'BLOCKED'}`
+  );
+  const safe = moves.filter(m => m.safe);
+  if (!safe.length) {
+    return { move: me.dir, reasoning: `[${playerLabel}] ` + lines.join('\n') + `\nTrapped!` };
+  }
+  // Hunt if we're longer than the average enemy length
+  const enemies = state.snakes.filter((s, i) => s.alive && i !== playerIdx);
+  const avgLen = enemies.length ? enemies.reduce((s, e) => s + e.body.length, 0) / enemies.length : 0;
+  const hunt = me.length > avgLen;
+  if (hunt) {
+    safe.sort((a, b) => a.enemyDist - b.enemyDist);
+    return {
+      move: safe[0].dir,
+      reasoning: `[${playerLabel}] HUNT mode (len ${me.length} vs avg ${avgLen.toFixed(1)})\n` +
+        lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (chase enemy)`,
+    };
+  }
+  safe.sort((a, b) => a.foodDist - b.foodDist);
+  return {
+    move: safe[0].dir,
+    reasoning: `[${playerLabel}] FEED mode (len ${me.length} vs avg ${avgLen.toFixed(1)})\n` +
+      lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (nearest food)`,
+  };
+}
+
+function cautious4P(state, playerLabel) {
+  const playerIdx = PLAYER_LABELS_4P.indexOf(playerLabel);
+  const { moves, me } = evaluateMoves4P(state, playerIdx);
+  const lines = moves.map(m =>
+    `  ${DIR_NAME[m.dir]}: ${m.safe ? `safe, food ${m.foodDist}, space ${m.space}` : 'BLOCKED'}`
+  );
+  const safe = moves.filter(m => m.safe);
+  if (!safe.length) {
+    return { move: me.dir, reasoning: `[${playerLabel}] ` + lines.join('\n') + `\nTrapped!` };
+  }
+  safe.sort((a, b) => {
+    if (b.space !== a.space) return b.space - a.space;
+    return a.foodDist - b.foodDist;
+  });
+  return {
+    move: safe[0].dir,
+    reasoning: `[${playerLabel}] CAUTIOUS (prefer space)\n` +
+      lines.join('\n') + `\n=> ${DIR_NAME[safe[0].dir]} (space ${safe[0].space})`,
+  };
+}
+
+const AI_STRATEGIES_4P = {
+  greedy:     { name: 'Greedy',     fn: greedy4P,     desc: 'Chases nearest food',
+                personality: { aggression: 20, caution: 40, greed: 90 } },
+  aggressive: { name: 'Aggressive', fn: aggressive4P, desc: 'Hunts when longer than enemies',
+                personality: { aggression: 80, caution: 30, greed: 50 } },
+  cautious:   { name: 'Cautious',   fn: cautious4P,   desc: 'Prefers open spaces, avoids crowds',
+                personality: { aggression: 10, caution: 95, greed: 40 } },
+};
+
+
+/* ── 4P Match Runners ──────────────────────────────────────────────────── */
+
+function _runSnake4PMatch(config, strategyA, strategyB, mode) {
+  const resolvedSeed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
+  const game = new SnakeGame4P({ ...config, seed: resolvedSeed, mode: mode });
+  // UI provides 2 strategies: strategyA controls players A,C; strategyB controls players B,D
+  const fns = [
+    AI_STRATEGIES_4P[strategyA].fn,
+    AI_STRATEGIES_4P[strategyB].fn,
+    AI_STRATEGIES_4P[strategyA].fn,
+    AI_STRATEGIES_4P[strategyB].fn,
+  ];
+  const history = [];
+
+  const snapSnake = (s, i) => ({
+    alive: s.alive, score: s.score, body: s.body.map(p => [...p]),
+    label: PLAYER_LABELS_4P[i],
+  });
+
+  // Turn 0: initial state
+  history.push({
+    turn: 0, grid: game.getGrid(),
+    snakes: game.snakes.map((s, i) => snapSnake(s, i)),
+    food: game.foodList.map(f => [...f]),
+    agents: [null, null, null, null],
+    winner: null,
+    // Backward-compatible score fields for the UI scoreboard
+    scoreA: 0, scoreB: 0,
+  });
+
+  while (!game.over) {
+    const moves = [];
+    const results = [];
+    for (let i = 0; i < 4; i++) {
+      if (!game.snakes[i].alive) {
+        moves.push(game.snakes[i].dir);
+        results.push({ move: game.snakes[i].dir, reasoning: 'Dead' });
+        continue;
+      }
+      const aiState = game.getAIState(i);
+      const result = fns[i](aiState, PLAYER_LABELS_4P[i]);
+      moves.push(result.move);
+      results.push(result);
+    }
+
+    game.step(moves);
+
+    // Compute scores for scoreboard: Team A side = A+C, Team B side = B+D
+    const scoreA = game.snakes[0].score + game.snakes[2].score;
+    const scoreB = game.snakes[1].score + game.snakes[3].score;
+
+    history.push({
+      turn: game.turn, grid: game.getGrid(),
+      snakes: game.snakes.map((s, i) => snapSnake(s, i)),
+      food: game.foodList.map(f => [...f]),
+      agents: results.map((r, i) => ({
+        move: DIR_NAME[r.move], reasoning: r.reasoning, label: PLAYER_LABELS_4P[i],
+      })),
+      // For the UI: agentA/agentB carry combined reasoning for side panels
+      agentA: {
+        move: DIR_NAME[results[0].move],
+        reasoning: `--- Agent A ---\n${results[0].reasoning}\n--- Agent C ---\n${results[2].reasoning}`,
+      },
+      agentB: {
+        move: DIR_NAME[results[1].move],
+        reasoning: `--- Agent B ---\n${results[1].reasoning}\n--- Agent D ---\n${results[3].reasoning}`,
+      },
+      winner: game.winner,
+      scoreA: scoreA, scoreB: scoreB,
+    });
+  }
+  return history;
+}
+
+function runSnakeRoyaleMatch(config, strategyA, strategyB) {
+  return _runSnake4PMatch(config, strategyA, strategyB, 'royale');
+}
+
+function runSnake2v2Match(config, strategyA, strategyB) {
+  return _runSnake4PMatch(config, strategyA, strategyB, '2v2');
+}
+
+
+/* ── 4P Rendering ──────────────────────────────────────────────────────── */
+
+function renderSnake4PFrame(ctx, frame, size) {
+  const grid = frame.grid;
+  const gridH = grid.length, gridW = grid[0].length;
+  const cellW = size / gridW, cellH = size / gridH;
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++) {
+      ctx.fillStyle = ARC3[grid[y][x]];
+      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+    }
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= gridW; x++) {
+    ctx.beginPath(); ctx.moveTo(x*cellW, 0); ctx.lineTo(x*cellW, size); ctx.stroke();
+  }
+  for (let y = 0; y <= gridH; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y*cellH); ctx.lineTo(size, y*cellH); ctx.stroke();
+  }
+}
+
+function renderSnake4PPreview(canvas, config) {
+  const resolvedSeed = typeof config.seed === 'function' ? config.seed() : (config.seed || 42);
+  const g = new SnakeGame4P({ ...config, seed: resolvedSeed });
+  const grid = g.getGrid();
+  const size = 120;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cellW = size / g.W, cellH = size / g.H;
+  for (let y = 0; y < g.H; y++)
+    for (let x = 0; x < g.W; x++) {
+      ctx.fillStyle = ARC3[grid[y][x]];
+      ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+    }
+}
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3158,7 +4141,7 @@ function runPokerMatch(config, strategyA, strategyB) {
    Available Games
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// Only Snake is enabled for now — other games kept for future re-enablement
+// Snake variants, Chess960, and Othello are enabled — other games kept for future re-enablement
 const _ALL_ARENA_GAMES = [
   { id: 'snake', title: 'Snake Battle', category: 'ARC-style',
     desc: 'Two AI snakes compete for food. Eat to grow, avoid walls and each other.',
@@ -3166,6 +4149,24 @@ const _ALL_ARENA_GAMES = [
     config: { width: 20, height: 20, maxTurns: 200, seed: 42 },
     strategies: AI_STRATEGIES,
     run: runMatch, render: renderSnakeFrame, preview: renderSnakePreview },
+  { id: 'snake_random', title: 'Snake: Random Maps', category: 'ARC-style',
+    desc: 'Two snakes on a procedurally generated map. New walls every match.',
+    tags: ['Territorial', 'Simultaneous', 'Adaptive'],
+    config: { width: 20, height: 20, maxTurns: 200, seed: () => Date.now() },
+    strategies: AI_STRATEGIES_RANDOM,
+    run: runSnakeRandomMatch, render: renderSnakeRandomFrame, preview: renderSnakeRandomPreview },
+  { id: 'snake_royale', title: 'Snake: Battle Royale', category: 'ARC-style',
+    desc: 'Four snakes enter, one survives. Bigger grid, more chaos.',
+    tags: ['Territorial', 'Simultaneous', '4-Player'],
+    config: { width: 30, height: 30, maxTurns: 400, seed: () => Date.now(), mode: 'royale' },
+    strategies: AI_STRATEGIES_4P,
+    run: runSnakeRoyaleMatch, render: renderSnake4PFrame, preview: renderSnake4PPreview },
+  { id: 'snake_2v2', title: 'Snake: 2v2 Teams', category: 'ARC-style',
+    desc: 'Team up! Allies pass through each other. Last team standing wins.',
+    tags: ['Territorial', 'Simultaneous', 'Team'],
+    config: { width: 24, height: 24, maxTurns: 300, seed: () => Date.now(), mode: '2v2' },
+    strategies: AI_STRATEGIES_4P,
+    run: runSnake2v2Match, render: renderSnake4PFrame, preview: renderSnake4PPreview },
   { id: 'tron', title: 'Tron', category: 'ARC-style',
     desc: 'Light cycles leave trails. Last one alive wins. Claim space, cut off your opponent.',
     tags: ['Territorial', 'Simultaneous'],
@@ -3216,7 +4217,7 @@ const _ALL_ARENA_GAMES = [
     run: runPokerMatch, render: renderPokerFrame, preview: renderPokerPreview },
 ];
 
-const ARENA_ENABLED_IDS = new Set(['snake', 'chess960', 'othello']);
+const ARENA_ENABLED_IDS = new Set(['snake', 'snake_random', 'snake_royale', 'snake_2v2', 'chess960', 'othello']);
 const ARENA_GAMES = _ALL_ARENA_GAMES.filter(g => ARENA_ENABLED_IDS.has(g.id));
 
 
@@ -3580,8 +4581,13 @@ function renderStep(step) {
   // Winner overlay on final step
   if (step === Arena.history.length - 1 && frame.winner) {
     showWinnerOverlay(frame.winner, sA, sB);
-    const statusClass = frame.winner === 'A' ? 'win-a' : frame.winner === 'B' ? 'win-b' : 'draw';
-    const statusText = frame.winner === 'draw' ? 'Draw!' : `Agent ${frame.winner} Wins!`;
+    const w = frame.winner;
+    const statusClass = (w === 'A' || w === 'C' || w === 'teamAC') ? 'win-a' :
+                         (w === 'B' || w === 'D' || w === 'teamBD') ? 'win-b' : 'draw';
+    const statusText = w === 'draw' ? 'Draw!' :
+                        w === 'teamAC' ? 'Team A+C Wins!' :
+                        w === 'teamBD' ? 'Team B+D Wins!' :
+                        `Agent ${w} Wins!`;
     updateMatchStatus(statusClass, statusText);
   } else {
     hideWinnerOverlay();
@@ -3726,6 +4732,21 @@ function showWinnerOverlay(winner, scoreA, scoreB) {
   } else if (winner === 'A') {
     textEl.textContent = 'Agent A Wins!';
     textEl.style.color = ARC3[C.A_HEAD];
+  } else if (winner === 'B') {
+    textEl.textContent = 'Agent B Wins!';
+    textEl.style.color = ARC3[C.B_HEAD];
+  } else if (winner === 'C') {
+    textEl.textContent = 'Agent C Wins!';
+    textEl.style.color = ARC3[C4P.C_HEAD];
+  } else if (winner === 'D') {
+    textEl.textContent = 'Agent D Wins!';
+    textEl.style.color = ARC3[C4P.D_HEAD];
+  } else if (winner === 'teamAC') {
+    textEl.textContent = 'Team A+C Wins!';
+    textEl.style.color = ARC3[C.A_HEAD];
+  } else if (winner === 'teamBD') {
+    textEl.textContent = 'Team B+D Wins!';
+    textEl.style.color = ARC3[C.B_HEAD];
   } else {
     textEl.textContent = 'Agent B Wins!';
     textEl.style.color = ARC3[C.B_HEAD];
@@ -4382,22 +5403,108 @@ const _GAME_TAB_ICONS = {
   poker: '\u{1F0CF}',     // playing card
 };
 
+// Snake variant grouping — these game IDs share one parent tab with sub-tabs
+const _SNAKE_VARIANT_IDS = new Set(['snake', 'snake_random', 'snake_royale', 'snake_2v2']);
+const _SNAKE_VARIANTS = [
+  { id: 'snake', label: 'Classic' },
+  { id: 'snake_random', label: 'Random Maps' },
+  { id: 'snake_royale', label: 'Battle Royale' },
+  { id: 'snake_2v2', label: '2v2 Teams' },
+];
+function _snakeParentId(gameId) { return 'snake'; }
+
 function arBuildGameTabs() {
   const container = document.getElementById('arGameTabs');
   container.innerHTML = '';
 
-  for (const game of ARENA_GAMES) {
+  // Separate snake variants from other games
+  const snakeGames = ARENA_GAMES.filter(g => _SNAKE_VARIANT_IDS.has(g.id));
+  const otherGames = ARENA_GAMES.filter(g => !_SNAKE_VARIANT_IDS.has(g.id));
+
+  // Build snake parent tab with sub-tabs (if any snake games are enabled)
+  if (snakeGames.length > 0) {
+    const parentGame = snakeGames[0]; // use first snake game for preview
+    const isSnakeActive = _SNAKE_VARIANT_IDS.has(AR.selectedGame);
+
+    const tab = document.createElement('div');
+    tab.className = 'ar-game-tab has-subtabs' + (isSnakeActive ? ' active' : '');
+    tab.dataset.game = 'snake';
+
+    // Main row: preview + meta
+    const mainRow = document.createElement('div');
+    mainRow.className = 'ar-game-tab-main';
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'ar-game-tab-preview';
+    canvas.width = 96; canvas.height = 96;
+    mainRow.appendChild(canvas);
+
+    const meta = document.createElement('div');
+    meta.className = 'ar-game-tab-meta';
+
+    const title = document.createElement('div');
+    title.className = 'ar-game-tab-title';
+    title.textContent = 'Snake Battle';
+    meta.appendChild(title);
+
+    // Stats row — shows currently selected variant's stats
+    const selectedVariant = isSnakeActive ? AR.selectedGame : 'snake';
+    const statsRow = document.createElement('div');
+    statsRow.className = 'ar-game-tab-stats';
+    statsRow.id = `arTabStats_${selectedVariant}`;
+    statsRow.innerHTML = '<span class="ar-game-tab-stat">Loading...</span>';
+    meta.appendChild(statsRow);
+
+    mainRow.appendChild(meta);
+    tab.appendChild(mainRow);
+
+    // Sub-tab bar
+    const subBar = document.createElement('div');
+    subBar.className = 'ar-subtab-bar';
+    for (const v of _SNAKE_VARIANTS) {
+      // Only show sub-tab if this variant's game is in ARENA_GAMES (enabled)
+      if (!ARENA_GAMES.find(g => g.id === v.id)) continue;
+      const sub = document.createElement('div');
+      sub.className = 'ar-subtab' + (AR.selectedGame === v.id ? ' active' : '');
+      sub.dataset.variant = v.id;
+      sub.textContent = v.label;
+      sub.addEventListener('click', (e) => {
+        e.stopPropagation();
+        arSelectGame(v.id, 'community');
+      });
+      subBar.appendChild(sub);
+    }
+    tab.appendChild(subBar);
+
+    // Click on parent card (not subtab) → select currently active variant or default to 'snake'
+    tab.addEventListener('click', () => {
+      if (!_SNAKE_VARIANT_IDS.has(AR.selectedGame)) {
+        arSelectGame('snake', 'community');
+      }
+    });
+
+    container.appendChild(tab);
+
+    // Render preview
+    if (parentGame.preview) {
+      try { parentGame.preview(canvas, parentGame.config); } catch (e) { /* skip */ }
+    }
+
+    // Fetch stats for the currently selected snake variant
+    _arFetchTabStats(selectedVariant);
+  }
+
+  // Build tabs for non-snake games (unchanged)
+  for (const game of otherGames) {
     const tab = document.createElement('div');
     tab.className = 'ar-game-tab' + (AR.selectedGame === game.id ? ' active' : '');
     tab.dataset.game = game.id;
 
-    // Canvas preview
     const canvas = document.createElement('canvas');
     canvas.className = 'ar-game-tab-preview';
     canvas.width = 96; canvas.height = 96;
     tab.appendChild(canvas);
 
-    // Meta: title, desc, tags, stats
     const meta = document.createElement('div');
     meta.className = 'ar-game-tab-meta';
 
@@ -4413,7 +5520,6 @@ function arBuildGameTabs() {
       meta.appendChild(desc);
     }
 
-    // Tags row
     if (game.tags && game.tags.length) {
       const tagsRow = document.createElement('div');
       tagsRow.className = 'ar-game-tab-tags';
@@ -4426,7 +5532,6 @@ function arBuildGameTabs() {
       meta.appendChild(tagsRow);
     }
 
-    // Stats row (agent count, game count — filled async)
     const statsRow = document.createElement('div');
     statsRow.className = 'ar-game-tab-stats';
     statsRow.id = `arTabStats_${game.id}`;
@@ -4437,12 +5542,10 @@ function arBuildGameTabs() {
     tab.addEventListener('click', () => arSelectGame(game.id, 'community'));
     container.appendChild(tab);
 
-    // Render preview
     if (game.preview) {
       try { game.preview(canvas, game.config); } catch (e) { /* skip */ }
     }
 
-    // Fetch stats for each tab
     _arFetchTabStats(game.id);
   }
 }
@@ -4475,10 +5578,24 @@ async function arSelectGame(gameId, mode) {
   AR.selectedGame = gameId;
   AR.mode = mode || 'community';
 
-  // Highlight active tab
+  // Highlight active tab — for snake variants, highlight parent + subtab
+  const parentGameId = _SNAKE_VARIANT_IDS.has(gameId) ? _snakeParentId(gameId) : gameId;
   document.querySelectorAll('.ar-game-tab').forEach(el => {
-    el.classList.toggle('active', el.dataset.game === gameId);
+    el.classList.toggle('active', el.dataset.game === parentGameId || el.dataset.game === gameId);
   });
+  // Highlight sub-tab if applicable
+  document.querySelectorAll('.ar-subtab').forEach(el => {
+    el.classList.toggle('active', el.dataset.variant === gameId);
+  });
+
+  // Update snake parent tab stats row ID to match selected variant
+  if (_SNAKE_VARIANT_IDS.has(gameId)) {
+    const snakeTab = document.querySelector('.ar-game-tab[data-game="snake"]');
+    if (snakeTab) {
+      const statsRow = snakeTab.querySelector('.ar-game-tab-stats');
+      if (statsRow) statsRow.id = `arTabStats_${gameId}`;
+    }
+  }
 
   const game = ARENA_GAMES.find(g => g.id === gameId);
 
@@ -4488,18 +5605,38 @@ async function arSelectGame(gameId, mode) {
     return;
   }
 
-  // Community mode: fetch research data from server
+  // Show loading overlay
+  const overlay = document.getElementById('arLoadingOverlay');
+  if (overlay) overlay.style.display = 'flex';
   document.getElementById('arStatusText').textContent = `Loading ${game ? game.title : gameId}...`;
+
   try {
-    const data = await fetch(`/api/arena/research/${gameId}`).then(r => r.json());
-    if (data.error) {
-      document.getElementById('arStatusText').textContent = `Error: ${data.error}`;
+    // Fire all fetches in parallel — wait for all before rendering
+    const [researchData, liveTournamentData] = await Promise.all([
+      fetch(`/api/arena/research/${gameId}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/arena/live-tournament/${gameId}`).then(r => r.json()).catch(() => []),
+    ]);
+
+    if (researchData && researchData.error) {
+      document.getElementById('arStatusText').textContent = `Error: ${researchData.error}`;
       return;
     }
-    arRenderResearch(gameId, data);
+
+    // Render everything at once
+    if (researchData) arRenderResearch(gameId, researchData);
+
+    // Live tournament canvases
+    if (Array.isArray(liveTournamentData) && liveTournamentData.length > 0) {
+      LocalResearch.liveMatches = liveTournamentData;
+      if (typeof arRenderLiveCanvases === 'function') arRenderLiveCanvases();
+    }
+
     arStartPolling(gameId);
   } catch (e) {
     document.getElementById('arStatusText').textContent = `Failed to load: ${e.message}`;
+  } finally {
+    // Hide loading overlay
+    if (overlay) overlay.style.display = 'none';
   }
 }
 
@@ -5163,7 +6300,8 @@ async function arStartHumanPlay() {
   if (!agentCode) { alert('Agent has no code'); return; }
 
   // Launch human play mode (defined in arena-autoresearch.js)
-  arLaunchHumanPlay(gameId, agentCode, agentName, delay);
+  // Pass agentId so client can proxy moves through the server (agents are Python)
+  arLaunchHumanPlay(gameId, agentId, agentCode, agentName, delay);
 }
 
 

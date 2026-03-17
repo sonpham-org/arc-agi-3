@@ -1,5 +1,5 @@
-# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-11 13:47
+# Author: Claude Opus 4.6
+# Date: 2026-03-16 12:00
 # PURPOSE: SQLite database layer for ARC-AGI-3. Manages schema migrations, session
 #   persistence (sessions, session_actions, llm_calls), observatory data, share links,
 #   auth (magic links, Google OAuth), leaderboard, and tool execution logging.
@@ -7,6 +7,7 @@
 #   Modified in Phase 2 to support imports from session_manager.py.
 #   Phase 17: Refactored into domain-specific modules (db_sessions, db_auth, db_exports, etc.)
 #            with db.py as thin facade + connection manager.
+#   Added arena_agents.program_version_id migration for snake variant program tracking.
 # SRP/DRY check: Pass — all DB operations consolidated here; session state in session_manager.py
 """ARC-AGI-3 Database Layer — SQLite persistence.
 
@@ -368,6 +369,14 @@ def _init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_alc_created ON arena_llm_calls(created_at);
         CREATE INDEX IF NOT EXISTS idx_alc_status ON arena_llm_calls(status);
+
+        -- Frequently queried columns
+        CREATE INDEX IF NOT EXISTS idx_session_actions_session
+            ON session_actions(session_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_created
+            ON sessions(user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sessions_game
+            ON sessions(game_id);
     """)
 
     conn.commit()
@@ -570,6 +579,15 @@ def _migrate_schema(conn):
     if _table_exists(conn, "session_steps") and _table_exists(conn, "session_actions"):
         conn.execute("DROP TABLE session_steps")
         log.info("Dropped old session_steps table (session_actions exists)")
+
+    # ── 6. arena_agents: add program_version_id for snake variant tracking ──
+    arena_agent_cols = _get_table_columns(conn, "arena_agents")
+    if "program_version_id" not in arena_agent_cols and arena_agent_cols:
+        try:
+            conn.execute("ALTER TABLE arena_agents ADD COLUMN program_version_id INTEGER DEFAULT NULL")
+            log.info("Migrated arena_agents: added program_version_id")
+        except Exception:
+            pass
 
     conn.commit()
 

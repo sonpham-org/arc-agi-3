@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-16 22:00
+// Date: 2026-03-16 23:45
 // PURPOSE: Arena Auto Research — in-browser evolution + tournament engine.
 //   Phase 2: headless match runner, per-game state adapters, live tournament canvases.
 //   Phase 4: human vs AI play mode — keyboard/click input, timed moves, result submission.
@@ -39,6 +39,35 @@ const AGENT_INTERFACE = {
 function getMove(state) {
   // state.grid: 2D array (20x20), state.mySnake: {body:[[x,y],...], dir, alive, score}
   // state.enemySnake: same, state.food: [x,y] or null, state.turn: int
+  // state.memory: {} (mutable, persists across turns within a game)
+  // Return: 'UP', 'DOWN', 'LEFT', or 'RIGHT'
+  return 'UP';
+}`,
+  snake_random: `
+function getMove(state) {
+  // state.grid: 2D array (20x20), state.mySnake: {body:[[x,y],...], dir, alive, score}
+  // state.enemySnake: same, state.food: [x,y] or null, state.turn: int
+  // state.walls: [[x,y], ...] — extra wall positions (changes each match)
+  // state.memory: {} (mutable, persists across turns within a game)
+  // Return: 'UP', 'DOWN', 'LEFT', or 'RIGHT'
+  return 'UP';
+}`,
+  snake_royale: `
+function getMove(state) {
+  // state.grid: 2D array (30x30), state.mySnake: {body:[[x,y],...], dir, alive, score}
+  // state.snakes: [{body, dir, alive, score}, ...] — all 4 snakes
+  // state.myIndex: 0-3 (which snake you are)
+  // state.food: [[x,y], ...], state.turn: int
+  // state.memory: {} (mutable, persists across turns within a game)
+  // Return: 'UP', 'DOWN', 'LEFT', or 'RIGHT'
+  return 'UP';
+}`,
+  snake_2v2: `
+function getMove(state) {
+  // state.grid: 2D array (24x24), state.mySnake: {body:[[x,y],...], dir, alive, score}
+  // state.allySnake: same (your teammate — you can pass through each other)
+  // state.enemies: [{body, dir, alive, score}, ...] — 2 enemy snakes
+  // state.myIndex: 0-3, state.food: [[x,y], ...], state.turn: int
   // state.memory: {} (mutable, persists across turns within a game)
   // Return: 'UP', 'DOWN', 'LEFT', or 'RIGHT'
   return 'UP';
@@ -215,14 +244,38 @@ function _arParseDir(raw) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function _arSnakeState(engine, player, memory) {
-  const st = engine.getAIState();
+  const st = engine.getAIState ? engine.getAIState() : {};
   const isA = player === 'A';
+
+  // 4-player engine (snake_royale / snake_2v2)
+  if (st.snakes && st.snakes.length > 2) {
+    const idx = isA ? 0 : 1;
+    const mySnake = st.snakes[idx];
+    const allyIdx = engine.mode === '2v2' ? (idx === 0 ? 2 : 3) : -1;
+    const allySnake = allyIdx >= 0 ? st.snakes[allyIdx] : null;
+    const enemies = st.snakes.filter((_, i) => i !== idx && i !== allyIdx);
+    return {
+      grid: engine.getGrid(),
+      mySnake: mySnake,
+      allySnake: allySnake,
+      enemySnake: enemies[0] || null,
+      enemies: enemies,
+      snakes: st.snakes,
+      myIndex: idx,
+      food: st.food,
+      turn: st.turn,
+      memory: memory,
+    };
+  }
+
+  // 2-player engine (snake / snake_random)
   return {
     grid: engine.getGrid(),
     mySnake: isA ? st.snakeA : st.snakeB,
     enemySnake: isA ? st.snakeB : st.snakeA,
     food: st.food,
     turn: st.turn,
+    walls: st.walls || null,
     memory: memory,
   };
 }
@@ -352,7 +405,10 @@ function _arArtilleryState(engine, player, memory) {
 /** Dispatch state builder by game ID */
 function _arBuildState(gameId, engine, player, memory) {
   switch (gameId) {
-    case 'snake': return _arSnakeState(engine, player, memory);
+    case 'snake':
+    case 'snake_random':
+    case 'snake_royale':
+    case 'snake_2v2': return _arSnakeState(engine, player, memory);
     case 'tron': return _arTronState(engine, player, memory);
     case 'connect4': return _arC4State(engine, player, memory);
     case 'chess960': return _arChessState(engine, player, memory);
@@ -370,8 +426,14 @@ function _arBuildState(gameId, engine, player, memory) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function _arNewEngine(gameId, config) {
+  // Resolve seed to a real value if it's a function (e.g. () => Date.now())
+  const resolvedConfig = { ...config };
+  if (typeof resolvedConfig.seed === 'function') resolvedConfig.seed = resolvedConfig.seed();
   switch (gameId) {
-    case 'snake': return new SnakeGame(config);
+    case 'snake': return new SnakeGame(resolvedConfig);
+    case 'snake_random': return typeof SnakeRandomGame !== 'undefined' ? new SnakeRandomGame(resolvedConfig) : new SnakeGame(resolvedConfig);
+    case 'snake_royale': return typeof SnakeGame4P !== 'undefined' ? new SnakeGame4P({ ...resolvedConfig, mode: 'royale' }) : new SnakeGame(resolvedConfig);
+    case 'snake_2v2': return typeof SnakeGame4P !== 'undefined' ? new SnakeGame4P({ ...resolvedConfig, mode: '2v2' }) : new SnakeGame(resolvedConfig);
     case 'tron': return new TronGame(config);
     case 'connect4': return new ConnectFourGame(config);
     case 'chess960': return new ChessGame(config);
@@ -385,7 +447,7 @@ function _arNewEngine(gameId, config) {
 
 /** Is this a simultaneous-move game (both players act at once)? */
 function _arIsSimultaneous(gameId) {
-  return gameId === 'snake' || gameId === 'tron';
+  return gameId === 'snake' || gameId === 'snake_random' || gameId === 'snake_royale' || gameId === 'snake_2v2' || gameId === 'tron';
 }
 
 /** Whose turn is it? Returns 'A' or 'B'. For simultaneous games, always 'A' (both move). */
@@ -405,10 +467,26 @@ function _arWhoseTurn(gameId, engine) {
 /** Step the engine with the agent's raw move. Returns description of what happened. */
 function _arStepEngine(gameId, engine, rawMoveA, rawMoveB, stateA, stateB) {
   switch (gameId) {
-    case 'snake': {
+    case 'snake':
+    case 'snake_random': {
       const dirA = _arParseDir(rawMoveA);
       const dirB = _arParseDir(rawMoveB);
       engine.step(dirA, dirB);
+      return { moveA: _AR_DIR_NAMES[dirA], moveB: _AR_DIR_NAMES[dirB] };
+    }
+    case 'snake_royale':
+    case 'snake_2v2': {
+      // 4P games: fnA/fnB are used for first 2 players, AI strategies for 3rd/4th
+      const dirA = _arParseDir(rawMoveA);
+      const dirB = _arParseDir(rawMoveB);
+      // For headless 2-agent mode, fill remaining with greedy AI
+      const dirC = engine.snakes && engine.snakes[2]?.alive ? _arParseDir('UP') : 0;
+      const dirD = engine.snakes && engine.snakes[3]?.alive ? _arParseDir('UP') : 0;
+      if (typeof engine.step4P === 'function') {
+        engine.step4P(dirA, dirB, dirC, dirD);
+      } else {
+        engine.step(dirA, dirB);
+      }
       return { moveA: _AR_DIR_NAMES[dirA], moveB: _AR_DIR_NAMES[dirB] };
     }
     case 'tron': {
@@ -581,11 +659,24 @@ function arRunHeadless(gameId, fnA, fnB, config) {
       turnCount++;
 
       if (typeof engine.getGrid === 'function') {
-        history.push({
+        const frame = {
           turn: turnCount, grid: engine.getGrid(),
           moveA: result.moveA, moveB: result.moveB,
           winner: engine.winner,
-        });
+        };
+        // Add snake-specific state for mini-frame renderer
+        if (gameId.startsWith('snake') && engine.snakeA) {
+          frame.snakes = [engine.snakeA.body.map(p => [...p]), engine.snakeB.body.map(p => [...p])];
+          frame.alive = [engine.snakeA.alive, engine.snakeB.alive];
+          frame.scores = [engine.snakeA.score, engine.snakeB.score];
+          frame.food = engine.food ? (Array.isArray(engine.food[0]) ? engine.food : [engine.food]) : [];
+        } else if (gameId.startsWith('snake') && engine.snakes) {
+          frame.snakes = engine.snakes.map(s => s.body.map(p => [...p]));
+          frame.alive = engine.snakes.map(s => s.alive);
+          frame.scores = engine.snakes.map(s => s.score);
+          frame.food = engine.food || [];
+        }
+        history.push(frame);
       }
     }
   } else {
@@ -1095,7 +1186,9 @@ function arStopLocal() {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function arSeedAgents(gameId) {
-  const seeds = _AR_SEED_AGENTS[gameId];
+  let seeds = _AR_SEED_AGENTS[gameId];
+  // Resolve alias (snake variants point to 'snake')
+  if (typeof seeds === 'string') seeds = _AR_SEED_AGENTS[seeds];
   if (!seeds || !seeds.length) {
     arLog('info', 'No seed agents for this game, creating generic ones');
     LocalResearch.agents.push({
@@ -1174,6 +1267,11 @@ const _AR_SEED_AGENTS = {
   return safe[0];
 }` },
   ],
+
+  // Snake variants reuse the same seed agents — they share the same base interface
+  snake_random: 'snake',  // alias — resolved by arSeedAgents()
+  snake_royale: 'snake',
+  snake_2v2: 'snake',
 
   tron: [
     { name: 'seed_straight', code: `function getMove(state) {
@@ -1376,7 +1474,7 @@ async function arSubmitToCommunity() {
         body: JSON.stringify({
           name: agent.name,
           code: agent.code,
-          contributor: 'local_research',
+          contributor: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.display_name || currentUser.email.split('@')[0] : 'local_research',
         }),
       });
       if (resp.ok) submitted++;
@@ -1475,9 +1573,10 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
 
-  // Snake: raw state format {snakes, food, alive, scores, turn}
-  if (gameId === 'snake' && frame.snakes) {
-    const GRID = 20;
+  // Snake (all variants): raw state format {snakes, food, alive, scores, turn}
+  const isSnakeVariant = gameId === 'snake' || gameId === 'snake_random' || gameId === 'snake_royale' || gameId === 'snake_2v2';
+  if (isSnakeVariant && frame.snakes) {
+    const GRID = gameId === 'snake_royale' ? 30 : gameId === 'snake_2v2' ? 24 : 20;
     const SC = w / GRID;
 
     ctx.fillStyle = _SNAKE_BG;
@@ -1495,11 +1594,17 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
       ctx.fill();
     }
 
-    const alive = frame.alive || [true, true];
-    for (let s = 0; s < 2; s++) {
+    const alive = frame.alive || [true, true, true, true];
+    const snakeCount = frame.snakes.length;
+    const _SNAKE_COLORS_4P = [
+      ['#00ff87', '#00a85a'], ['#00b4d8', '#007a94'],
+      ['#4FCC30', '#2d8a1c'], ['#A356D6', '#7a3aad'],
+    ];
+    const colorsForGame = snakeCount > 2 ? _SNAKE_COLORS_4P : _SNAKE_COLORS;
+    for (let s = 0; s < snakeCount; s++) {
       const sn = frame.snakes[s];
       if (!sn || !sn.length) continue;
-      const [hc, bc] = alive[s] ? _SNAKE_COLORS[s] : [_SNAKE_DEAD, _SNAKE_DEAD];
+      const [hc, bc] = alive[s] ? (colorsForGame[s] || _SNAKE_COLORS[0]) : [_SNAKE_DEAD, _SNAKE_DEAD];
       const P = 1;
       for (let i = sn.length - 1; i >= 0; i--) {
         const [sx, sy] = sn[i];
@@ -1528,12 +1633,25 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
 
     if (frame.scores) {
       ctx.font = `bold ${Math.max(9, SC * 0.7 | 0)}px monospace`;
-      ctx.fillStyle = _SNAKE_COLORS[0][0];
-      ctx.fillText(frame.scores[0], 4, h - 4);
-      ctx.fillStyle = _SNAKE_COLORS[1][0];
-      ctx.textAlign = 'right';
-      ctx.fillText(frame.scores[1], w - 4, h - 4);
       ctx.textAlign = 'left';
+      if (snakeCount <= 2) {
+        ctx.fillStyle = colorsForGame[0][0];
+        ctx.fillText(frame.scores[0], 4, h - 4);
+        ctx.fillStyle = colorsForGame[1][0];
+        ctx.textAlign = 'right';
+        ctx.fillText(frame.scores[1], w - 4, h - 4);
+        ctx.textAlign = 'left';
+      } else {
+        // 4P: show all scores in corners
+        const positions = [[4, h - 4], [w - 4, h - 4], [4, 12], [w - 4, 12]];
+        const aligns = ['left', 'right', 'left', 'right'];
+        for (let s = 0; s < Math.min(snakeCount, 4); s++) {
+          ctx.fillStyle = colorsForGame[s][0];
+          ctx.textAlign = aligns[s];
+          ctx.fillText(frame.scores[s], positions[s][0], positions[s][1]);
+        }
+        ctx.textAlign = 'left';
+      }
     }
     return;
   }
@@ -1959,7 +2077,7 @@ async function arCreateAgentLocal() {
           try {
             const resp = await fetch(`/api/arena/agents/${gameId}`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: block.input.name, code: block.input.code, contributor: model }),
+              body: JSON.stringify({ name: block.input.name, code: block.input.code, contributor: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.display_name || currentUser.email.split('@')[0] : model }),
             });
             const r = await resp.json();
             if (resp.ok && !r.error) {
@@ -2024,7 +2142,8 @@ const HumanPlay = {
   active: false,
   gameId: null,
   engine: null,
-  aiFn: null,
+  agentId: null,
+  agentCode: null,
   aiName: '',
   aiMemory: {},
   humanMemory: {},
@@ -2041,24 +2160,49 @@ const HumanPlay = {
   _clickHandler: null,
 };
 
+/** Fetch AI move from server (agents are Python, executed server-side). */
+async function _hpFetchAiMove(state) {
+  try {
+    const body = { game_id: HumanPlay.gameId, state };
+    if (HumanPlay.agentId) body.agent_id = HumanPlay.agentId;
+    else body.code = HumanPlay.agentCode;
+    const resp = await fetch('/api/arena/agent-move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      console.warn('Agent move error:', data.error);
+      if (state.validMoves && state.validMoves.length > 0) return state.validMoves[0];
+      return 'UP';
+    }
+    return data.move;
+  } catch (e) {
+    console.warn('Agent move fetch error:', e);
+    if (state.validMoves && state.validMoves.length > 0) return state.validMoves[0];
+    return 'UP';
+  }
+}
+
 /** Launch human vs AI play session. Called from arStartHumanPlay() in arena.js */
-function arLaunchHumanPlay(gameId, agentCode, agentName, delayMs) {
+function arLaunchHumanPlay(gameId, agentId, agentCode, agentName, delayMs) {
   if (gameId === 'poker') {
     alert('Poker human play is not yet supported.');
     return;
   }
 
-  const aiFn = arCreateAgentFn(agentCode);
-  if (!aiFn) { alert('Failed to load AI agent code.'); return; }
+  if (!agentId && !agentCode) { alert('No agent code available.'); return; }
 
   const game = ARENA_GAMES.find(g => g.id === gameId);
   if (!game) return;
 
-  // Init state
+  // Init state — agent moves are proxied through the server (Python code)
   HumanPlay.active = true;
   HumanPlay.gameId = gameId;
   HumanPlay.engine = _arNewEngine(gameId, game.config);
-  HumanPlay.aiFn = aiFn;
+  HumanPlay.agentId = agentId;
+  HumanPlay.agentCode = agentCode;
   HumanPlay.aiName = agentName;
   HumanPlay.aiMemory = {};
   HumanPlay.humanMemory = {};
@@ -2102,7 +2246,7 @@ function arLaunchHumanPlay(gameId, agentCode, agentName, delayMs) {
 /** Clean up and exit human play */
 function arHumanQuit() {
   HumanPlay.active = false;
-  if (HumanPlay.timer) { clearInterval(HumanPlay.timer); HumanPlay.timer = null; }
+  if (HumanPlay.timer) { clearTimeout(HumanPlay.timer); HumanPlay.timer = null; }
   if (HumanPlay.timerCountdown) { clearInterval(HumanPlay.timerCountdown); HumanPlay.timerCountdown = null; }
   if (HumanPlay._keyHandler) { document.removeEventListener('keydown', HumanPlay._keyHandler); HumanPlay._keyHandler = null; }
   if (HumanPlay._clickHandler && HumanPlay.canvas) { HumanPlay.canvas.removeEventListener('click', HumanPlay._clickHandler); HumanPlay._clickHandler = null; }
@@ -2220,30 +2364,36 @@ function _hpSetupSimultaneous() {
   _hpUpdateStatus('Arrow keys or WASD to move. Game starts in 1s...');
   _hpUpdateHint(gameId === 'snake' ? 'You are the BLUE snake (left side)' : 'You are BLUE (left side)');
 
-  // Start game loop after 1s
+  // Start game loop after 1s — async because AI moves are fetched from server
+  const tickRate = delayMs > 0 ? Math.max(delayMs, 150) : 200;
+
+  async function _hpSimulTick() {
+    if (!HumanPlay.active || engine.over) {
+      if (engine.over) _hpGameOver();
+      return;
+    }
+
+    // Build AI state and get AI move from server
+    const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
+    const aiRaw = await _hpFetchAiMove(aiState);
+    const aiDir = _arParseDir(aiRaw);
+
+    if (!HumanPlay.active) return;
+
+    // Step engine with human's buffered direction + AI direction
+    engine.step(HumanPlay.humanDir, aiDir);
+    HumanPlay.turns++;
+
+    _hpRender();
+    _hpUpdateStatus(`Turn ${HumanPlay.turns} | You: ${_AR_DIR_NAMES[HumanPlay.humanDir]} | AI: ${_AR_DIR_NAMES[aiDir]}`);
+
+    // Schedule next tick (recursive setTimeout avoids pileup from slow server calls)
+    HumanPlay.timer = setTimeout(_hpSimulTick, tickRate);
+  }
+
   setTimeout(() => {
     if (!HumanPlay.active) return;
-    const tickRate = delayMs > 0 ? Math.max(delayMs, 150) : 200;
-    HumanPlay.timer = setInterval(() => {
-      if (!HumanPlay.active || engine.over) {
-        clearInterval(HumanPlay.timer);
-        HumanPlay.timer = null;
-        if (engine.over) _hpGameOver();
-        return;
-      }
-
-      // Build AI state and get AI move
-      const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
-      const aiRaw = arSafeCall(HumanPlay.aiFn, aiState, 50);
-      const aiDir = _arParseDir(aiRaw);
-
-      // Step engine with human's buffered direction + AI direction
-      engine.step(HumanPlay.humanDir, aiDir);
-      HumanPlay.turns++;
-
-      _hpRender();
-      _hpUpdateStatus(`Turn ${HumanPlay.turns} | You: ${_AR_DIR_NAMES[HumanPlay.humanDir]} | AI: ${_AR_DIR_NAMES[aiDir]}`);
-    }, tickRate);
+    _hpSimulTick();
   }, 1000);
 }
 
@@ -2342,7 +2492,7 @@ function _hpTimeoutMove() {
   }
 }
 
-function _hpDoAiTurn() {
+async function _hpDoAiTurn() {
   const { gameId, engine } = HumanPlay;
   if (engine.over) { _hpGameOver(); return; }
 
@@ -2354,20 +2504,19 @@ function _hpDoAiTurn() {
 
   _hpUpdateStatus(`Turn ${HumanPlay.turns + 1} | AI thinking...`);
 
-  // Small delay so human can see the "thinking" state
-  setTimeout(() => {
-    if (!HumanPlay.active || engine.over) return;
-    const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
-    const raw = arSafeCall(HumanPlay.aiFn, aiState, 50);
-    _arStepEngine(gameId, engine, raw, null, aiState, null);
-    HumanPlay.turns++;
-    _hpRender();
+  // Fetch AI move from server (agents are Python)
+  const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
+  const raw = await _hpFetchAiMove(aiState);
 
-    if (engine.over) { _hpGameOver(); return; }
+  if (!HumanPlay.active || engine.over) return;
+  _arStepEngine(gameId, engine, raw, null, aiState, null);
+  HumanPlay.turns++;
+  _hpRender();
 
-    // Back to human
-    _hpStartHumanTurn();
-  }, 300);
+  if (engine.over) { _hpGameOver(); return; }
+
+  // Back to human
+  _hpStartHumanTurn();
 }
 
 
@@ -2471,7 +2620,7 @@ function _hpApplyHumanMove(gameId, engine, move) {
 
 function _hpGameOver() {
   HumanPlay.active = false;
-  if (HumanPlay.timer) { clearInterval(HumanPlay.timer); HumanPlay.timer = null; }
+  if (HumanPlay.timer) { clearTimeout(HumanPlay.timer); HumanPlay.timer = null; }
   if (HumanPlay.timerCountdown) { clearInterval(HumanPlay.timerCountdown); HumanPlay.timerCountdown = null; }
 
   const winner = HumanPlay.engine.winner;

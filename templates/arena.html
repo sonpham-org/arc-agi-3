@@ -18,6 +18,7 @@
 <script>
 const MODE = {{ mode | tojson }};
 const FEATURES = {{ features | tojson }};
+let currentUser = null;
 </script>
 
 <div class="arena-container" id="arenaContainer">
@@ -44,12 +45,26 @@ const FEATURES = {{ features | tojson }};
           <animate attributeName="opacity" values="0.12;0.12;0.12;1;1;0.12;0.12;0.12" keyTimes="0;0.15;0.3;0.45;0.55;0.7;0.85;1" dur="3.2s" repeatCount="indefinite"/>
         </rect>
       </svg>
-      <span class="app-title-text">AutoResearch Arena<a class="logo-sub-link to-obs" href="/obs">&#8594; to Observatory</a></span>
+      <span class="app-title-text">AutoResearch Arena<a class="logo-sub-link to-obs" href="{{ observatory_url }}">&#8594; to Observatory</a></span>
     </span>
     <a class="nav-link active" id="modeBtnResearch" href="#autoresearch" onclick="switchArenaMode('research');return false;">Auto Research</a>
     <a class="nav-link" id="modeBtnMatch" href="#matchup" onclick="switchArenaMode('match');return false;">Create Match-up</a>
     <span style="flex:1"></span>
-    <a class="nav-switch-btn to-obs" href="/obs">&#8592; to Observatory</a>
+    <a class="nav-switch-btn to-obs" href="{{ observatory_url }}">&#8592; to Observatory</a>
+    {% if google_client_id %}
+    <a id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;text-decoration:none;" href="/api/auth/google">Log in</a>
+    {% else %}
+    <button id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;" onclick="showLoginModal()">Log in</button>
+    {% endif %}
+    <div id="userBadge" style="display:none;position:relative;">
+      <button class="btn" style="font-size:11px;padding:2px 10px;" onclick="toggleUserMenu()">
+        <span id="userBadgeLabel"></span> ▾
+      </button>
+      <div id="userMenu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 0;min-width:140px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+        <div style="padding:6px 12px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border);" id="userMenuEmail"></div>
+        <button style="display:block;width:100%;text-align:left;padding:6px 12px;background:none;border:none;color:var(--red);cursor:pointer;font-family:inherit;font-size:12px;" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
     <button id="themeToggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:6px;line-height:1;" title="Toggle light/dark mode"></button>
   </div>
 
@@ -204,6 +219,12 @@ const FEATURES = {{ features | tojson }};
 
     <!-- Game tab bar -->
     <div class="ar-game-tabs" id="arGameTabs"></div>
+
+    <!-- Loading overlay — shown while game data is being fetched -->
+    <div class="ar-loading-overlay" id="arLoadingOverlay" style="display:none;">
+      <div class="ar-loading-spinner"></div>
+      <div class="ar-loading-text">Loading game data...</div>
+    </div>
 
     <!-- Content area (3 columns) -->
     <div class="ar-content" id="arContent">
@@ -418,6 +439,39 @@ const FEATURES = {{ features | tojson }};
 
 </div>
 
+<!-- Login Modal -->
+<div id="loginModal" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;max-width:360px;width:90%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="font-size:15px;color:var(--accent);">Log in to AutoResearch Arena</h3>
+      <button onclick="hideLoginModal()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px;">&times;</button>
+    </div>
+    <div id="loginStep1">
+      {% if google_client_id %}
+      <a href="/api/auth/google" style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:10px;background:#fff;border:1px solid #dadce0;border-radius:6px;color:#3c4043;font-family:'Google Sans',Roboto,Arial,sans-serif;font-size:14px;font-weight:500;text-decoration:none;cursor:pointer;margin-bottom:14px;box-sizing:border-box;">
+        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Sign in with Google
+      </a>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <hr style="flex:1;border:none;border-top:1px solid var(--border);">
+        <span style="font-size:11px;color:var(--text-dim);">or</span>
+        <hr style="flex:1;border:none;border-top:1px solid var(--border);">
+      </div>
+      {% endif %}
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">Enter your email to receive a login link. No password needed.</p>
+      <input id="loginEmail" type="email" placeholder="you@example.com"
+        style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:13px;margin-bottom:10px;">
+      <button id="loginSendBtn" class="btn btn-primary" style="width:100%;padding:8px;font-size:13px;" onclick="sendMagicLink()">Send login link</button>
+      <div id="loginError" style="display:none;color:var(--red);font-size:11px;margin-top:8px;"></div>
+    </div>
+    <div id="loginStep2" style="display:none;text-align:center;">
+      <p style="font-size:13px;color:var(--text);">Check your email!</p>
+      <p style="font-size:12px;color:var(--text-dim);margin-top:6px;">We sent a login link to <strong id="loginSentEmail"></strong></p>
+      <p style="font-size:11px;color:var(--text-dim);margin-top:10px;">The link expires in 15 minutes.</p>
+    </div>
+  </div>
+</div>
+
 <!-- Scaffolding schemas (declarative field definitions) -->
 <script src="/static/js/config/scaffolding-schemas.js?v={{ static_v }}"></script>
 <!-- Shim: provide getModelInfo/PROVIDER_LABELS/modelsData for scaffolding.js (normally from ui-models.js) -->
@@ -456,7 +510,10 @@ window.addEventListener('hashchange', _arenaRouteFromHash);
 </script>
 <!-- LLM calling infrastructure (callLLM, provider routing, BYOK keys) -->
 <script src="/static/js/scaffolding.js?v={{ static_v }}"></script>
+<!-- Shared auth (login modal, user badge, magic link, Google OAuth) -->
+<script src="/static/js/auth.js?v={{ static_v }}"></script>
 <script src="/static/js/arena.js?v={{ static_v }}"></script>
 <script src="/static/js/arena-autoresearch.js?v={{ static_v }}"></script>
+<script>checkAuthStatus();</script>
 </body>
 </html>
