@@ -2317,6 +2317,7 @@ function arLaunchHumanPlay(gameId, agents, delayMs) {
   HumanPlay.delayMs = delayMs;
   HumanPlay.turns = 0;
   HumanPlay.humanDir = null;
+  HumanPlay.history = [];
 
   // Show game area inside the dialog popup (don't replace arCenter)
   const configArea = document.getElementById('arHumanConfig');
@@ -2542,6 +2543,7 @@ function _hpSetupSimultaneous() {
       engine.step(HumanPlay.humanDir, aiDir);
     }
     HumanPlay.turns++;
+    HumanPlay.history.push(_hpBuildFrame(gameId, engine));
 
     _hpRender();
     _hpUpdateStatus(`Turn ${HumanPlay.turns}`);
@@ -2590,6 +2592,7 @@ function _hpSetupTurnBased() {
     // Apply human move
     _hpApplyHumanMove(gameId, engine, move);
     HumanPlay.turns++;
+    HumanPlay.history.push(_hpBuildFrame(gameId, engine));
     _hpRender();
 
     if (engine.over) { _hpGameOver(); return; }
@@ -2644,6 +2647,7 @@ function _hpTimeoutMove() {
   if (move) {
     _hpApplyHumanMove(gameId, engine, move);
     HumanPlay.turns++;
+    HumanPlay.history.push(_hpBuildFrame(gameId, engine));
     _hpRender();
     _hpUpdateStatus(`Turn ${HumanPlay.turns} | Timeout — random move played`);
     if (engine.over) { _hpGameOver(); return; }
@@ -2670,6 +2674,7 @@ async function _hpDoAiTurn() {
   if (!HumanPlay.active || engine.over) return;
   _arStepEngine(gameId, engine, raw, null, aiState, null);
   HumanPlay.turns++;
+  HumanPlay.history.push(_hpBuildFrame(gameId, engine));
   _hpRender();
 
   if (engine.over) { _hpGameOver(); return; }
@@ -2808,6 +2813,7 @@ function _hpGameOver() {
       delay_ms: HumanPlay.delayMs,
       winner: humanResult,
       turns: HumanPlay.turns,
+      history: HumanPlay.history,
     }),
   }).then(r => r.json()).then(data => {
     if (data.error) console.warn('Human play submit error:', data.error);
