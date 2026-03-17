@@ -1596,11 +1596,18 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
 
     const alive = frame.alive || [true, true, true, true];
     const snakeCount = frame.snakes.length;
-    const _SNAKE_COLORS_4P = [
+    // Royale: 4 distinct colors. 2v2: two greens (team AC) vs two blues (team BD)
+    const _SNAKE_COLORS_ROYALE = [
       ['#00ff87', '#00a85a'], ['#00b4d8', '#007a94'],
       ['#4FCC30', '#2d8a1c'], ['#A356D6', '#7a3aad'],
     ];
-    const colorsForGame = snakeCount > 2 ? _SNAKE_COLORS_4P : _SNAKE_COLORS;
+    const _SNAKE_COLORS_2V2 = [
+      ['#00ff87', '#00a85a'], ['#00b4d8', '#007a94'],  // 0=green(AC), 1=blue(BD)
+      ['#4FCC30', '#2d8a1c'], ['#48a0cc', '#2e7a9e'],  // 2=green(AC), 3=blue(BD)
+    ];
+    const colorsForGame = snakeCount > 2
+      ? (gameId === 'snake_2v2' ? _SNAKE_COLORS_2V2 : _SNAKE_COLORS_ROYALE)
+      : _SNAKE_COLORS;
     for (let s = 0; s < snakeCount; s++) {
       const sn = frame.snakes[s];
       if (!sn || !sn.length) continue;
