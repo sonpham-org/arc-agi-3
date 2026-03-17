@@ -1,7 +1,8 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-16 23:30
+# Date: 2026-03-17 12:00
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
-#   Supports snake + chess960 (Fischer Random). Game engines dispatched via _ACTIVE_GAMES.
+#   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
+#   Game engines dispatched via _ACTIVE_GAMES.
 #   Uses ARENA_CLAUDE_KEY env var (Anthropic API key or OAuth token) for agent evolution.
 #   Uses server/arena_tool_runner.py for LLM tool-calling loops (no external deps).
 #   Runs in two daemon threads: tournament (continuous) + evolution (round-robin games).
@@ -115,10 +116,14 @@ def _load_default_program(game_id='snake'):
 
 try:
     from server.snake_engine import SnakeGame as _SnakeGameBase
+    from server.snake_engine import SnakeRandomGame as _SnakeRandomGameBase
+    from server.snake_engine import SnakeGame4P as _SnakeGame4PBase
     _HAS_SNAKE_ENGINE = True
 except ImportError:
     _HAS_SNAKE_ENGINE = False
     _SnakeGameBase = None
+    _SnakeRandomGameBase = None
+    _SnakeGame4PBase = None
 
 try:
     from server.chess960_engine import Chess960Game as _Chess960GameBase
@@ -135,9 +140,7 @@ except ImportError:
     _OthelloGameBase = None
 
 # Active arena games — both tournament + evolution loops iterate these
-# Snake variants paused during snake variants implementation (2026-03-16)
-# Re-add 'snake' (and new variants) when ready to resume evolution
-_ACTIVE_GAMES = ['chess960', 'othello']
+_ACTIVE_GAMES = ['snake', 'snake_random', 'snake_royale', 'snake_2v2', 'chess960', 'othello']
 
 
 def _run_snake_match(code_a, code_b):
@@ -213,12 +216,89 @@ def _run_othello_match(code_a, code_b):
         return {'winner': None, 'turns': 0, 'scores': [2, 2], 'history': [], 'error': str(exc)}
 
 
+def _run_snake_random_match(code_a, code_b):
+    """Run a headless snake random-maps match. New seed per match.
+    Returns winner/turns/scores/history."""
+    if not _HAS_SNAKE_ENGINE:
+        return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': 'No snake engine'}
+
+    fn_a = _load_agent_fn(code_a)
+    fn_b = _load_agent_fn(code_b)
+    if not fn_a or not fn_b:
+        return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': 'Agent load failed'}
+
+    seed = int(time.time() * 1000) % (2**32)
+    game = _SnakeRandomGameBase(seed=seed)
+    try:
+        result = game.run(fn_a, fn_b)
+        return {
+            'winner': result['winner'],
+            'turns': result['turns'],
+            'scores': result['scores'],
+            'history': result.get('history', []),
+        }
+    except Exception as exc:
+        return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': str(exc)}
+
+
+def _run_snake_4p_match(code_a, code_b, mode='royale'):
+    """Run a headless 4-player snake match. code_a controls snakes 0,2; code_b controls 1,3.
+    Returns winner/turns/scores/history. Winner mapped to agent index (0 or 1) or None."""
+    if not _HAS_SNAKE_ENGINE:
+        return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': 'No snake engine'}
+
+    fn_a = _load_agent_fn(code_a)
+    fn_b = _load_agent_fn(code_b)
+    if not fn_a or not fn_b:
+        return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': 'Agent load failed'}
+
+    if mode == '2v2':
+        config = {'width': 24, 'height': 24, 'max_turns': 300, 'food_count': 10, 'mode': '2v2'}
+    else:
+        config = {'width': 30, 'height': 30, 'max_turns': 400, 'food_count': 12, 'mode': 'royale'}
+
+    game = _SnakeGame4PBase(**config)
+    try:
+        # Agent A controls snakes 0, 2; Agent B controls snakes 1, 3
+        result = game.run([fn_a, fn_b, fn_a, fn_b])
+
+        # Map 4P winner to 2-agent winner
+        raw_winner = result['winner']
+        if raw_winner is None:
+            winner = None
+        elif mode == '2v2':
+            # 'team0' (snakes 0,2) → agent 0; 'team1' (snakes 1,3) → agent 1
+            winner = 0 if raw_winner == 'team0' else (1 if raw_winner == 'team1' else None)
+        else:
+            # Royale: player index 0,2 → agent 0; player index 1,3 → agent 1
+            winner = 0 if raw_winner in (0, 2) else (1 if raw_winner in (1, 3) else None)
+
+        # Aggregate scores: agent 0 = snakes 0+2, agent 1 = snakes 1+3
+        scores_4p = result['scores']
+        scores = [scores_4p[0] + scores_4p[2], scores_4p[1] + scores_4p[3]]
+
+        return {
+            'winner': winner,
+            'turns': result['turns'],
+            'scores': scores,
+            'history': result.get('history', []),
+        }
+    except Exception as exc:
+        return {'winner': None, 'turns': 0, 'scores': [3, 3], 'history': [], 'error': str(exc)}
+
+
 def _run_match(game_id, code_a, code_b):
     """Dispatch match to the correct game engine."""
     if game_id == 'chess960':
         return _run_chess960_match(code_a, code_b)
     if game_id == 'othello':
         return _run_othello_match(code_a, code_b)
+    if game_id == 'snake_random':
+        return _run_snake_random_match(code_a, code_b)
+    if game_id == 'snake_royale':
+        return _run_snake_4p_match(code_a, code_b, mode='royale')
+    if game_id == 'snake_2v2':
+        return _run_snake_4p_match(code_a, code_b, mode='2v2')
     return _run_snake_match(code_a, code_b)
 
 
@@ -862,12 +942,292 @@ def _validate_othello_code(code):
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#   Snake Random Maps Validation — 12 scenarios (2P + walls)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_TEST_STATES_RANDOM = [
+    ('center_walls', {'grid_size': (20, 20), 'my_snake': [[10, 10], [9, 10], [8, 10]], 'my_direction': 'RIGHT', 'enemy_snake': [[15, 15], [16, 15], [17, 15]], 'enemy_direction': 'LEFT', 'food': [[5, 5], [12, 8]], 'walls': [[7, 7], [7, 8], [7, 9], [12, 5], [13, 5]], 'turn': 50, 'prev_moves': []}),
+    ('wall_above', {'grid_size': (20, 20), 'my_snake': [[10, 5], [10, 6], [10, 7]], 'my_direction': 'UP', 'enemy_snake': [[15, 15], [16, 15], [17, 15]], 'enemy_direction': 'LEFT', 'food': [[5, 5]], 'walls': [[10, 4], [9, 4], [11, 4]], 'turn': 30, 'prev_moves': []}),
+    ('wall_corridor', {'grid_size': (20, 20), 'my_snake': [[5, 10], [4, 10], [3, 10]], 'my_direction': 'RIGHT', 'enemy_snake': [[15, 10], [16, 10], [17, 10]], 'enemy_direction': 'LEFT', 'food': [[10, 5]], 'walls': [[5, 9], [6, 9], [7, 9], [5, 11], [6, 11], [7, 11]], 'turn': 60, 'prev_moves': []}),
+    ('near_border', {'grid_size': (20, 20), 'my_snake': [[1, 10], [2, 10], [3, 10]], 'my_direction': 'LEFT', 'enemy_snake': [[18, 10], [17, 10], [16, 10]], 'enemy_direction': 'RIGHT', 'food': [[10, 10]], 'walls': [[5, 5], [5, 6]], 'turn': 40, 'prev_moves': []}),
+    ('corner_walls', {'grid_size': (20, 20), 'my_snake': [[2, 2], [3, 2], [4, 2]], 'my_direction': 'LEFT', 'enemy_snake': [[17, 17], [16, 17], [15, 17]], 'enemy_direction': 'RIGHT', 'food': [[10, 10]], 'walls': [[3, 3], [3, 4], [4, 3]], 'turn': 20, 'prev_moves': []}),
+    ('many_walls', {'grid_size': (20, 20), 'my_snake': [[10, 10], [9, 10], [8, 10]], 'my_direction': 'RIGHT', 'enemy_snake': [[15, 15], [16, 15], [17, 15]], 'enemy_direction': 'LEFT', 'food': [[5, 5]], 'walls': [[3, 3], [3, 4], [3, 5], [7, 7], [7, 8], [12, 3], [12, 4], [12, 5], [15, 8], [15, 9], [15, 10]], 'turn': 100, 'prev_moves': []}),
+    ('wall_trap', {'grid_size': (20, 20), 'my_snake': [[8, 8], [8, 9], [8, 10]], 'my_direction': 'UP', 'enemy_snake': [[15, 15], [14, 15], [13, 15]], 'enemy_direction': 'RIGHT', 'food': [[12, 12]], 'walls': [[7, 7], [8, 7], [9, 7], [9, 8]], 'turn': 80, 'prev_moves': []}),
+    ('enemy_near_wall', {'grid_size': (20, 20), 'my_snake': [[10, 10], [9, 10], [8, 10]], 'my_direction': 'RIGHT', 'enemy_snake': [[12, 10], [13, 10], [14, 10]], 'enemy_direction': 'LEFT', 'food': [[10, 5]], 'walls': [[11, 9], [11, 11]], 'turn': 90, 'prev_moves': []}),
+    ('enemy_dead_walls', {'grid_size': (20, 20), 'my_snake': [[10, 10], [9, 10], [8, 10]], 'my_direction': 'RIGHT', 'enemy_snake': [], 'enemy_direction': None, 'food': [[15, 15]], 'walls': [[5, 5], [5, 6], [6, 5]], 'turn': 150, 'prev_moves': []}),
+    ('no_walls', {'grid_size': (20, 20), 'my_snake': [[10, 10], [9, 10], [8, 10]], 'my_direction': 'RIGHT', 'enemy_snake': [[15, 15], [16, 15], [17, 15]], 'enemy_direction': 'LEFT', 'food': [[5, 5]], 'walls': [], 'turn': 10, 'prev_moves': []}),
+    ('start_walls', {'grid_size': (20, 20), 'my_snake': [[3, 3], [2, 3], [1, 3]], 'my_direction': 'RIGHT', 'enemy_snake': [[16, 16], [17, 16], [18, 16]], 'enemy_direction': 'LEFT', 'food': [[10, 5]], 'walls': [[5, 3], [5, 4], [5, 5], [10, 10], [11, 10]], 'turn': 0, 'prev_moves': []}),
+    ('late_game_walls', {'grid_size': (20, 20), 'my_snake': [[10, 10], [10, 11], [10, 12], [10, 13], [10, 14]], 'my_direction': 'UP', 'enemy_snake': [[5, 5], [5, 6], [5, 7], [5, 8]], 'enemy_direction': 'UP', 'food': [[18, 18]], 'walls': [[8, 8], [8, 9], [9, 8], [12, 12], [12, 13]], 'turn': 180, 'prev_moves': []}),
+]
+
+
+def _validate_snake_random_code(code):
+    """Validate agent code against 12 snake random-maps scenarios."""
+    forbidden = ['import os', 'import subprocess', 'import socket', 'import sys',
+                  'open(', '__import__', 'exec(', 'eval(']
+    for pat in forbidden:
+        if pat in code:
+            return f'Forbidden pattern: {pat}'
+
+    fn = _load_agent_fn(code)
+    if not fn:
+        return 'get_move function not found or syntax error.'
+
+    failures = []
+    for scenario_name, state in _TEST_STATES_RANDOM:
+        try:
+            start = time.time()
+            result = fn(state)
+            elapsed = time.time() - start
+            if elapsed > 0.1:
+                failures.append(f'{scenario_name}: too slow ({elapsed*1000:.0f}ms)')
+            elif result not in _VALID_MOVES:
+                failures.append(f"{scenario_name}: returned '{result}'")
+        except Exception as exc:
+            failures.append(f'{scenario_name}: CRASH — {type(exc).__name__}: {exc}')
+
+    if failures:
+        return 'Test failures:\n  ' + '\n  '.join(failures)
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#   Snake Battle Royale (4P) Validation — 12 scenarios
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _make_4p_state(my_idx, my_body, my_dir, snakes_data, food, turn, grid_size=(30, 30)):
+    """Build a 4P state dict for testing."""
+    snakes = []
+    for i, (body, direction, alive) in enumerate(snakes_data):
+        snakes.append({
+            'body': body, 'direction': direction, 'alive': alive,
+            'is_ally': False,  # royale: no allies
+        })
+    return {
+        'grid_size': grid_size,
+        'my_snake': my_body,
+        'my_direction': my_dir,
+        'my_index': my_idx,
+        'snakes': snakes,
+        'food': food,
+        'turn': turn,
+        'prev_moves': [],
+    }
+
+_TEST_STATES_ROYALE = [
+    ('center_4p', _make_4p_state(0, [[15, 15], [14, 15], [13, 15]], 'RIGHT',
+        [([[15, 15], [14, 15], [13, 15]], 'RIGHT', True), ([[25, 4], [26, 4], [27, 4]], 'LEFT', True),
+         ([[4, 25], [3, 25], [2, 25]], 'RIGHT', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[10, 10], [20, 20], [5, 25]], 50)),
+    ('near_wall_4p', _make_4p_state(0, [[1, 15], [2, 15], [3, 15]], 'LEFT',
+        [([[1, 15], [2, 15], [3, 15]], 'LEFT', True), ([[25, 4], [26, 4], [27, 4]], 'LEFT', True),
+         ([[4, 25], [3, 25], [2, 25]], 'RIGHT', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[10, 10]], 30)),
+    ('corner_4p', _make_4p_state(0, [[1, 1], [2, 1], [3, 1]], 'LEFT',
+        [([[1, 1], [2, 1], [3, 1]], 'LEFT', True), ([[28, 1], [27, 1], [26, 1]], 'RIGHT', True),
+         ([[1, 28], [2, 28], [3, 28]], 'LEFT', True), ([[28, 28], [27, 28], [26, 28]], 'RIGHT', True)],
+        [[15, 15]], 10)),
+    ('two_dead_4p', _make_4p_state(0, [[15, 15], [14, 15], [13, 15]], 'RIGHT',
+        [([[15, 15], [14, 15], [13, 15]], 'RIGHT', True), ([[25, 4], [26, 4], [27, 4]], 'LEFT', True),
+         ([], None, False), ([], None, False)],
+        [[10, 10]], 200)),
+    ('enemy_adjacent_4p', _make_4p_state(0, [[15, 15], [14, 15], [13, 15]], 'RIGHT',
+        [([[15, 15], [14, 15], [13, 15]], 'RIGHT', True), ([[17, 15], [18, 15], [19, 15]], 'LEFT', True),
+         ([[15, 17], [15, 18], [15, 19]], 'UP', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[10, 10], [20, 20]], 80)),
+    ('long_snake_4p', _make_4p_state(0, [[15, 15], [15, 16], [15, 17], [15, 18], [15, 19], [15, 20], [15, 21]], 'UP',
+        [([[15, 15], [15, 16], [15, 17], [15, 18], [15, 19], [15, 20], [15, 21]], 'UP', True),
+         ([[5, 5], [4, 5], [3, 5]], 'RIGHT', True),
+         ([[25, 5], [26, 5], [27, 5]], 'LEFT', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[10, 10], [20, 20], [5, 25]], 150)),
+    ('start_4p', _make_4p_state(0, [[4, 4], [3, 4], [2, 4]], 'RIGHT',
+        [([[4, 4], [3, 4], [2, 4]], 'RIGHT', True), ([[25, 4], [26, 4], [27, 4]], 'LEFT', True),
+         ([[4, 25], [3, 25], [2, 25]], 'RIGHT', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[10, 10], [20, 10], [10, 20], [20, 20]], 0)),
+    ('last_alive_4p', _make_4p_state(0, [[15, 15], [14, 15], [13, 15]], 'RIGHT',
+        [([[15, 15], [14, 15], [13, 15]], 'RIGHT', True), ([], None, False),
+         ([], None, False), ([], None, False)],
+        [[10, 10]], 300)),
+    ('crowded_4p', _make_4p_state(0, [[15, 15], [14, 15], [13, 15]], 'RIGHT',
+        [([[15, 15], [14, 15], [13, 15]], 'RIGHT', True), ([[16, 14], [17, 14], [18, 14]], 'LEFT', True),
+         ([[14, 16], [13, 16], [12, 16]], 'RIGHT', True), ([[16, 16], [17, 16], [18, 16]], 'LEFT', True)],
+        [[15, 10], [15, 20]], 100)),
+    ('as_player2_4p', _make_4p_state(1, [[25, 4], [26, 4], [27, 4]], 'LEFT',
+        [([[4, 4], [3, 4], [2, 4]], 'RIGHT', True), ([[25, 4], [26, 4], [27, 4]], 'LEFT', True),
+         ([[4, 25], [3, 25], [2, 25]], 'RIGHT', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[15, 15]], 20)),
+    ('as_player3_4p', _make_4p_state(2, [[4, 25], [3, 25], [2, 25]], 'RIGHT',
+        [([[4, 4], [3, 4], [2, 4]], 'RIGHT', True), ([[25, 4], [26, 4], [27, 4]], 'LEFT', True),
+         ([[4, 25], [3, 25], [2, 25]], 'RIGHT', True), ([[25, 25], [26, 25], [27, 25]], 'LEFT', True)],
+        [[15, 15]], 20)),
+    ('late_game_4p', _make_4p_state(0, [[15, 15], [15, 16], [15, 17], [15, 18], [15, 19]], 'UP',
+        [([[15, 15], [15, 16], [15, 17], [15, 18], [15, 19]], 'UP', True),
+         ([[10, 10], [10, 11], [10, 12], [10, 13]], 'UP', True),
+         ([], None, False), ([], None, False)],
+        [[5, 5], [25, 25]], 350)),
+]
+
+
+def _validate_snake_royale_code(code):
+    """Validate agent code against 12 snake royale (4P) scenarios."""
+    forbidden = ['import os', 'import subprocess', 'import socket', 'import sys',
+                  'open(', '__import__', 'exec(', 'eval(']
+    for pat in forbidden:
+        if pat in code:
+            return f'Forbidden pattern: {pat}'
+
+    fn = _load_agent_fn(code)
+    if not fn:
+        return 'get_move function not found or syntax error.'
+
+    failures = []
+    for scenario_name, state in _TEST_STATES_ROYALE:
+        try:
+            start = time.time()
+            result = fn(state)
+            elapsed = time.time() - start
+            if elapsed > 0.1:
+                failures.append(f'{scenario_name}: too slow ({elapsed*1000:.0f}ms)')
+            elif result not in _VALID_MOVES:
+                failures.append(f"{scenario_name}: returned '{result}'")
+        except Exception as exc:
+            failures.append(f'{scenario_name}: CRASH — {type(exc).__name__}: {exc}')
+
+    if failures:
+        return 'Test failures:\n  ' + '\n  '.join(failures)
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#   Snake 2v2 Teams (4P) Validation — 12 scenarios
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _make_2v2_state(my_idx, my_body, my_dir, snakes_data, food, turn, grid_size=(24, 24)):
+    """Build a 2v2 state dict for testing. Teams: (0,2) vs (1,3)."""
+    my_team = my_idx % 2
+    snakes = []
+    for i, (body, direction, alive) in enumerate(snakes_data):
+        snakes.append({
+            'body': body, 'direction': direction, 'alive': alive,
+            'is_ally': (i % 2) == my_team,
+        })
+    # Add 2v2-specific fields
+    ally_idx = {0: 2, 1: 3, 2: 0, 3: 1}[my_idx]
+    ally_data = snakes_data[ally_idx]
+    enemy_indices = [i for i in range(4) if i != my_idx and (i % 2) != my_team]
+    return {
+        'grid_size': grid_size,
+        'my_snake': my_body,
+        'my_direction': my_dir,
+        'my_index': my_idx,
+        'snakes': snakes,
+        'ally_snake': ally_data[0] if ally_data[2] else [],
+        'ally_direction': ally_data[1] if ally_data[2] else None,
+        'enemies': [{'body': snakes_data[i][0] if snakes_data[i][2] else [],
+                      'direction': snakes_data[i][1] if snakes_data[i][2] else None,
+                      'alive': snakes_data[i][2]} for i in enemy_indices],
+        'food': food,
+        'turn': turn,
+        'prev_moves': [],
+    }
+
+_TEST_STATES_2V2 = [
+    ('center_2v2', _make_2v2_state(0, [[12, 12], [11, 12], [10, 12]], 'RIGHT',
+        [([[12, 12], [11, 12], [10, 12]], 'RIGHT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[8, 8], [16, 16]], 50)),
+    ('near_wall_2v2', _make_2v2_state(0, [[1, 12], [2, 12], [3, 12]], 'LEFT',
+        [([[1, 12], [2, 12], [3, 12]], 'LEFT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[12, 12]], 30)),
+    ('ally_nearby_2v2', _make_2v2_state(0, [[10, 10], [9, 10], [8, 10]], 'RIGHT',
+        [([[10, 10], [9, 10], [8, 10]], 'RIGHT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([[11, 10], [11, 11], [11, 12]], 'UP', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[5, 5]], 40)),
+    ('enemy_adjacent_2v2', _make_2v2_state(0, [[10, 10], [9, 10], [8, 10]], 'RIGHT',
+        [([[10, 10], [9, 10], [8, 10]], 'RIGHT', True), ([[12, 10], [13, 10], [14, 10]], 'LEFT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[10, 5]], 70)),
+    ('ally_dead_2v2', _make_2v2_state(0, [[12, 12], [11, 12], [10, 12]], 'RIGHT',
+        [([[12, 12], [11, 12], [10, 12]], 'RIGHT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([], None, False), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[8, 8]], 150)),
+    ('enemies_dead_2v2', _make_2v2_state(0, [[12, 12], [11, 12], [10, 12]], 'RIGHT',
+        [([[12, 12], [11, 12], [10, 12]], 'RIGHT', True), ([], None, False),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([], None, False)],
+        [[8, 8]], 200)),
+    ('start_2v2', _make_2v2_state(0, [[4, 4], [3, 4], [2, 4]], 'RIGHT',
+        [([[4, 4], [3, 4], [2, 4]], 'RIGHT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[8, 8], [16, 8], [8, 16], [16, 16]], 0)),
+    ('as_player1_2v2', _make_2v2_state(1, [[19, 4], [20, 4], [21, 4]], 'LEFT',
+        [([[4, 4], [3, 4], [2, 4]], 'RIGHT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[12, 12]], 20)),
+    ('as_player2_2v2', _make_2v2_state(2, [[4, 19], [3, 19], [2, 19]], 'RIGHT',
+        [([[4, 4], [3, 4], [2, 4]], 'RIGHT', True), ([[19, 4], [20, 4], [21, 4]], 'LEFT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[12, 12]], 20)),
+    ('long_snake_2v2', _make_2v2_state(0, [[12, 12], [12, 13], [12, 14], [12, 15], [12, 16], [12, 17]], 'UP',
+        [([[12, 12], [12, 13], [12, 14], [12, 15], [12, 16], [12, 17]], 'UP', True),
+         ([[5, 5], [4, 5], [3, 5]], 'RIGHT', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([[19, 19], [20, 19], [21, 19]], 'LEFT', True)],
+        [[8, 8], [16, 16]], 120)),
+    ('corner_2v2', _make_2v2_state(0, [[1, 1], [2, 1], [3, 1]], 'LEFT',
+        [([[1, 1], [2, 1], [3, 1]], 'LEFT', True), ([[22, 1], [21, 1], [20, 1]], 'RIGHT', True),
+         ([[1, 22], [2, 22], [3, 22]], 'LEFT', True), ([[22, 22], [21, 22], [20, 22]], 'RIGHT', True)],
+        [[12, 12]], 10)),
+    ('late_game_2v2', _make_2v2_state(0, [[12, 12], [12, 13], [12, 14], [12, 15]], 'UP',
+        [([[12, 12], [12, 13], [12, 14], [12, 15]], 'UP', True),
+         ([[8, 8], [8, 9], [8, 10], [8, 11], [8, 12]], 'UP', True),
+         ([[4, 19], [3, 19], [2, 19]], 'RIGHT', True), ([], None, False)],
+        [[5, 5], [20, 20]], 250)),
+]
+
+
+def _validate_snake_2v2_code(code):
+    """Validate agent code against 12 snake 2v2 team scenarios."""
+    forbidden = ['import os', 'import subprocess', 'import socket', 'import sys',
+                  'open(', '__import__', 'exec(', 'eval(']
+    for pat in forbidden:
+        if pat in code:
+            return f'Forbidden pattern: {pat}'
+
+    fn = _load_agent_fn(code)
+    if not fn:
+        return 'get_move function not found or syntax error.'
+
+    failures = []
+    for scenario_name, state in _TEST_STATES_2V2:
+        try:
+            start = time.time()
+            result = fn(state)
+            elapsed = time.time() - start
+            if elapsed > 0.1:
+                failures.append(f'{scenario_name}: too slow ({elapsed*1000:.0f}ms)')
+            elif result not in _VALID_MOVES:
+                failures.append(f"{scenario_name}: returned '{result}'")
+        except Exception as exc:
+            failures.append(f'{scenario_name}: CRASH — {type(exc).__name__}: {exc}')
+
+    if failures:
+        return 'Test failures:\n  ' + '\n  '.join(failures)
+    return None
+
+
 def _validate_code(game_id, code):
     """Dispatch validation to the correct game validator."""
     if game_id == 'chess960':
         return _validate_chess960_code(code)
     if game_id == 'othello':
         return _validate_othello_code(code)
+    if game_id == 'snake_random':
+        return _validate_snake_random_code(code)
+    if game_id == 'snake_royale':
+        return _validate_snake_royale_code(code)
+    if game_id == 'snake_2v2':
+        return _validate_snake_2v2_code(code)
     return _validate_agent_code(code)
 
 
@@ -1078,6 +1438,21 @@ _GAME_SEEDS = {
         'seed_random': 'random_agent.py',
         'seed_greedy': 'greedy_agent.py',
         'seed_wall_avoider': 'wall_avoider.py',
+    },
+    'snake_random': {
+        'seed_random': 'snake_random_random_agent.py',
+        'seed_greedy': 'snake_random_greedy_agent.py',
+        'seed_wall_avoider': 'snake_random_wall_avoider.py',
+    },
+    'snake_royale': {
+        'seed_random': 'snake_royale_random_agent.py',
+        'seed_greedy': 'snake_royale_greedy_agent.py',
+        'seed_cautious': 'snake_royale_cautious_agent.py',
+    },
+    'snake_2v2': {
+        'seed_random': 'snake_2v2_random_agent.py',
+        'seed_greedy': 'snake_2v2_greedy_agent.py',
+        'seed_team': 'snake_2v2_team_agent.py',
     },
     'chess960': {
         'chess960_seed_random': 'chess960_random_agent.py',

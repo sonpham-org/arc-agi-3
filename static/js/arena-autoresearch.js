@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-16 23:45
+// Date: 2026-03-17 00:00
 // PURPOSE: Arena Auto Research — in-browser evolution + tournament engine.
 //   Phase 2: headless match runner, per-game state adapters, live tournament canvases.
 //   Phase 4: human vs AI play mode — keyboard/click input, timed moves, result submission.
@@ -668,8 +668,8 @@ function arRunHeadless(gameId, fnA, fnB, config) {
         if (gameId.startsWith('snake') && engine.snakeA) {
           frame.snakes = [engine.snakeA.body.map(p => [...p]), engine.snakeB.body.map(p => [...p])];
           frame.alive = [engine.snakeA.alive, engine.snakeB.alive];
-          frame.scores = [engine.snakeA.score, engine.snakeB.score];
-          frame.food = engine.food ? (Array.isArray(engine.food[0]) ? engine.food : [engine.food]) : [];
+          frame.scores = [engine.snakeA.body.length, engine.snakeB.body.length];
+          frame.food = Array.isArray(engine.food) ? engine.food : [];
         } else if (gameId.startsWith('snake') && engine.snakes) {
           frame.snakes = engine.snakes.map(s => s.body.map(p => [...p]));
           frame.alive = engine.snakes.map(s => s.alive);
@@ -2142,16 +2142,16 @@ const HumanPlay = {
   active: false,
   gameId: null,
   engine: null,
+  agents: [],            // [{id, code, name}, ...] — 1 for 2P, 3 for 4P
   agentId: null,
   agentCode: null,
   aiName: '',
-  aiMemory: {},
-  humanMemory: {},
   delayMs: 1000,       // time limit per human move (0 = infinite)
   timer: null,          // game loop interval (simultaneous games)
   timerCountdown: null, // countdown display interval
   moveDeadline: 0,      // timestamp when current move times out
   humanDir: null,        // buffered direction for simultaneous games
+  aiPrevMoves: [],       // track AI moves for prev_moves state field
   turns: 0,
   canvas: null,
   ctx: null,
@@ -2160,12 +2160,79 @@ const HumanPlay = {
   _clickHandler: null,
 };
 
-/** Fetch AI move from server (agents are Python, executed server-side). */
-async function _hpFetchAiMove(state) {
+/** Build state in Python SnakeGame.get_state() format for server-side agents.
+ *  @param {object} engine — JS snake engine
+ *  @param {number} playerIdx — 0-based index (0=human for 2P, 0-3 for 4P)
+ *  @param {number} agentSlot — index into HumanPlay.agents for prev_moves tracking */
+function _hpBuildPythonState(engine, playerIdx, agentSlot) {
+  const gameId = HumanPlay.gameId;
+  const prevMoves = (HumanPlay.aiPrevMoves && HumanPlay.aiPrevMoves[agentSlot]) || [];
+
+  // 4-player modes (royale / 2v2)
+  if (engine.snakes && engine.snakes.length > 2) {
+    const me = engine.snakes[playerIdx];
+    const state = {
+      grid_size: [engine.W, engine.H],
+      my_snake: me.body.map(p => [...p]),
+      my_direction: DIR_NAME[me.dir],
+      my_index: playerIdx,
+      snakes: engine.snakes.map((s, i) => ({
+        body: s.alive ? s.body.map(p => [...p]) : [],
+        direction: s.alive ? DIR_NAME[s.dir] : null,
+        alive: s.alive,
+        is_ally: engine.mode === '2v2' ? (i % 2) === (playerIdx % 2) : false,
+      })),
+      food: (engine.foodList || engine.food || []).map(f => [...f]),
+      turn: engine.turn,
+      prev_moves: prevMoves,
+    };
+    // 2v2: add convenience ally/enemies fields
+    if (engine.mode === '2v2') {
+      const allyIdx = playerIdx === 0 ? 2 : playerIdx === 1 ? 3 : playerIdx === 2 ? 0 : 1;
+      const ally = engine.snakes[allyIdx];
+      state.ally_snake = ally.alive ? ally.body.map(p => [...p]) : [];
+      state.ally_direction = ally.alive ? DIR_NAME[ally.dir] : null;
+      state.enemies = engine.snakes
+        .filter((_, i) => (i % 2) !== (playerIdx % 2))
+        .map(e => ({
+          body: e.alive ? e.body.map(p => [...p]) : [],
+          direction: e.alive ? DIR_NAME[e.dir] : null,
+          alive: e.alive,
+        }));
+    }
+    return state;
+  }
+
+  // 2-player modes (snake / snake_random)
+  const isA = playerIdx === 0;
+  const me = isA ? engine.snakeA : engine.snakeB;
+  const enemy = isA ? engine.snakeB : engine.snakeA;
+  const state = {
+    grid_size: [engine.W, engine.H],
+    my_snake: me.body.map(p => [...p]),
+    my_direction: DIR_NAME[me.dir],
+    enemy_snake: enemy.alive ? enemy.body.map(p => [...p]) : [],
+    enemy_direction: enemy.alive ? DIR_NAME[enemy.dir] : null,
+    food: (Array.isArray(engine.food) ? engine.food : (engine.food ? [engine.food] : [])).map(f => [...f]),
+    turn: engine.turn,
+    prev_moves: prevMoves,
+  };
+  // snake_random: include walls
+  if (gameId === 'snake_random' && engine.walls) {
+    state.walls = [...engine.walls].map(k => k.split(',').map(Number));
+  }
+  return state;
+}
+
+/** Fetch AI move from server (agents are Python, executed server-side).
+ *  @param {object} state — Python-format game state
+ *  @param {object} [agent] — {id, code} for specific agent (default: HumanPlay primary agent) */
+async function _hpFetchAiMove(state, agent) {
   try {
+    const a = agent || HumanPlay.agents[0];
     const body = { game_id: HumanPlay.gameId, state };
-    if (HumanPlay.agentId) body.agent_id = HumanPlay.agentId;
-    else body.code = HumanPlay.agentCode;
+    if (a.id) body.agent_id = a.id;
+    else body.code = a.code;
     const resp = await fetch('/api/arena/agent-move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2185,52 +2252,62 @@ async function _hpFetchAiMove(state) {
   }
 }
 
-/** Launch human vs AI play session. Called from arStartHumanPlay() in arena.js */
-function arLaunchHumanPlay(gameId, agentId, agentCode, agentName, delayMs) {
+/** Launch human vs AI play session. Called from arStartHumanPlay() in arena.js
+ *  @param {string} gameId
+ *  @param {Array<{id, code, name}>} agents — 1 agent for 2P, 3 agents for 4P
+ *  @param {number} delayMs */
+function arLaunchHumanPlay(gameId, agents, delayMs) {
   if (gameId === 'poker') {
     alert('Poker human play is not yet supported.');
     return;
   }
 
-  if (!agentId && !agentCode) { alert('No agent code available.'); return; }
+  if (!agents || !agents.length) { alert('No agent code available.'); return; }
 
   const game = ARENA_GAMES.find(g => g.id === gameId);
   if (!game) return;
+
+  const is4P = gameId === 'snake_royale' || gameId === 'snake_2v2';
 
   // Init state — agent moves are proxied through the server (Python code)
   HumanPlay.active = true;
   HumanPlay.gameId = gameId;
   HumanPlay.engine = _arNewEngine(gameId, game.config);
-  HumanPlay.agentId = agentId;
-  HumanPlay.agentCode = agentCode;
-  HumanPlay.aiName = agentName;
-  HumanPlay.aiMemory = {};
-  HumanPlay.humanMemory = {};
+  // agents[0] = selected opponent, agents[1..2] = random fill for 4P
+  HumanPlay.agents = agents;
+  HumanPlay.agentId = agents[0].id;
+  HumanPlay.agentCode = agents[0].code;
+  HumanPlay.aiName = agents[0].name;
+  HumanPlay.aiPrevMoves = agents.map(() => []);
   HumanPlay.delayMs = delayMs;
   HumanPlay.turns = 0;
   HumanPlay.humanDir = null;
 
-  // Build UI in arCenter
-  const center = document.getElementById('arCenter');
-  const sz = HumanPlay.canvasSize;
+  // Show game area inside the dialog popup (don't replace arCenter)
+  const configArea = document.getElementById('arHumanConfig');
+  const gameArea = document.getElementById('arHumanGameArea');
+  if (configArea) configArea.style.display = 'none';
+  if (gameArea) gameArea.style.display = 'block';
 
-  center.innerHTML = `
-    <div class="ar-section-header">
-      <span>You vs ${escHtml(agentName)}</span>
-      <div>
-        <span class="ar-human-timer-badge" id="hpTimer">${delayMs ? delayMs + 'ms' : 'No limit'}</span>
-        <button class="ar-btn ar-btn-sm" onclick="arHumanQuit()">Quit</button>
-      </div>
-    </div>
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:12px;">
-      <canvas id="hpCanvas" width="${sz}" height="${sz}" style="image-rendering:pixelated;border:2px solid var(--border);border-radius:4px;max-width:100%;max-height:calc(100vh - 200px);cursor:${_arIsSimultaneous(gameId) ? 'default' : 'pointer'};"></canvas>
-      <div id="hpStatus" style="margin-top:8px;font-size:13px;font-weight:600;color:var(--text);"></div>
-      <div id="hpHint" style="font-size:11px;color:var(--text-dim);margin-top:4px;"></div>
-    </div>
-  `;
+  // Title: show opponent name, or all names for 4P
+  const titleEl = document.getElementById('hpTitle');
+  if (titleEl) {
+    if (is4P) {
+      const names = agents.map(a => a.name).join(', ');
+      titleEl.textContent = `You vs ${names}`;
+    } else {
+      titleEl.textContent = `You vs ${agents[0].name}`;
+    }
+  }
+  const timerEl = document.getElementById('hpTimer');
+  if (timerEl) timerEl.textContent = delayMs ? delayMs + 'ms' : 'No limit';
+
+  // Show the dialog overlay
+  document.getElementById('arHumanDialog').style.display = 'flex';
 
   HumanPlay.canvas = document.getElementById('hpCanvas');
   HumanPlay.ctx = HumanPlay.canvas.getContext('2d');
+  HumanPlay.canvasSize = HumanPlay.canvas.width;
 
   // Render initial state
   _hpRender();
@@ -2251,13 +2328,13 @@ function arHumanQuit() {
   if (HumanPlay._keyHandler) { document.removeEventListener('keydown', HumanPlay._keyHandler); HumanPlay._keyHandler = null; }
   if (HumanPlay._clickHandler && HumanPlay.canvas) { HumanPlay.canvas.removeEventListener('click', HumanPlay._clickHandler); HumanPlay._clickHandler = null; }
 
-  // Restore research view
-  const gameId = AR.selectedGame || HumanPlay.gameId;
-  if (gameId) arSelectGame(gameId, 'community');
-  else {
-    const center = document.getElementById('arCenter');
-    if (center) center.innerHTML = '<div class="ar-no-data">Select a game to begin</div>';
-  }
+  // Hide the dialog — research view is intact behind it
+  document.getElementById('arHumanDialog').style.display = 'none';
+  // Reset dialog to config state for next time
+  const configArea = document.getElementById('arHumanConfig');
+  const gameArea = document.getElementById('arHumanGameArea');
+  if (configArea) configArea.style.display = 'block';
+  if (gameArea) gameArea.style.display = 'none';
 }
 
 
@@ -2267,11 +2344,13 @@ function _hpRender() {
   const { gameId, engine, ctx, canvasSize: sz } = HumanPlay;
   if (!engine || !ctx) return;
 
-  // Build a frame object matching what the arena render functions expect
+  // Build a frame object and use the tournament mini-frame renderer for snake
   const frame = _hpBuildFrame(gameId, engine);
-  const game = ARENA_GAMES.find(g => g.id === gameId);
-  if (game && game.render) {
-    game.render(ctx, frame, sz);
+  if (gameId === 'snake' || gameId.startsWith('snake_')) {
+    _arRenderMiniFrame(HumanPlay.canvas, gameId, frame);
+  } else {
+    const game = ARENA_GAMES.find(g => g.id === gameId);
+    if (game && game.render) game.render(ctx, frame, sz);
   }
 
   // Overlay valid moves for turn-based click games
@@ -2285,7 +2364,28 @@ function _hpRender() {
 
 function _hpBuildFrame(gameId, engine) {
   switch (gameId) {
-    case 'snake': return { grid: engine.getGrid() };
+    case 'snake':
+    case 'snake_random': {
+      // 2P snake variants
+      return {
+        snakes: [engine.snakeA.body.map(p => [...p]), engine.snakeB.body.map(p => [...p])],
+        alive: [engine.snakeA.alive, engine.snakeB.alive],
+        scores: [engine.snakeA.body.length, engine.snakeB.body.length],
+        food: Array.isArray(engine.food) ? engine.food : (engine.food ? [engine.food] : []),
+        turn: engine.turn,
+      };
+    }
+    case 'snake_royale':
+    case 'snake_2v2': {
+      // 4P snake variants
+      return {
+        snakes: engine.snakes.map(s => s.body.map(p => [...p])),
+        alive: engine.snakes.map(s => s.alive),
+        scores: engine.snakes.map(s => s.body.length),
+        food: (engine.foodList || engine.food || []).map(f => [...f]),
+        turn: engine.turn,
+      };
+    }
     case 'tron': return { grid: engine.getGrid() };
     case 'connect4': return { board: engine.getBoard(), lastMove: engine.lastMove };
     case 'chess960': return { board: engine.getBoard(), lastMove: engine.lastMove };
@@ -2342,8 +2442,11 @@ function _hpDrawValidMoves(gameId, engine, ctx, sz) {
 function _hpSetupSimultaneous() {
   const { gameId, engine, delayMs } = HumanPlay;
 
-  // Default human direction = current snake/tron direction
-  if (gameId === 'snake') HumanPlay.humanDir = engine.snakeA.dir;
+  const is4P = gameId === 'snake_royale' || gameId === 'snake_2v2';
+
+  // Default human direction = current snake direction
+  if (is4P) HumanPlay.humanDir = engine.snakes[0].dir;
+  else if (gameId === 'snake' || gameId === 'snake_random') HumanPlay.humanDir = engine.snakeA.dir;
   else if (gameId === 'tron') HumanPlay.humanDir = engine.dirA;
   else HumanPlay.humanDir = 0;
 
@@ -2362,10 +2465,16 @@ function _hpSetupSimultaneous() {
   HumanPlay._keyHandler = keyHandler;
 
   _hpUpdateStatus('Arrow keys or WASD to move. Game starts in 1s...');
-  _hpUpdateHint(gameId === 'snake' ? 'You are the BLUE snake (left side)' : 'You are BLUE (left side)');
+  if (is4P) {
+    const label = gameId === 'snake_2v2' ? 'You are GREEN (top-left). Your ally is bottom-left.' : 'You are GREEN (top-left). Free for all!';
+    _hpUpdateHint(label);
+  } else {
+    _hpUpdateHint('You are the GREEN snake (top-left)');
+  }
 
   // Start game loop after 1s — async because AI moves are fetched from server
   const tickRate = delayMs > 0 ? Math.max(delayMs, 150) : 200;
+  const agents = HumanPlay.agents;
 
   async function _hpSimulTick() {
     if (!HumanPlay.active || engine.over) {
@@ -2373,19 +2482,32 @@ function _hpSetupSimultaneous() {
       return;
     }
 
-    // Build AI state and get AI move from server
-    const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
-    const aiRaw = await _hpFetchAiMove(aiState);
-    const aiDir = _arParseDir(aiRaw);
+    if (is4P) {
+      // 4P: fetch moves for agents at player indices 1, 2, 3 in parallel
+      const [raw1, raw2, raw3] = await Promise.all([
+        _hpFetchAiMove(_hpBuildPythonState(engine, 1, 0), agents[0]),
+        _hpFetchAiMove(_hpBuildPythonState(engine, 2, 1), agents[1]),
+        _hpFetchAiMove(_hpBuildPythonState(engine, 3, 2), agents[2]),
+      ]);
+      const dirs = [_arParseDir(raw1), _arParseDir(raw2), _arParseDir(raw3)];
+      dirs.forEach((d, i) => HumanPlay.aiPrevMoves[i].push(DIR_NAME[d]));
 
-    if (!HumanPlay.active) return;
+      if (!HumanPlay.active) return;
+      engine.step([HumanPlay.humanDir, dirs[0], dirs[1], dirs[2]]);
+    } else {
+      // 2P: fetch single AI move
+      const aiState = _hpBuildPythonState(engine, 1, 0);
+      const aiRaw = await _hpFetchAiMove(aiState, agents[0]);
+      const aiDir = _arParseDir(aiRaw);
+      HumanPlay.aiPrevMoves[0].push(DIR_NAME[aiDir]);
 
-    // Step engine with human's buffered direction + AI direction
-    engine.step(HumanPlay.humanDir, aiDir);
+      if (!HumanPlay.active) return;
+      engine.step(HumanPlay.humanDir, aiDir);
+    }
     HumanPlay.turns++;
 
     _hpRender();
-    _hpUpdateStatus(`Turn ${HumanPlay.turns} | You: ${_AR_DIR_NAMES[HumanPlay.humanDir]} | AI: ${_AR_DIR_NAMES[aiDir]}`);
+    _hpUpdateStatus(`Turn ${HumanPlay.turns}`);
 
     // Schedule next tick (recursive setTimeout avoids pileup from slow server calls)
     HumanPlay.timer = setTimeout(_hpSimulTick, tickRate);
@@ -2504,8 +2626,8 @@ async function _hpDoAiTurn() {
 
   _hpUpdateStatus(`Turn ${HumanPlay.turns + 1} | AI thinking...`);
 
-  // Fetch AI move from server (agents are Python)
-  const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.aiMemory);
+  // Build Python-format state and fetch AI move from server
+  const aiState = _hpBuildPythonState(engine, 'B');
   const raw = await _hpFetchAiMove(aiState);
 
   if (!HumanPlay.active || engine.over) return;
@@ -2624,9 +2746,16 @@ function _hpGameOver() {
   if (HumanPlay.timerCountdown) { clearInterval(HumanPlay.timerCountdown); HumanPlay.timerCountdown = null; }
 
   const winner = HumanPlay.engine.winner;
-  const isWin = winner === 'A';
+  const gameId = HumanPlay.gameId;
+  // Human is player A (index 0). In 2v2, human is on teamAC.
+  const isWin = winner === 'A' || winner === 'teamAC';
   const isDraw = winner === 'draw' || !winner;
-  const resultText = isWin ? 'You Win!' : isDraw ? 'Draw!' : `${HumanPlay.aiName} Wins!`;
+  let resultText;
+  if (isWin) resultText = 'You Win!';
+  else if (isDraw) resultText = 'Draw!';
+  else if (gameId === 'snake_royale') resultText = `${winner} Wins!`;
+  else if (gameId === 'snake_2v2') resultText = 'Enemy Team Wins!';
+  else resultText = `${HumanPlay.aiName} Wins!`;
   const resultColor = isWin ? '#4FCC30' : isDraw ? '#e09540' : '#F93C31';
 
   _hpUpdateStatus(`<span style="color:${resultColor};font-size:18px;">${resultText}</span>`);

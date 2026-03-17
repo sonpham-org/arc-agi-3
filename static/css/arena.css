@@ -1,11 +1,11 @@
 /* Author: Claude Opus 4.6
-   Date: 2026-03-16 23:30
+   Date: 2026-03-16 23:45
    PURPOSE: Styles for AutoResearch Arena — Agent vs Agent page. Three-column layout with
    side panels (agent settings/logs) and center panel (game selection/match canvas).
    Supports Code mode (built-in AI strategies) and Harness mode (LLM scaffolding).
    Includes arena observatory overlay for per-agent observability.
-   Auto Research: horizontal game tab bar at top with snake variant sub-tabs,
-   loading overlay on game switch, then three-column layout —
+   Auto Research: vertical game sidebar on left with snake variant sub-items,
+   loading overlay on game switch, then three-column content area —
    center (program.md viewer + tabbed panel: Create New Agent / AI Heartbeat),
    mid (leaderboard, recent games), right (live tournament, ELO chart).
    Local config dialog, human vs AI play dialog.
@@ -652,71 +652,59 @@
   flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;
 }
 
-/* ── Game Tab Bar (horizontal, above columns) ── */
+/* ── Game Sidebar (vertical, left column) ── */
 .ar-game-tabs {
-  display: flex; align-items: stretch; gap: 8px; padding: 8px 12px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  flex-shrink: 0; overflow-x: auto;
+  display: flex; flex-direction: column; gap: 4px; padding: 8px;
+  background: var(--surface); border-right: 1px solid var(--border);
+  flex-shrink: 0; overflow-y: auto; width: 220px;
 }
 .ar-game-tab {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 16px; cursor: pointer;
-  background: var(--bg); border: 2px solid var(--border); border-radius: 12px;
-  transition: all 0.15s; flex-shrink: 0; min-width: 220px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; cursor: pointer;
+  background: var(--bg); border: 1px solid transparent; border-radius: 8px;
+  transition: all 0.15s;
 }
-.ar-game-tab:hover { border-color: var(--text-dim); background: var(--surface2); }
+.ar-game-tab:hover { background: var(--surface2); }
 .ar-game-tab.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
 .ar-game-tab.active .ar-game-tab-title { color: var(--accent); }
 .ar-game-tab-preview {
-  width: 48px; height: 48px; border-radius: 6px; flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 4px; flex-shrink: 0;
   image-rendering: pixelated; border: 1px solid var(--border);
 }
-.ar-game-tab-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ar-game-tab-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ar-game-tab-title {
-  font-size: 13px; font-weight: 700; color: var(--text);
+  font-size: 12px; font-weight: 700; color: var(--text);
 }
 .ar-game-tab-desc {
-  font-size: 10px; color: var(--text-dim); line-height: 1.3;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
-}
-.ar-game-tab-stats {
-  display: flex; gap: 8px; align-items: center; margin-top: 1px;
-}
-.ar-game-tab-stat {
-  font-size: 9px; color: var(--text-dim); font-weight: 600;
-  padding: 1px 6px; border-radius: 8px; background: var(--surface);
-  border: 1px solid var(--border); white-space: nowrap;
-}
-.ar-game-tab.active .ar-game-tab-stat {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
+  font-size: 9px; color: var(--text-dim); line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
 }
 .ar-game-tab-tags {
-  display: flex; gap: 4px; align-items: center;
+  display: flex; gap: 3px; align-items: center;
 }
 .ar-game-tab-tag {
-  font-size: 8px; padding: 0 5px; border-radius: 6px;
-  border: 1px solid var(--border); color: var(--text-dim); line-height: 1.6;
+  font-size: 8px; padding: 0 4px; border-radius: 4px;
+  border: 1px solid var(--border); color: var(--text-dim); line-height: 1.5;
 }
 
-/* ── Snake variant sub-tabs inside game tab card ── */
+/* ── Snake variant sub-tabs (vertical list under parent) ── */
 .ar-game-tab.has-subtabs {
-  flex-direction: column; align-items: stretch; gap: 6px; padding-bottom: 6px;
+  flex-direction: column; align-items: stretch; gap: 4px; padding-bottom: 6px;
 }
 .ar-game-tab.has-subtabs .ar-game-tab-main {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
 }
 .ar-subtab-bar {
-  display: flex; gap: 0; border-radius: 6px; overflow: hidden;
-  border: 1px solid var(--border); margin-left: 58px; /* align with text past preview */
+  display: flex; flex-direction: column; gap: 0; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border); margin-left: 0;
 }
 .ar-subtab {
-  font-size: 9px; font-weight: 600; padding: 3px 10px;
+  font-size: 10px; font-weight: 600; padding: 4px 10px;
   cursor: pointer; color: var(--text-dim); background: var(--bg);
-  border-right: 1px solid var(--border); transition: all 0.12s;
+  border-bottom: 1px solid var(--border); transition: all 0.12s;
   white-space: nowrap;
 }
-.ar-subtab:last-child { border-right: none; }
+.ar-subtab:last-child { border-bottom: none; }
 .ar-subtab:hover { color: var(--text); background: var(--surface2); }
 .ar-subtab.active {
   color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg));

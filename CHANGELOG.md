@@ -5,6 +5,35 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.9.3] — feat: Snake variants server-side activation (tournament + evolution)
+*Author: Claude Opus 4.6 | 2026-03-17*
+
+### Added
+- **SnakeRandomGame Python engine** — Ported procedural wall generation (L/T clusters, flood-fill validation, mulberry32 PRNG) from JS to `server/snake_engine.py`. Border-ring collision, wall collision, interior-only food spawning.
+- **Server-side match runners** — `_run_snake_random_match()` and `_run_snake_4p_match()` in `arena_heartbeat.py`. 4P winner mapped to 2-agent format (agent A controls snakes 0,2; agent B controls 1,3).
+- **9 variant seed agents** — 3 per variant (random/greedy/specialized) in `server/arena_seeds/`. Each uses the correct state format for its variant.
+- **Variant-specific validation** — 12 test scenarios each for `snake_random` (with walls), `snake_royale` (4P FFA state), `snake_2v2` (4P team state with allies/enemies). Dispatched via `_validate_code()`.
+- **`_GAME_SEEDS` entries** — All 4 snake variants now seed baseline agents on first tournament start.
+
+### Changed
+- **`_ACTIVE_GAMES`** — Now includes `snake`, `snake_random`, `snake_royale`, `snake_2v2`, `chess960`, `othello` (was only chess960 + othello).
+- **`_run_match()` dispatch** — Routes all 4 snake variant IDs to their correct engine.
+- **Heartbeat auto-start re-enabled** in `server/app.py` (was disabled during variant implementation).
+
+---
+
+## [1.9.2] — fix: Arena "Play against Agent" — engine parity, renderer, in-dialog UI
+*Author: Claude Opus 4.6 | 2026-03-17*
+
+### Fixed
+- **JS SnakeGame engine now matches Python engine** — 8 food (was 1), 350 max turns (was 200), spawn at (3,3)/(W-4,H-4) (was centered), no wall ring (was ring of wall cells), tie-break by body length (was score)
+- **Agent move state format** — human play sends Python-compatible state to `/api/arena/agent-move` (`grid_size`, `my_snake`, `my_direction`, `enemy_snake`, `enemy_direction`, `food` array, `prev_moves`) instead of JS-format state that Python agents couldn't parse
+- **Tournament renderer for human play** — uses `_arRenderMiniFrame()` (dark theme, rounded snake segments, eyes, neon colors, score overlay) instead of flat ARC3 grid palette
+- **Game renders in popup dialog** — canvas shows inside `#arHumanDialog` overlay instead of destroying the research view; quit/game-over closes the popup and research view is intact
+- **All 4 snake variants playable** — Classic, Random Maps (walls), Battle Royale (4P), and 2v2 Teams (4P). For 4P modes, 2 extra agents are randomly picked from the leaderboard. State format adapters handle 2P walls and 4P `snakes`/`ally`/`enemies` fields.
+
+---
+
 ## [1.9.1] — feat: Subdomain routing — Observatory & Arena at separate domains
 *Author: Claude Opus 4.6 | 2026-03-16*
 

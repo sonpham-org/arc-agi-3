@@ -1,12 +1,14 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-16 23:30
-# PURPOSE: Core snake game engines for Arena. 2-player SnakeGame + 4-player SnakeGame4P
-#   (Battle Royale & 2v2 Teams). Used by server heartbeat and batch runner.
+# Date: 2026-03-17 12:00
+# PURPOSE: Core snake game engines for Arena. 2-player SnakeGame, 2-player SnakeRandomGame
+#   (with procedural walls), and 4-player SnakeGame4P (Battle Royale & 2v2 Teams).
+#   Used by server heartbeat and batch runner.
 # SRP/DRY check: Pass — game engine logic only, no DB or API calls
-"""Core snake game engines for 2-player and 4-player competitive snake."""
+"""Core snake game engines for 2-player, random-maps, and 4-player competitive snake."""
 
 import random
-from typing import List, Tuple, Dict, Optional
+from collections import deque
+from typing import List, Tuple, Dict, Optional, Set
 
 DIRECTIONS = {
     'UP': (0, -1),
@@ -214,6 +216,242 @@ class SnakeGame:
             'scores': [len(s.body) for s in self.snakes],
             'history': self.history,
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#   Mulberry32 PRNG (matches JS arena.js implementation exactly)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _mulberry32(seed: int):
+    """Deterministic PRNG matching JS mulberry32. Returns a callable producing [0, 1) floats."""
+    a = seed & 0xFFFFFFFF
+
+    def next_val():
+        nonlocal a
+        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = ((a ^ (a >> 15)) * (1 | a)) & 0xFFFFFFFF
+        t = (t + (((t ^ (t >> 7)) * (61 | t)) & 0xFFFFFFFF)) & 0xFFFFFFFF
+        t = (t ^ (t >> 14)) & 0xFFFFFFFF
+        return t / 4294967296
+
+    return next_val
+
+
+# Direction vectors indexed by [UP=0, RIGHT=1, DOWN=2, LEFT=3]
+_DIR_DX = [0, 1, 0, -1]
+_DIR_DY = [-1, 0, 1, 0]
+_DIR_OPPOSITE_IDX = [2, 3, 0, 1]
+
+
+class SnakeRandomGame(SnakeGame):
+    """2-player snake with procedural wall clusters. Extends SnakeGame."""
+
+    def __init__(self, width=20, height=20, max_turns=200, food_count=8, seed=42):
+        super().__init__(width=width, height=height, max_turns=max_turns, food_count=food_count)
+        self._seed = seed
+
+    def setup(self):
+        self.walls: Set[Tuple[int, int]] = set()  # init before super (overridden _spawn_food needs it)
+        super().setup()
+        self._generate_walls()
+        # Re-filter food that landed on walls, then refill
+        self.food = [f for f in self.food if f not in self.walls]
+        while len(self.food) < self.food_count:
+            self._spawn_food_interior()
+
+    def _spawn_food_interior(self):
+        """Spawn food only in interior cells (avoid walls and border ring)."""
+        occupied = self._occupied() | self.walls
+        free = [(x, y) for x in range(1, self.width - 1)
+                for y in range(1, self.height - 1)
+                if (x, y) not in occupied]
+        if free:
+            self.food.append(random.choice(free))
+
+    def _spawn_food(self):
+        """Override parent to use interior-only spawning."""
+        self._spawn_food_interior()
+
+    def _generate_walls(self):
+        """Generate 4-8 L/T-shaped wall clusters. Validates flood-fill connectivity."""
+        rng = _mulberry32(self._seed)
+        max_attempts = 10
+
+        for attempt in range(max_attempts):
+            candidate = set()
+            cluster_count = 4 + int(rng() * 5)  # 4-8 clusters
+
+            for _ in range(cluster_count):
+                cx = 3 + int(rng() * (self.width - 6))
+                cy = 3 + int(rng() * (self.height - 6))
+                shape_type = 'L' if rng() < 0.5 else 'T'
+                cells = self._generate_cluster(cx, cy, shape_type, rng)
+                candidate.update(cells)
+
+            # Validate: flood-fill from both spawn points must reach >60% of interior
+            interior_size = (self.width - 2) * (self.height - 2)
+            threshold = int(interior_size * 0.6)
+
+            head_a = self.snakes[0].head
+            head_b = self.snakes[1].head
+            fill_a = self._flood_fill_walls(head_a[0], head_a[1], candidate)
+            fill_b = self._flood_fill_walls(head_b[0], head_b[1], candidate)
+
+            if fill_a >= threshold and fill_b >= threshold:
+                self.walls = candidate
+                return
+
+            # Retry with incremented seed
+            rng = _mulberry32(self._seed + attempt + 1)
+
+        # Fallback: no extra walls
+        self.walls = set()
+
+    def _generate_cluster(self, cx, cy, shape_type, rng):
+        """Generate an L or T shaped wall cluster."""
+        cells = set()
+        arm_len = 2 + int(rng() * 4)  # 2-5
+        dir1 = int(rng() * 4)  # primary direction index
+        dir2 = (dir1 + 1 + int(rng() * 2)) % 4  # perpendicular-ish
+
+        # Main arm
+        for i in range(arm_len):
+            nx = cx + _DIR_DX[dir1] * i
+            ny = cy + _DIR_DY[dir1] * i
+            if 0 < nx < self.width - 1 and 0 < ny < self.height - 1:
+                cells.add((nx, ny))
+
+        # Branch arm
+        branch_start = int(rng() * max(1, arm_len - 1))
+        bx = cx + _DIR_DX[dir1] * branch_start
+        by = cy + _DIR_DY[dir1] * branch_start
+        branch_len = 1 + int(rng() * 3)  # 1-3
+
+        for i in range(1, branch_len + 1):
+            nx = bx + _DIR_DX[dir2] * i
+            ny = by + _DIR_DY[dir2] * i
+            if 0 < nx < self.width - 1 and 0 < ny < self.height - 1:
+                cells.add((nx, ny))
+
+        if shape_type == 'T':
+            # Opposite branch for T-shape
+            opp_dir = _DIR_OPPOSITE_IDX[dir2]
+            for i in range(1, branch_len + 1):
+                nx = bx + _DIR_DX[opp_dir] * i
+                ny = by + _DIR_DY[opp_dir] * i
+                if 0 < nx < self.width - 1 and 0 < ny < self.height - 1:
+                    cells.add((nx, ny))
+
+        return cells
+
+    def _flood_fill_walls(self, start_x, start_y, wall_set):
+        """BFS flood-fill counting reachable interior cells (excluding walls)."""
+        count = 0
+        visited = {(start_x, start_y)}
+        queue = deque([(start_x, start_y)])
+        while queue:
+            cx, cy = queue.popleft()
+            count += 1
+            for d in range(4):
+                nx = cx + _DIR_DX[d]
+                ny = cy + _DIR_DY[d]
+                if (0 < nx < self.width - 1 and 0 < ny < self.height - 1
+                        and (nx, ny) not in visited and (nx, ny) not in wall_set):
+                    visited.add((nx, ny))
+                    queue.append((nx, ny))
+        return count
+
+    def step(self, moves: List[str]) -> bool:
+        """Override to add wall collision."""
+        if self.game_over:
+            return False
+
+        self.history.append(self.get_full_state())
+
+        valid_moves = []
+        for i, move in enumerate(moves):
+            if move not in DIRECTIONS:
+                move = self.snakes[i].direction
+            valid_moves.append(move)
+
+        for i, snake in enumerate(self.snakes):
+            if snake.alive:
+                snake.move(valid_moves[i])
+
+        # Check collisions (walls + border + body)
+        deaths = [False, False]
+        for i, snake in enumerate(self.snakes):
+            if not snake.alive:
+                continue
+            hx, hy = snake.head
+            # Border collision (ring)
+            if hx <= 0 or hx >= self.width - 1 or hy <= 0 or hy >= self.height - 1:
+                deaths[i] = True
+                continue
+            # Wall collision
+            if snake.head in self.walls:
+                deaths[i] = True
+                continue
+            # Self collision
+            body_set = set(snake.body[1:])
+            if snake.head in body_set:
+                deaths[i] = True
+                continue
+            # Enemy body collision
+            other = self.snakes[1 - i]
+            if other.alive:
+                other_body = set(other.body[1:])
+                if snake.head in other_body:
+                    deaths[i] = True
+
+        # Head-on collision
+        if (self.snakes[0].alive and self.snakes[1].alive
+                and not deaths[0] and not deaths[1]
+                and self.snakes[0].head == self.snakes[1].head):
+            deaths[0] = True
+            deaths[1] = True
+
+        for i, dead in enumerate(deaths):
+            if dead:
+                self.snakes[i].alive = False
+
+        # Food consumption
+        for snake in self.snakes:
+            if snake.alive and snake.head in self.food:
+                self.food.remove(snake.head)
+                snake.grow()
+                self._spawn_food()
+
+        self.turn += 1
+
+        alive = [s.alive for s in self.snakes]
+        if not alive[0] and not alive[1]:
+            self.game_over = True
+            self.winner = self._winner_by_length()
+        elif not alive[0]:
+            self.game_over = True
+            self.winner = 1
+        elif not alive[1]:
+            self.game_over = True
+            self.winner = 0
+        elif self.turn >= self.max_turns:
+            self.game_over = True
+            self.winner = self._winner_by_length()
+
+        if self.game_over:
+            self.history.append(self.get_full_state())
+
+        return not self.game_over
+
+    def get_state(self, player_idx: int) -> Dict:
+        state = super().get_state(player_idx)
+        state['walls'] = [list(w) for w in sorted(self.walls)]
+        return state
+
+    def get_full_state(self) -> Dict:
+        state = super().get_full_state()
+        state['walls'] = [list(w) for w in sorted(self.walls)]
+        return state
 
 
 class SnakeGame4P:

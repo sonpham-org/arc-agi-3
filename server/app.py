@@ -2049,13 +2049,11 @@ def batch_status(batch_id):
 # ARENA HEARTBEAT — start background thread for server-side evolution
 # ═══════════════════════════════════════════════════════════════════════════
 
-# HEARTBEAT DISABLED — paused during snake variants implementation (2026-03-16)
-# try:
-#     from server.arena_heartbeat import start_arena_heartbeat
-#     start_arena_heartbeat()
-# except Exception as _hb_err:
-#     print(f"[arena] Heartbeat start failed (non-fatal): {_hb_err}")
-print("[arena] Heartbeat auto-start DISABLED — re-enable after snake variants ship")
+try:
+    from server.arena_heartbeat import start_arena_heartbeat
+    start_arena_heartbeat()
+except Exception as _hb_err:
+    print(f"[arena] Heartbeat start failed (non-fatal): {_hb_err}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

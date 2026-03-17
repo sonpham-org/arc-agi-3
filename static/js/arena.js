@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-16 23:30
+// Date: 2026-03-17 00:00
 // PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
@@ -57,42 +57,45 @@ class SnakeGame {
   constructor(config = {}) {
     this.W = config.width || 20;
     this.H = config.height || 20;
-    this.maxTurns = config.maxTurns || 200;
+    this.maxTurns = config.maxTurns || 350;
+    this.foodCount = config.foodCount || 8;
     this.seed = config.seed || 42;
     this.rng = mulberry32(this.seed);
     this.turn = 0;
     this.over = false;
     this.winner = null;
 
-    const midY = this.H >> 1;
+    // Spawn positions match Python engine: top-left and bottom-right
     this.snakeA = {
-      body: [[4, midY], [3, midY], [2, midY]],
-      dir: DIR.RIGHT, alive: true, score: 0,
+      body: [[3, 3], [2, 3], [1, 3]],
+      dir: DIR.RIGHT, alive: true,
     };
     this.snakeB = {
-      body: [[this.W - 5, midY], [this.W - 4, midY], [this.W - 3, midY]],
-      dir: DIR.LEFT, alive: true, score: 0,
+      body: [[this.W - 4, this.H - 4], [this.W - 3, this.H - 4], [this.W - 2, this.H - 4]],
+      dir: DIR.LEFT, alive: true,
     };
-    this.food = this._spawnFood();
+    // Food is an array of positions (matches Python engine's 8-food list)
+    this.food = [];
+    for (let i = 0; i < this.foodCount; i++) this._spawnFood();
   }
 
   _spawnFood() {
     const occupied = new Set();
     for (const [x, y] of this.snakeA.body) occupied.add(`${x},${y}`);
     for (const [x, y] of this.snakeB.body) occupied.add(`${x},${y}`);
+    for (const [x, y] of this.food) occupied.add(`${x},${y}`);
     const cands = [];
-    for (let y = 1; y < this.H - 1; y++)
-      for (let x = 1; x < this.W - 1; x++)
+    // Full grid 0..W-1, 0..H-1 — no wall ring (matches Python engine)
+    for (let y = 0; y < this.H; y++)
+      for (let x = 0; x < this.W; x++)
         if (!occupied.has(`${x},${y}`)) cands.push([x, y]);
-    if (!cands.length) return null;
-    return cands[Math.floor(this.rng() * cands.length)];
+    if (cands.length) this.food.push(cands[Math.floor(this.rng() * cands.length)]);
   }
 
   getGrid() {
     const grid = Array.from({ length: this.H }, () => Array(this.W).fill(C.BG));
-    for (let x = 0; x < this.W; x++) { grid[0][x] = C.WALL; grid[this.H - 1][x] = C.WALL; }
-    for (let y = 0; y < this.H; y++) { grid[y][0] = C.WALL; grid[y][this.W - 1] = C.WALL; }
-    if (this.food) grid[this.food[1]][this.food[0]] = C.FOOD;
+    // No wall ring — boundaries are out-of-bounds (matches Python engine)
+    for (const [fx, fy] of this.food) grid[fy][fx] = C.FOOD;
     const drawSnake = (snake, headColor, bodyColor) => {
       if (!snake.alive) return;
       for (let i = snake.body.length - 1; i >= 1; i--)
@@ -107,11 +110,11 @@ class SnakeGame {
   getAIState() {
     const snap = s => ({
       head: [...s.body[0]], body: s.body.map(p => [...p]),
-      dir: s.dir, alive: s.alive, score: s.score, length: s.body.length,
+      dir: s.dir, alive: s.alive, length: s.body.length,
     });
     return {
       width: this.W, height: this.H, turn: this.turn, maxTurns: this.maxTurns,
-      food: this.food ? [...this.food] : null,
+      food: this.food.map(f => [...f]),
       snakeA: snap(this.snakeA), snakeB: snap(this.snakeB),
     };
   }
@@ -133,9 +136,9 @@ class SnakeGame {
 
     let aDead = false, bDead = false;
 
-    // Wall collision
-    if (nax <= 0 || nax >= this.W - 1 || nay <= 0 || nay >= this.H - 1) aDead = true;
-    if (nbx <= 0 || nbx >= this.W - 1 || nby <= 0 || nby >= this.H - 1) bDead = true;
+    // Wall collision — out-of-bounds 0..W-1 (matches Python engine, no wall ring)
+    if (nax < 0 || nax >= this.W || nay < 0 || nay >= this.H) aDead = true;
+    if (nbx < 0 || nbx >= this.W || nby < 0 || nby >= this.H) bDead = true;
 
     // Head-on collision
     if (nax === nbx && nay === nby) { aDead = true; bDead = true; }
@@ -150,29 +153,33 @@ class SnakeGame {
     if (aDead) this.snakeA.alive = false;
     if (bDead) this.snakeB.alive = false;
 
-    let ateA = false, ateB = false;
+    // Move alive snakes and handle food consumption
     if (this.snakeA.alive) {
       this.snakeA.body.unshift([nax, nay]);
-      if (this.food && nax === this.food[0] && nay === this.food[1]) {
-        ateA = true; this.snakeA.score++;
-      } else this.snakeA.body.pop();
+      const fi = this.food.findIndex(([fx, fy]) => fx === nax && fy === nay);
+      if (fi >= 0) { this.food.splice(fi, 1); this._spawnFood(); }
+      else this.snakeA.body.pop();
     }
     if (this.snakeB.alive) {
       this.snakeB.body.unshift([nbx, nby]);
-      if (this.food && nbx === this.food[0] && nby === this.food[1]) {
-        ateB = true; this.snakeB.score++;
-      } else this.snakeB.body.pop();
+      const fi = this.food.findIndex(([fx, fy]) => fx === nbx && fy === nby);
+      if (fi >= 0) { this.food.splice(fi, 1); this._spawnFood(); }
+      else this.snakeB.body.pop();
     }
-    if (ateA || ateB) this.food = this._spawnFood();
 
-    // Determine winner
-    if (!this.snakeA.alive && !this.snakeB.alive) { this.over = true; this.winner = 'draw'; }
+    // Determine winner — tie-break by body length (matches Python engine)
+    if (!this.snakeA.alive && !this.snakeB.alive) {
+      this.over = true;
+      if (this.snakeA.body.length > this.snakeB.body.length) this.winner = 'A';
+      else if (this.snakeB.body.length > this.snakeA.body.length) this.winner = 'B';
+      else this.winner = 'draw';
+    }
     else if (!this.snakeA.alive) { this.over = true; this.winner = 'B'; }
     else if (!this.snakeB.alive) { this.over = true; this.winner = 'A'; }
     else if (this.turn >= this.maxTurns) {
       this.over = true;
-      if (this.snakeA.score > this.snakeB.score) this.winner = 'A';
-      else if (this.snakeB.score > this.snakeA.score) this.winner = 'B';
+      if (this.snakeA.body.length > this.snakeB.body.length) this.winner = 'A';
+      else if (this.snakeB.body.length > this.snakeA.body.length) this.winner = 'B';
       else this.winner = 'draw';
     }
   }
@@ -4146,7 +4153,7 @@ const _ALL_ARENA_GAMES = [
   { id: 'snake', title: 'Snake Battle', category: 'ARC-style',
     desc: 'Two AI snakes compete for food. Eat to grow, avoid walls and each other.',
     tags: ['Territorial', 'Simultaneous'],
-    config: { width: 20, height: 20, maxTurns: 200, seed: 42 },
+    config: { width: 20, height: 20, maxTurns: 350, seed: 42 },
     strategies: AI_STRATEGIES,
     run: runMatch, render: renderSnakeFrame, preview: renderSnakePreview },
   { id: 'snake_random', title: 'Snake: Random Maps', category: 'ARC-style',
@@ -5423,7 +5430,7 @@ function arBuildGameTabs() {
 
   // Build snake parent tab with sub-tabs (if any snake games are enabled)
   if (snakeGames.length > 0) {
-    const parentGame = snakeGames[0]; // use first snake game for preview
+    const parentGame = snakeGames[0];
     const isSnakeActive = _SNAKE_VARIANT_IDS.has(AR.selectedGame);
 
     const tab = document.createElement('div');
@@ -5436,7 +5443,7 @@ function arBuildGameTabs() {
 
     const canvas = document.createElement('canvas');
     canvas.className = 'ar-game-tab-preview';
-    canvas.width = 96; canvas.height = 96;
+    canvas.width = 72; canvas.height = 72;
     mainRow.appendChild(canvas);
 
     const meta = document.createElement('div');
@@ -5447,22 +5454,18 @@ function arBuildGameTabs() {
     title.textContent = 'Snake Battle';
     meta.appendChild(title);
 
-    // Stats row — shows currently selected variant's stats
-    const selectedVariant = isSnakeActive ? AR.selectedGame : 'snake';
-    const statsRow = document.createElement('div');
-    statsRow.className = 'ar-game-tab-stats';
-    statsRow.id = `arTabStats_${selectedVariant}`;
-    statsRow.innerHTML = '<span class="ar-game-tab-stat">Loading...</span>';
-    meta.appendChild(statsRow);
+    const desc = document.createElement('div');
+    desc.className = 'ar-game-tab-desc';
+    desc.textContent = 'Territorial · Simultaneous';
+    meta.appendChild(desc);
 
     mainRow.appendChild(meta);
     tab.appendChild(mainRow);
 
-    // Sub-tab bar
+    // Sub-tab bar — each variant is one compact line
     const subBar = document.createElement('div');
     subBar.className = 'ar-subtab-bar';
     for (const v of _SNAKE_VARIANTS) {
-      // Only show sub-tab if this variant's game is in ARENA_GAMES (enabled)
       if (!ARENA_GAMES.find(g => g.id === v.id)) continue;
       const sub = document.createElement('div');
       sub.className = 'ar-subtab' + (AR.selectedGame === v.id ? ' active' : '');
@@ -5476,7 +5479,6 @@ function arBuildGameTabs() {
     }
     tab.appendChild(subBar);
 
-    // Click on parent card (not subtab) → select currently active variant or default to 'snake'
     tab.addEventListener('click', () => {
       if (!_SNAKE_VARIANT_IDS.has(AR.selectedGame)) {
         arSelectGame('snake', 'community');
@@ -5485,16 +5487,12 @@ function arBuildGameTabs() {
 
     container.appendChild(tab);
 
-    // Render preview
     if (parentGame.preview) {
       try { parentGame.preview(canvas, parentGame.config); } catch (e) { /* skip */ }
     }
-
-    // Fetch stats for the currently selected snake variant
-    _arFetchTabStats(selectedVariant);
   }
 
-  // Build tabs for non-snake games (unchanged)
+  // Build tabs for non-snake games
   for (const game of otherGames) {
     const tab = document.createElement('div');
     tab.className = 'ar-game-tab' + (AR.selectedGame === game.id ? ' active' : '');
@@ -5502,7 +5500,7 @@ function arBuildGameTabs() {
 
     const canvas = document.createElement('canvas');
     canvas.className = 'ar-game-tab-preview';
-    canvas.width = 96; canvas.height = 96;
+    canvas.width = 72; canvas.height = 72;
     tab.appendChild(canvas);
 
     const meta = document.createElement('div');
@@ -5513,30 +5511,12 @@ function arBuildGameTabs() {
     title.textContent = game.title;
     meta.appendChild(title);
 
-    if (game.desc) {
+    if (game.tags && game.tags.length) {
       const desc = document.createElement('div');
       desc.className = 'ar-game-tab-desc';
-      desc.textContent = game.desc;
+      desc.textContent = game.tags.join(' · ');
       meta.appendChild(desc);
     }
-
-    if (game.tags && game.tags.length) {
-      const tagsRow = document.createElement('div');
-      tagsRow.className = 'ar-game-tab-tags';
-      for (const t of game.tags) {
-        const tag = document.createElement('span');
-        tag.className = 'ar-game-tab-tag';
-        tag.textContent = t;
-        tagsRow.appendChild(tag);
-      }
-      meta.appendChild(tagsRow);
-    }
-
-    const statsRow = document.createElement('div');
-    statsRow.className = 'ar-game-tab-stats';
-    statsRow.id = `arTabStats_${game.id}`;
-    statsRow.innerHTML = '<span class="ar-game-tab-stat">Loading...</span>';
-    meta.appendChild(statsRow);
 
     tab.appendChild(meta);
     tab.addEventListener('click', () => arSelectGame(game.id, 'community'));
@@ -5545,8 +5525,6 @@ function arBuildGameTabs() {
     if (game.preview) {
       try { game.preview(canvas, game.config); } catch (e) { /* skip */ }
     }
-
-    _arFetchTabStats(game.id);
   }
 }
 
@@ -5587,15 +5565,6 @@ async function arSelectGame(gameId, mode) {
   document.querySelectorAll('.ar-subtab').forEach(el => {
     el.classList.toggle('active', el.dataset.variant === gameId);
   });
-
-  // Update snake parent tab stats row ID to match selected variant
-  if (_SNAKE_VARIANT_IDS.has(gameId)) {
-    const snakeTab = document.querySelector('.ar-game-tab[data-game="snake"]');
-    if (snakeTab) {
-      const statsRow = snakeTab.querySelector('.ar-game-tab-stats');
-      if (statsRow) statsRow.id = `arTabStats_${gameId}`;
-    }
-  }
 
   const game = ARENA_GAMES.find(g => g.id === gameId);
 
@@ -6277,7 +6246,7 @@ async function arStartHumanPlay() {
   const delay = parseInt(document.querySelector('input[name="arDelay"]:checked')?.value ?? 1000);
   const gameId = AR._humanGameId;
   const agentId = AR._humanAgentId;
-  arCloseHumanDialog();
+  // Dialog stays open — arLaunchHumanPlay swaps config area for game area
 
   // Fetch agent code from server (or local pool)
   let agentCode = null;
@@ -6299,9 +6268,36 @@ async function arStartHumanPlay() {
   }
   if (!agentCode) { alert('Agent has no code'); return; }
 
+  // For 4P modes (royale/2v2), pick 2 random agents from the leaderboard
+  let extraAgents = [];
+  const is4P = gameId === 'snake_royale' || gameId === 'snake_2v2';
+  if (is4P) {
+    try {
+      // Fetch the base game leaderboard (all snake variants share the same agent pool)
+      const lbResp = await fetch(`/api/arena/agents/${gameId}`);
+      const leaderboard = await lbResp.json();
+      // Filter out the selected agent and any human pseudo-agents
+      const candidates = (leaderboard || []).filter(a => a.id !== agentId && !a.is_human && a.code);
+      // Shuffle and pick 2
+      for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      }
+      extraAgents = candidates.slice(0, 2).map(a => ({ id: a.id, code: a.code, name: a.name }));
+    } catch (e) {
+      console.warn('Failed to fetch extra agents for 4P:', e);
+    }
+    if (extraAgents.length < 2) {
+      alert('Not enough agents on the leaderboard for a 4-player game (need at least 3 total).');
+      return;
+    }
+  }
+
+  // Build agent list: [selected agent, ...extra agents]
+  const agents = [{ id: agentId, code: agentCode, name: agentName }, ...extraAgents];
+
   // Launch human play mode (defined in arena-autoresearch.js)
-  // Pass agentId so client can proxy moves through the server (agents are Python)
-  arLaunchHumanPlay(gameId, agentId, agentCode, agentName, delay);
+  arLaunchHumanPlay(gameId, agents, delay);
 }
 
 

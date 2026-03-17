@@ -217,17 +217,17 @@ let currentUser = null;
   <!-- ══ Auto Research View (hidden by default) ═══════════════════════════ -->
   <div class="ar-layout" id="arResearchView" style="display:none;">
 
-    <!-- Game tab bar -->
-    <div class="ar-game-tabs" id="arGameTabs"></div>
-
     <!-- Loading overlay — shown while game data is being fetched -->
     <div class="ar-loading-overlay" id="arLoadingOverlay" style="display:none;">
       <div class="ar-loading-spinner"></div>
       <div class="ar-loading-text">Loading game data...</div>
     </div>
 
-    <!-- Content area (3 columns) -->
+    <!-- Content area (game sidebar + 3 columns) -->
     <div class="ar-content" id="arContent">
+
+    <!-- Game sidebar (left) -->
+    <div class="ar-game-tabs" id="arGameTabs"></div>
 
     <!-- Col 1: Program MD (top) + Tabbed Panel (bottom) -->
     <div class="ar-center" id="arCenter">
@@ -363,20 +363,38 @@ let currentUser = null;
   <!-- Human vs AI Play Dialog -->
   <div class="ar-dialog-overlay" id="arHumanDialog" style="display:none;">
     <div class="ar-dialog">
-      <h3 id="arHumanDialogTitle">Play Against AI</h3>
-      <div class="ar-human-opponent" id="arHumanOpponent"></div>
-      <label>Your Time Per Move</label>
-      <div class="ar-delay-options" id="arDelayOptions">
-        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="250"> <span>Fast (250ms)</span> <small>reflex mode</small></label>
-        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="500"> <span>Normal (500ms)</span> <small>competitive</small></label>
-        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="1000" checked> <span>Relaxed (1000ms)</span> <small>strategic</small></label>
-        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="2000"> <span>Slow (2000ms)</span> <small>careful analysis</small></label>
-        <label class="ar-delay-opt"><input type="radio" name="arDelay" value="0"> <span>Infinite</span> <small>unlimited thinking</small></label>
+      <!-- Pre-game config (hidden during play) -->
+      <div id="arHumanConfig">
+        <h3 id="arHumanDialogTitle">Play Against AI</h3>
+        <div class="ar-human-opponent" id="arHumanOpponent"></div>
+        <label>Your Time Per Move</label>
+        <div class="ar-delay-options" id="arDelayOptions">
+          <label class="ar-delay-opt"><input type="radio" name="arDelay" value="250"> <span>Fast (250ms)</span> <small>reflex mode</small></label>
+          <label class="ar-delay-opt"><input type="radio" name="arDelay" value="500"> <span>Normal (500ms)</span> <small>competitive</small></label>
+          <label class="ar-delay-opt"><input type="radio" name="arDelay" value="1000" checked> <span>Relaxed (1000ms)</span> <small>strategic</small></label>
+          <label class="ar-delay-opt"><input type="radio" name="arDelay" value="2000"> <span>Slow (2000ms)</span> <small>careful analysis</small></label>
+          <label class="ar-delay-opt"><input type="radio" name="arDelay" value="0"> <span>Infinite</span> <small>unlimited thinking</small></label>
+        </div>
+        <div class="ar-human-label-preview">You appear as: <strong id="arHumanLabel">human-1000ms</strong></div>
+        <div class="ar-dialog-actions">
+          <button class="ar-btn" onclick="arCloseHumanDialog()">Cancel</button>
+          <button class="ar-btn ar-btn-primary" onclick="arStartHumanPlay()">Start Game</button>
+        </div>
       </div>
-      <div class="ar-human-label-preview">You appear as: <strong id="arHumanLabel">human-1000ms</strong></div>
-      <div class="ar-dialog-actions">
-        <button class="ar-btn" onclick="arCloseHumanDialog()">Cancel</button>
-        <button class="ar-btn ar-btn-primary" onclick="arStartHumanPlay()">Start Game</button>
+      <!-- In-game area (hidden until game starts) -->
+      <div id="arHumanGameArea" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h3 id="hpTitle" style="margin:0;"></h3>
+          <div>
+            <span class="ar-human-timer-badge" id="hpTimer"></span>
+            <button class="ar-btn ar-btn-sm" onclick="arHumanQuit()">Quit</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;">
+          <canvas id="hpCanvas" width="400" height="400" style="image-rendering:pixelated;border:2px solid var(--border);border-radius:4px;"></canvas>
+          <div id="hpStatus" style="margin-top:8px;font-size:13px;font-weight:600;color:var(--text);"></div>
+          <div id="hpHint" style="font-size:11px;color:var(--text-dim);margin-top:4px;"></div>
+        </div>
       </div>
     </div>
   </div>
