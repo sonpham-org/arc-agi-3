@@ -1287,7 +1287,14 @@ def _max_games_for_pair(elo_gap):
 
 
 def _run_tournament(game_id='snake', match_count=20):
-    """Run a tournament round. Swiss matchmaking weighted by ELO proximity."""
+    """Run a tournament round: schedule all matchups first, play them, then publish results.
+
+    Phase 1 — LOAD: Fetch all agents + code once.
+    Phase 2 — SCHEDULE: Generate all pairings (Swiss ELO-weighted).
+    Phase 3 — PLAY: Run all matches (CPU-bound, no DB queries).
+    Phase 4 — PUBLISH: Write all results to DB + push live buffer.
+    """
+    # ── Phase 1: Load ──
     agents = arena_get_leaderboard(game_id, limit=200)
     for a in agents:
         full = arena_get_agent(game_id, a['id'])
@@ -1296,8 +1303,16 @@ def _run_tournament(game_id='snake', match_count=20):
     if len(agents) < 2:
         return 0
 
-    games_played = 0
+    # Pre-fetch pair counts in bulk
+    pair_counts = {}
+    for i, a1 in enumerate(agents):
+        for a2 in agents[i+1:]:
+            cnt = arena_count_pair_games(a1['id'], a2['id'])
+            pair_counts[(a1['id'], a2['id'])] = cnt
+            pair_counts[(a2['id'], a1['id'])] = cnt
 
+    # ── Phase 2: Schedule ──
+    schedule = []
     for _ in range(match_count):
         idx = random.randint(0, min(len(agents) - 1, 9))
         a1 = agents[idx]
@@ -1322,7 +1337,8 @@ def _run_tournament(game_id='snake', match_count=20):
         if max_games == 0:
             continue
 
-        if arena_count_pair_games(a1['id'], a2['id']) >= max_games:
+        pair_key = (a1['id'], a2['id'])
+        if pair_counts.get(pair_key, 0) >= max_games:
             continue
 
         code1 = a1.get('code', '')
@@ -1330,13 +1346,27 @@ def _run_tournament(game_id='snake', match_count=20):
         if not code1 or not code2:
             continue
 
+        schedule.append((a1, a2, code1, code2))
+        # Increment local pair count to avoid scheduling same pair repeatedly
+        pair_counts[pair_key] = pair_counts.get(pair_key, 0) + 1
+        pair_counts[(a2['id'], a1['id'])] = pair_counts[pair_key]
+
+    if not schedule:
+        return 0
+
+    # ── Phase 3: Play (CPU-bound, no DB) ──
+    results = []
+    for a1, a2, code1, code2 in schedule:
         result = _run_match(game_id, code1, code2)
         if result.get('error'):
             continue
-
         winner_id = a1['id'] if result['winner'] == 0 else (a2['id'] if result['winner'] == 1 else None)
         winner_name = a1['name'] if result['winner'] == 0 else (a2['name'] if result['winner'] == 1 else 'Draw')
+        results.append((a1, a2, winner_id, winner_name, result))
 
+    # ── Phase 4: Publish (batch DB writes) ──
+    games_played = 0
+    for a1, a2, winner_id, winner_name, result in results:
         try:
             arena_record_game(
                 game_id=game_id,
@@ -1348,12 +1378,9 @@ def _run_tournament(game_id='snake', match_count=20):
                 history=result.get('history'),
             )
             games_played += 1
-
             _push_live_match(a1, a2, winner_name, result.get('history', []), game_id)
-
-            time.sleep(0.2)
         except Exception as e:
-            print(f'[heartbeat] Game record error: {e}')
+            print(f'[tournament:{game_id}] Record error: {e}')
 
     return games_played
 
@@ -1377,7 +1404,8 @@ def _has_new_feedback(game_id='snake'):
         return False
 
 
-MATCH_DELAY = 0.5
+MATCH_DELAY = 0        # no delay — burn CPU on matches
+TOURNAMENT_BATCH = 10  # matches per tick before checking state
 
 def _warm_live_buffer(game_id='snake'):
     """Pre-fill live match buffer from DB on startup."""
@@ -1402,40 +1430,51 @@ def _warm_live_buffer(game_id='snake'):
         print(f'[tournament] Warm buffer failed (non-fatal): {exc}')
 
 
-def _tournament_loop():
-    print(f'[tournament] Continuous tournament runner started (games: {_ACTIVE_GAMES})')
+def _tournament_grinder(game_id):
+    """Dedicated tournament thread for one game. Grinds matches nonstop."""
     time.sleep(5)
-    for gid in _ACTIVE_GAMES:
-        _warm_live_buffer(gid)
-        _seed_if_empty(gid)
+    _warm_live_buffer(game_id)
+    _seed_if_empty(game_id)
+    print(f'[tournament:{game_id}] Grinder started — running matches continuously')
 
-    game_idx = 0
+    total = 0
     consecutive_zeros = 0
     while _heartbeat_state['running']:
-        game_id = _ACTIVE_GAMES[game_idx % len(_ACTIVE_GAMES)]
-        game_idx += 1
         try:
-            games = _run_tournament(game_id=game_id, match_count=1)
-            if games > 0:
-                _heartbeat_state['games_played'] += games
+            played = _run_tournament(game_id=game_id, match_count=TOURNAMENT_BATCH)
+            if played > 0:
+                total += played
+                _heartbeat_state['games_played'] += played
                 consecutive_zeros = 0
-                if _heartbeat_state['games_played'] % 10 == 0:
-                    print(f'[tournament] {_heartbeat_state["games_played"]} total games played')
+                if total % 50 == 0:
+                    print(f'[tournament:{game_id}] {total} games played')
             else:
                 consecutive_zeros += 1
                 if consecutive_zeros == 1:
                     agents = arena_get_leaderboard(game_id, limit=10)
-                    _heartbeat_state['last_error'] = f'tournament({game_id}): 0 games, {len(agents)} agents'
-                    print(f'[tournament] No {game_id} games ({len(agents)} agents). Retrying in 10s...')
-                time.sleep(10)
+                    print(f'[tournament:{game_id}] 0 games ({len(agents)} agents). Waiting for more agents...')
+                # Back off when no matches possible (not enough agents / all pairs exhausted)
+                time.sleep(30)
                 continue
         except Exception as e:
             _heartbeat_state['last_error'] = f'tournament({game_id}): {e}'
-            print(f'[tournament] Error ({game_id}): {e}')
+            print(f'[tournament:{game_id}] Error: {e}')
             traceback.print_exc()
             time.sleep(10)
             continue
-        time.sleep(MATCH_DELAY)
+
+
+def _tournament_loop():
+    """Spawn one grinder thread per game — each burns CPU on matches nonstop."""
+    print(f'[tournament] Launching per-game grinder threads (games: {_ACTIVE_GAMES})')
+    for game_id in _ACTIVE_GAMES:
+        t = threading.Thread(
+            target=_tournament_grinder,
+            args=(game_id,),
+            daemon=True,
+            name=f'arena-tournament-{game_id}',
+        )
+        t.start()
 
 
 _GAME_SEEDS = {
