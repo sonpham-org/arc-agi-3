@@ -351,6 +351,7 @@ def _init_db():
             is_human INTEGER DEFAULT 0,
             is_anchor INTEGER DEFAULT 0,
             active INTEGER DEFAULT 1,
+            program_version_id INTEGER DEFAULT NULL,
             created_at REAL DEFAULT (unixepoch('now')),
             UNIQUE(game_id, name)
         );
