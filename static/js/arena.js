@@ -317,8 +317,9 @@ class SnakeRandomGame extends SnakeGame {
     super(config);
     this.walls = new Set();
     this._generateWalls();
-    // Re-spawn food since walls may overlap original food position
-    this.food = this._spawnFood();
+    // Re-spawn food since walls may overlap original positions
+    this.food = [];
+    for (let i = 0; i < this.foodCount; i++) this._spawnFood();
   }
 
   _generateWalls() {
@@ -430,13 +431,14 @@ class SnakeRandomGame extends SnakeGame {
     const occupied = new Set();
     for (const [x, y] of this.snakeA.body) occupied.add(`${x},${y}`);
     for (const [x, y] of this.snakeB.body) occupied.add(`${x},${y}`);
-    const walls = this.walls || new Set(); // walls may not exist during super() construction
+    if (this.food) for (const [x, y] of this.food) occupied.add(`${x},${y}`);
+    const walls = this.walls || new Set();
     const cands = [];
+    // Interior only (1..W-2, 1..H-2) — SnakeRandomGame has border walls
     for (let y = 1; y < this.H - 1; y++)
       for (let x = 1; x < this.W - 1; x++)
         if (!occupied.has(`${x},${y}`) && !walls.has(`${x},${y}`)) cands.push([x, y]);
-    if (!cands.length) return null;
-    return cands[Math.floor(this.rng() * cands.length)];
+    if (cands.length) this.food.push(cands[Math.floor(this.rng() * cands.length)]);
   }
 
   getGrid() {
@@ -503,29 +505,33 @@ class SnakeRandomGame extends SnakeGame {
     if (aDead) this.snakeA.alive = false;
     if (bDead) this.snakeB.alive = false;
 
-    let ateA = false, ateB = false;
+    // Move alive snakes and handle food consumption (array-based food)
     if (this.snakeA.alive) {
       this.snakeA.body.unshift([nax, nay]);
-      if (this.food && nax === this.food[0] && nay === this.food[1]) {
-        ateA = true; this.snakeA.score++;
-      } else this.snakeA.body.pop();
+      const fi = this.food.findIndex(([fx, fy]) => fx === nax && fy === nay);
+      if (fi >= 0) { this.food.splice(fi, 1); this._spawnFood(); }
+      else this.snakeA.body.pop();
     }
     if (this.snakeB.alive) {
       this.snakeB.body.unshift([nbx, nby]);
-      if (this.food && nbx === this.food[0] && nby === this.food[1]) {
-        ateB = true; this.snakeB.score++;
-      } else this.snakeB.body.pop();
+      const fi = this.food.findIndex(([fx, fy]) => fx === nbx && fy === nby);
+      if (fi >= 0) { this.food.splice(fi, 1); this._spawnFood(); }
+      else this.snakeB.body.pop();
     }
-    if (ateA || ateB) this.food = this._spawnFood();
 
-    // Determine winner
-    if (!this.snakeA.alive && !this.snakeB.alive) { this.over = true; this.winner = 'draw'; }
+    // Determine winner — tie-break by body length
+    if (!this.snakeA.alive && !this.snakeB.alive) {
+      this.over = true;
+      if (this.snakeA.body.length > this.snakeB.body.length) this.winner = 'A';
+      else if (this.snakeB.body.length > this.snakeA.body.length) this.winner = 'B';
+      else this.winner = 'draw';
+    }
     else if (!this.snakeA.alive) { this.over = true; this.winner = 'B'; }
     else if (!this.snakeB.alive) { this.over = true; this.winner = 'A'; }
     else if (this.turn >= this.maxTurns) {
       this.over = true;
-      if (this.snakeA.score > this.snakeB.score) this.winner = 'A';
-      else if (this.snakeB.score > this.snakeA.score) this.winner = 'B';
+      if (this.snakeA.body.length > this.snakeB.body.length) this.winner = 'A';
+      else if (this.snakeB.body.length > this.snakeA.body.length) this.winner = 'B';
       else this.winner = 'draw';
     }
   }

@@ -431,7 +431,8 @@ function _populateAllModelSelects() {
 function getPrompt(key) {
   const [section, name] = key.split('.');
   return localStorage.getItem('arc_prompt.' + key)
-      || window.PROMPTS[section][name];
+      || (window.PROMPTS && window.PROMPTS[section] && window.PROMPTS[section][name])
+      || '';
 }
 
 const ARC_DESCRIPTION = getPrompt('shared.arc_description');
