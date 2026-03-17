@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-17 23:45
+# Date: 2026-03-17 23:55
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
@@ -55,7 +55,7 @@ HEARTBEAT_INTERVAL_FAST_FILL = 6 * 60   # 6 minutes per game until 100 agents
 HEARTBEAT_INTERVAL_NORMAL = 6 * 60     # 6 minutes per game steady state
 HEARTBEAT_INTERVAL_FAST = 6 * 60       # 6 minutes (same — haiku is cheap)
 EVOLUTION_STAGGER_SECS = 60            # offset between per-game threads to avoid burst
-EVOLUTION_DISABLED = True              # Kill switch — set False to re-enable LLM evolution
+EVOLUTION_ENABLED = os.environ.get('ARENA_EVOLUTION_ENABLED', '').lower() in ('1', 'true', 'yes')
 TOURNAMENT_GAMES_PER_TICK = 20
 EVOLUTION_AGENTS_PER_TICK = 1
 MAX_TOOL_ROUNDS = 6
@@ -1568,7 +1568,7 @@ def _evolution_loop_for_game(game_id, stagger_secs):
     print(f'[evolution:{game_id}] Started (stagger={stagger_secs}s, interval={HEARTBEAT_INTERVAL_NORMAL}s)')
 
     while _heartbeat_state['running']:
-        if EVOLUTION_DISABLED:
+        if not EVOLUTION_ENABLED:
             time.sleep(HEARTBEAT_INTERVAL_NORMAL)
             continue
 
