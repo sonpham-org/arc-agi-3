@@ -1,3 +1,10 @@
+// Author: Claude Opus 4.6
+// Date: 2026-03-16 23:30
+// PURPOSE: Main coordinator and entry point (Phase 9 modularization).
+//   Coordinates extracted session modules: session-storage, session-replay,
+//   session-persistence, session-views. Handles multi-session tabs, switching,
+//   session utilities, and app initialization. Auth functions extracted to auth.js.
+// SRP/DRY check: Pass — auth extracted to shared auth.js
 // ═══════════════════════════════════════════════════════════════════════════
 // SESSION.JS — Main coordinator and entry point (Phase 9 modularization)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -391,175 +398,9 @@ async function initApp() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// AUTH — Magic link login
-// ═══════════════════════════════════════════════════════════════════════════
-
-function updateAuthUI() {
-  console.log('[AUTH] updateAuthUI called, currentUser:', currentUser);
-  const loginBtn = document.getElementById('loginBtn');
-  const userBadge = document.getElementById('userBadge');
-  if (currentUser) {
-    loginBtn.style.display = 'none';
-    userBadge.style.display = '';
-    const label = currentUser.display_name || currentUser.email.split('@')[0];
-    document.getElementById('userBadgeLabel').textContent = label;
-    document.getElementById('userMenuEmail').textContent = currentUser.email;
-  } else {
-    loginBtn.style.display = '';
-    userBadge.style.display = 'none';
-  }
-}
-
-function toggleUserMenu() {
-  const menu = document.getElementById('userMenu');
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-}
-
-// Close user menu on outside click
-document.addEventListener('click', (e) => {
-  const badge = document.getElementById('userBadge');
-  const menu = document.getElementById('userMenu');
-  if (badge && menu && !badge.contains(e.target)) {
-    menu.style.display = 'none';
-  }
-});
-
-function showLoginModal() {
-  try {
-    console.log('[AUTH] showLoginModal called');
-    const modal = document.getElementById('loginModal');
-    if (!modal) { console.error('[AUTH] loginModal element not found!'); return; }
-    modal.style.display = 'flex';
-    console.log('[AUTH] modal display set to flex');
-    const s1 = document.getElementById('loginStep1');
-    const s2 = document.getElementById('loginStep2');
-    const err = document.getElementById('loginError');
-    if (s1) s1.style.display = '';
-    if (s2) s2.style.display = 'none';
-    if (err) err.style.display = 'none';
-    const emailEl = document.getElementById('loginEmail');
-    if (emailEl) { emailEl.value = ''; emailEl.focus(); }
-    console.log('[AUTH] modal opened successfully', { s1: !!s1, s2: !!s2, err: !!err, email: !!emailEl });
-  } catch (e) {
-    console.error('[AUTH] showLoginModal error:', e);
-  }
-}
-
-function hideLoginModal() {
-  document.getElementById('loginModal').style.display = 'none';
-}
-
-// Close modal on backdrop click
-document.getElementById('loginModal')?.addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) hideLoginModal();
-});
-
-// Submit on Enter in email field
-document.getElementById('loginEmail')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') sendMagicLink();
-});
-
-async function sendMagicLink() {
-  const email = document.getElementById('loginEmail').value.trim();
-  const errEl = document.getElementById('loginError');
-  const btn = document.getElementById('loginSendBtn');
-  if (!email || !email.includes('@')) {
-    errEl.textContent = 'Please enter a valid email address.';
-    errEl.style.display = '';
-    return;
-  }
-  btn.disabled = true;
-  btn.textContent = 'Sending...';
-  errEl.style.display = 'none';
-  try {
-    const resp = await fetch('/api/auth/magic-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      errEl.textContent = data.error || 'Failed to send link';
-      errEl.style.display = '';
-      btn.disabled = false;
-      btn.textContent = 'Send login link';
-      return;
-    }
-    // Dev mode: if code returned, auto-verify
-    if (data.dev_code) {
-      window.location.href = '/api/auth/verify?code=' + data.dev_code;
-      return;
-    }
-    document.getElementById('loginStep1').style.display = 'none';
-    document.getElementById('loginStep2').style.display = '';
-    document.getElementById('loginSentEmail').textContent = email;
-  } catch (e) {
-    errEl.textContent = 'Network error. Please try again.';
-    errEl.style.display = '';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Send login link';
-  }
-}
-
-async function doLogout() {
-  try {
-    await fetch('/api/auth/logout', { method: 'POST' });
-  } catch (e) { /* ignore */ }
-  currentUser = null;
-  updateAuthUI();
-  document.getElementById('userMenu').style.display = 'none';
-}
-
-async function checkAuthStatus() {
-  console.log('[AUTH] checkAuthStatus called');
-  try {
-    const resp = await fetch('/api/auth/status');
-    const data = await resp.json();
-    console.log('[AUTH] status response:', data);
-    if (data.authenticated && data.user) {
-      currentUser = data.user;
-      updateAuthUI();
-      claimLocalSessions();
-    } else {
-      currentUser = null;
-      updateAuthUI();
-    }
-  } catch (e) {
-    console.warn('[AUTH] checkAuthStatus failed:', e);
-    currentUser = null;
-    updateAuthUI();
-  }
-  // Clean ?logged_in param from URL
-  if (new URLSearchParams(window.location.search).has('logged_in')) {
-    const url = new URL(window.location);
-    url.searchParams.delete('logged_in');
-    window.history.replaceState({}, '', url.pathname + url.search);
-  }
-}
-
-async function claimLocalSessions() {
-  if (!currentUser) return;
-  // Collect session IDs from localStorage
-  const ids = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith('arc_session_')) {
-      ids.push(key.replace('arc_session_', ''));
-    }
-  }
-  if (ids.length === 0) return;
-  try {
-    await fetch('/api/auth/claim-sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_ids: ids }),
-    });
-  } catch (e) {
-    console.warn('Claim sessions failed:', e);
-  }
-}
+// AUTH functions moved to auth.js (shared with Arena).
+// Functions available: checkAuthStatus, updateAuthUI, sendMagicLink, showLoginModal,
+//   hideLoginModal, doLogout, toggleUserMenu, claimLocalSessions
 
 // If no Turnstile gate (not configured), init after all scripts are loaded
 if (turnstileVerified) {
