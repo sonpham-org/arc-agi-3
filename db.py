@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-16 12:00
+# Date: 2026-03-17 22:00
 # PURPOSE: SQLite database layer for ARC-AGI-3. Manages schema migrations, session
 #   persistence (sessions, session_actions, llm_calls), observatory data, share links,
 #   auth (magic links, Google OAuth), leaderboard, and tool execution logging.
@@ -39,6 +39,95 @@ _DATA_DIR = Path(os.environ.get("DB_DATA_DIR", Path(__file__).parent / "data"))
 DB_PATH = _DATA_DIR / "sessions.db"
 
 
+def _check_and_recover_db():
+    """Check DB integrity and recover if corrupted.
+
+    Uses sqlite3 CLI .recover command to salvage data from a corrupted DB.
+    Falls back to iterdump() if CLI is unavailable. Creates fresh DB if all else fails.
+    """
+    import shutil
+    import subprocess
+
+    if not DB_PATH.exists():
+        return  # Fresh DB, nothing to check
+
+    # Quick integrity check
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        result = conn.execute("PRAGMA integrity_check").fetchone()
+        conn.close()
+        if result and result[0] == "ok":
+            return  # DB is fine
+        log.warning("DB integrity check failed: %s", result[0] if result else "no result")
+    except Exception as e:
+        log.warning("DB integrity check error: %s", e)
+
+    # DB is corrupted — attempt recovery
+    log.warning("Attempting DB recovery...")
+    backup_path = DB_PATH.with_suffix(".db.corrupt")
+    recovered_path = DB_PATH.with_suffix(".db.recovered")
+
+    # Remove stale recovery artifacts
+    for p in [backup_path, recovered_path]:
+        p.unlink(missing_ok=True)
+
+    # Try sqlite3 CLI .recover (most robust)
+    try:
+        dump = subprocess.run(
+            ["sqlite3", str(DB_PATH), ".recover"],
+            capture_output=True, text=True, timeout=120
+        )
+        if dump.returncode == 0 and dump.stdout.strip():
+            # Write recovered SQL to a new DB
+            rconn = sqlite3.connect(str(recovered_path))
+            rconn.executescript(dump.stdout)
+            rconn.close()
+            # Swap files
+            shutil.move(str(DB_PATH), str(backup_path))
+            # Also move WAL/SHM files
+            for ext in ["-wal", "-shm"]:
+                wal = Path(str(DB_PATH) + ext)
+                if wal.exists():
+                    wal.unlink()
+            shutil.move(str(recovered_path), str(DB_PATH))
+            log.warning("DB recovered via sqlite3 .recover. Corrupt backup at %s", backup_path)
+            return
+        else:
+            log.warning("sqlite3 .recover failed (rc=%d): %s", dump.returncode, dump.stderr[:500])
+    except FileNotFoundError:
+        log.warning("sqlite3 CLI not available, trying Python iterdump()")
+    except Exception as e:
+        log.warning("sqlite3 .recover error: %s", e)
+
+    # Fallback: Python iterdump()
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        sql_dump = "\n".join(conn.iterdump())
+        conn.close()
+        rconn = sqlite3.connect(str(recovered_path))
+        rconn.executescript(sql_dump)
+        rconn.close()
+        shutil.move(str(DB_PATH), str(backup_path))
+        for ext in ["-wal", "-shm"]:
+            wal = Path(str(DB_PATH) + ext)
+            if wal.exists():
+                wal.unlink()
+        shutil.move(str(recovered_path), str(DB_PATH))
+        log.warning("DB recovered via iterdump(). Corrupt backup at %s", backup_path)
+        return
+    except Exception as e:
+        log.warning("iterdump() recovery failed: %s", e)
+
+    # Last resort: rename corrupt DB and start fresh
+    shutil.move(str(DB_PATH), str(backup_path))
+    for ext in ["-wal", "-shm"]:
+        wal = Path(str(DB_PATH) + ext)
+        if wal.exists():
+            wal.unlink()
+    recovered_path.unlink(missing_ok=True)
+    log.warning("Could not recover DB. Starting fresh. Corrupt backup at %s", backup_path)
+
+
 def _init_db():
     """Create the sessions database and tables if they don't exist.
 
@@ -46,6 +135,10 @@ def _init_db():
     to the new schema (session_actions, renamed columns).
     """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check for corruption and recover before opening
+    _check_and_recover_db()
+
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
 
@@ -593,8 +686,9 @@ def _migrate_schema(conn):
 
 
 def _get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
