@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-17 00:00
+// Date: 2026-03-17 15:00
 // PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
@@ -787,6 +787,9 @@ class SnakeGame4P {
       },
     ];
 
+    // Corpses: stored body positions of dead snakes (for rendering under live snakes)
+    this.corpses = []; // Array of { body: [[x,y],...], playerIdx: int }
+
     // Initial food: 12 for 30x30 royale, 10 for 24x24 2v2
     const foodCount = this.W >= 30 ? 12 : 10;
     this.foodList = [];
@@ -824,16 +827,19 @@ class SnakeGame4P {
     for (let y = 0; y < this.H; y++) { grid[y][0] = C4P.WALL; grid[y][this.W - 1] = C4P.WALL; }
     // Food
     for (const [fx, fy] of this.foodList) grid[fy][fx] = C4P.FOOD;
-    // Draw snakes (dead snakes in gray, alive in their colors)
+    // Draw corpses first (gray, will be underneath alive snakes)
+    this._corpseCells = [];
+    for (const c of this.corpses) {
+      for (const [cx, cy] of c.body) {
+        grid[cy][cx] = C4P.DEAD;
+        this._corpseCells.push([cx, cy]);
+      }
+    }
+    // Draw alive snakes on top
     for (let i = 0; i < 4; i++) {
       const s = this.snakes[i];
+      if (!s.alive || s.body.length === 0) continue;
       const colors = PLAYER_COLORS_4P[i];
-      if (!s.alive) {
-        // Draw dead snake body in gray
-        for (let j = s.body.length - 1; j >= 0; j--)
-          grid[s.body[j][1]][s.body[j][0]] = C4P.DEAD;
-        continue;
-      }
       for (let j = s.body.length - 1; j >= 1; j--)
         grid[s.body[j][1]][s.body[j][0]] = colors.body;
       grid[s.body[0][1]][s.body[0][0]] = colors.head;
@@ -927,9 +933,12 @@ class SnakeGame4P {
       }
     }
 
-    // Apply deaths — clear body so dead snakes are walkable and disappear
+    // Apply deaths — save corpse, then clear body so dead snakes are walkable
     for (let i = 0; i < 4; i++) {
       if (dead[i]) {
+        if (this.snakes[i].body.length > 0) {
+          this.corpses.push({ body: this.snakes[i].body.map(p => [...p]), playerIdx: i });
+        }
         this.snakes[i].alive = false;
         this.snakes[i].body = [];
       }
@@ -1198,8 +1207,10 @@ function _runSnake4PMatch(config, strategyA, strategyB, mode) {
   });
 
   // Turn 0: initial state
+  const grid0 = game.getGrid();
   history.push({
-    turn: 0, grid: game.getGrid(),
+    turn: 0, grid: grid0,
+    corpseCells: game._corpseCells || [],
     snakes: game.snakes.map((s, i) => snapSnake(s, i)),
     food: game.foodList.map(f => [...f]),
     agents: [null, null, null, null],
@@ -1229,8 +1240,10 @@ function _runSnake4PMatch(config, strategyA, strategyB, mode) {
     const scoreA = game.snakes[0].score + game.snakes[2].score;
     const scoreB = game.snakes[1].score + game.snakes[3].score;
 
+    const turnGrid = game.getGrid();
     history.push({
-      turn: game.turn, grid: game.getGrid(),
+      turn: game.turn, grid: turnGrid,
+      corpseCells: game._corpseCells || [],
       snakes: game.snakes.map((s, i) => snapSnake(s, i)),
       food: game.foodList.map(f => [...f]),
       agents: results.map((r, i) => ({
@@ -1272,6 +1285,26 @@ function renderSnake4PFrame(ctx, frame, size) {
       ctx.fillStyle = ARC3[grid[y][x]];
       ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
     }
+  // Cross-hatch overlay on corpse cells
+  if (frame.corpseCells && frame.corpseCells.length > 0) {
+    ctx.strokeStyle = 'rgba(80, 80, 80, 0.6)';
+    ctx.lineWidth = Math.max(0.5, cellW * 0.1);
+    for (const [cx, cy] of frame.corpseCells) {
+      // Only draw hatch if the cell is still showing as dead gray (not overwritten by alive snake)
+      if (grid[cy][cx] !== C4P.DEAD) continue;
+      const px = cx * cellW, py = cy * cellH;
+      // Diagonal lines: top-left to bottom-right
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + cellW, py + cellH);
+      ctx.stroke();
+      // Diagonal lines: top-right to bottom-left
+      ctx.beginPath();
+      ctx.moveTo(px + cellW, py);
+      ctx.lineTo(px, py + cellH);
+      ctx.stroke();
+    }
+  }
   // Grid lines
   ctx.strokeStyle = 'rgba(255,255,255,0.03)';
   ctx.lineWidth = 0.5;

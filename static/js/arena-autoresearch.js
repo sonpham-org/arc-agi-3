@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-17 00:00
+// Date: 2026-03-17 15:00
 // PURPOSE: Arena Auto Research — in-browser evolution + tournament engine.
 //   Phase 2: headless match runner, per-game state adapters, live tournament canvases.
 //   Phase 4: human vs AI play mode — keyboard/click input, timed moves, result submission.
@@ -643,7 +643,9 @@ function arRunHeadless(gameId, fnA, fnB, config) {
 
   // Record initial state
   if (typeof engine.getGrid === 'function') {
-    history.push({ turn: 0, grid: engine.getGrid(), winner: null });
+    const initFrame = { turn: 0, grid: engine.getGrid(), winner: null };
+    if (engine._corpseCells) initFrame.corpseCells = engine._corpseCells;
+    history.push(initFrame);
   }
 
   let turnCount = 0;
@@ -677,6 +679,7 @@ function arRunHeadless(gameId, fnA, fnB, config) {
           frame.scores = engine.snakes.map(s => s.score);
           frame.food = engine.food || [];
         }
+        if (engine._corpseCells) frame.corpseCells = engine._corpseCells;
         history.push(frame);
       }
     }
@@ -1602,6 +1605,21 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
       ctx.beginPath();
       ctx.arc(f[0] * SC + SC / 2, f[1] * SC + SC / 2, SC * 0.35, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Corpse cells: gray with cross-hatch
+    if (frame.corpseCells && frame.corpseCells.length > 0) {
+      ctx.fillStyle = '#3a3a3a';
+      for (const [cx, cy] of frame.corpseCells) {
+        ctx.fillRect(cx * SC + 1, cy * SC + 1, SC - 2, SC - 2);
+      }
+      ctx.strokeStyle = 'rgba(80, 80, 80, 0.7)';
+      ctx.lineWidth = Math.max(0.5, SC * 0.1);
+      for (const [cx, cy] of frame.corpseCells) {
+        const px = cx * SC, py = cy * SC;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + SC, py + SC); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(px + SC, py); ctx.lineTo(px, py + SC); ctx.stroke();
+      }
     }
 
     const alive = frame.alive || [true, true, true, true];

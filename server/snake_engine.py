@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-17 12:00
+# Date: 2026-03-17 15:00
 # PURPOSE: Core snake game engines for Arena. 2-player SnakeGame, 2-player SnakeRandomGame
 #   (with procedural walls), and 4-player SnakeGame4P (Battle Royale & 2v2 Teams).
 #   Used by server heartbeat and batch runner.
@@ -473,6 +473,7 @@ class SnakeGame4P:
         self.game_over = False
         self.winner = None  # int (player index), 'team0', 'team1', or None (draw)
         self.prev_moves: List[List] = [[], [], [], []]
+        self.corpses: List[Dict] = []  # [{body: [(x,y),...], player_idx: int}, ...]
 
     def setup(self):
         w, h = self.width, self.height
@@ -606,9 +607,11 @@ class SnakeGame4P:
                     deaths[i] = True
                     deaths[j] = True
 
-        # Clear body on death so dead snakes are walkable
+        # Save corpse then clear body so dead snakes are walkable
         for i, dead in enumerate(deaths):
             if dead:
+                if self.snakes[i].body:
+                    self.corpses.append({'body': list(self.snakes[i].body), 'player_idx': i})
                 self.snakes[i].alive = False
                 self.snakes[i].body = []
 

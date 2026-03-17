@@ -5,6 +5,19 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.9.4] — feat: Dead snake corpse rendering in 4P modes
+*Author: Claude Opus 4.6 | 2026-03-17*
+
+### Added
+- **Corpse rendering** — When a snake dies in Battle Royale or 2v2 Teams, its body remains visible as a gray cross-hatched corpse underneath living snakes. Corpses are walkable but visually persist for the rest of the match.
+- **Cross-hatch overlay** — Dead snake cells rendered with diagonal cross-hatch lines (both `renderSnake4PFrame` grid renderer and `_arRenderMiniFrame` mini-canvas renderer).
+
+### Changed
+- **`SnakeGame4P` (JS + Python)** — On death, snake body saved to `corpses[]` array before clearing for collision. `getGrid()` draws corpses first, then alive snakes on top.
+- **Frame snapshots** — Both code-mode and harness-mode match runners include `corpseCells` in each frame for replay rendering.
+
+---
+
 <<<<<<< Updated upstream
 ## [1.9.3] — feat: Snake variants server-side activation (tournament + evolution)
 *Author: Claude Opus 4.6 | 2026-03-17*
