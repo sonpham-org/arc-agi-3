@@ -68,7 +68,7 @@ let currentUser = null;
   </div>
 
   <!-- ── Three-Column Layout (persistent) ─────────────────────────────────── -->
-  <div class="arena-layout" id="arenaLayout">
+  <div class="arena-layout" id="arenaLayout" style="display:none;">
 
     <!-- ── Left Panel: Agent A ──────────────────────────────────────────────── -->
     <div class="arena-side-panel agent-panel-a" id="panelA">
@@ -214,7 +214,7 @@ let currentUser = null;
   </div>
 
   <!-- ══ Auto Research View (hidden by default) ═══════════════════════════ -->
-  <div class="ar-layout" id="arResearchView" style="display:none;">
+  <div class="ar-layout" id="arResearchView" style="display:flex;">
 
     <!-- Loading overlay — shown while game data is being fetched -->
     <div class="ar-loading-overlay" id="arLoadingOverlay" style="display:none;">
@@ -330,7 +330,7 @@ let currentUser = null;
   </div>
 
   <!-- Status Bar (Auto Research) -->
-  <div class="ar-status-bar" id="arStatusBar" style="display:none;">
+  <div class="ar-status-bar" id="arStatusBar" style="display:flex;">
     <span id="arStatusText">Select a game to begin</span>
   </div>
 
