@@ -670,6 +670,7 @@ function arRunHeadless(gameId, fnA, fnB, config) {
           frame.alive = [engine.snakeA.alive, engine.snakeB.alive];
           frame.scores = [engine.snakeA.body.length, engine.snakeB.body.length];
           frame.food = Array.isArray(engine.food) ? engine.food : [];
+          if (engine.walls) frame.walls = [...engine.walls];
         } else if (gameId.startsWith('snake') && engine.snakes) {
           frame.snakes = engine.snakes.map(s => s.body.map(p => [...p]));
           frame.alive = engine.snakes.map(s => s.alive);
@@ -1587,6 +1588,15 @@ function _arRenderMiniFrame(canvas, gameId, frame) {
       for (let y = 0; y <= GRID; y++)
         ctx.fillRect(x * SC, y * SC, 1, 1);
 
+    // Walls (snake_random) — dark gray blocks
+    if (frame.walls && frame.walls.length) {
+      ctx.fillStyle = '#444455';
+      for (const key of frame.walls) {
+        const [wx, wy] = typeof key === 'string' ? key.split(',').map(Number) : key;
+        ctx.fillRect(wx * SC + 0.5, wy * SC + 0.5, SC - 1, SC - 1);
+      }
+    }
+
     for (const f of (frame.food || [])) {
       ctx.fillStyle = _SNAKE_FOOD;
       ctx.beginPath();
@@ -2374,13 +2384,15 @@ function _hpBuildFrame(gameId, engine) {
     case 'snake':
     case 'snake_random': {
       // 2P snake variants
-      return {
+      const frame = {
         snakes: [engine.snakeA.body.map(p => [...p]), engine.snakeB.body.map(p => [...p])],
         alive: [engine.snakeA.alive, engine.snakeB.alive],
         scores: [engine.snakeA.body.length, engine.snakeB.body.length],
         food: Array.isArray(engine.food) ? engine.food : (engine.food ? [engine.food] : []),
         turn: engine.turn,
       };
+      if (engine.walls) frame.walls = [...engine.walls];
+      return frame;
     }
     case 'snake_royale':
     case 'snake_2v2': {
