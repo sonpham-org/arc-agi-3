@@ -48,20 +48,18 @@ from db_arena import (
 #   Config
 # ═══════════════════════════════════════════════════════════════════════════
 
-HEARTBEAT_INTERVAL_FAST_FILL = 6 * 60   # 6 minutes until 100 agents (was 2min)
-HEARTBEAT_INTERVAL_NORMAL = 30 * 60    # 30 minutes after 100 agents (was 10min)
-HEARTBEAT_INTERVAL_FAST = 3 * 60      # 3 minutes when new user feedback (was 1min)
+HEARTBEAT_INTERVAL_FAST_FILL = 3 * 60   # 3 minutes — spawn agent every 3min
+HEARTBEAT_INTERVAL_NORMAL = 3 * 60     # 3 minutes — keep it consistent
+HEARTBEAT_INTERVAL_FAST = 3 * 60       # 3 minutes when new user feedback
 TOURNAMENT_GAMES_PER_TICK = 20
 EVOLUTION_AGENTS_PER_TICK = 1
 MAX_TOOL_ROUNDS = 6
 ELO_START = 1000.0
 ELO_K = 32
 
-# Rotate through Claude models for agent evolution
+# Agent evolution model — Haiku only for now (cost-efficient while seeding variants)
 _EVOLUTION_MODELS = [
     ('claude-haiku-4-5-20251001', 'claude-haiku-4.5'),
-    ('claude-sonnet-4-6', 'claude-sonnet-4.6'),
-    ('claude-opus-4-6', 'claude-opus-4.6'),
 ]
 
 # Heartbeat state (for monitoring)
