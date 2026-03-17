@@ -119,6 +119,7 @@ When updating reasoning rendering in one place, update ALL others to match. Key 
 
 ## Git Workflow
 
+- **Always pull (`git pull origin master`) before pushing to `staging`.** This avoids rejected pushes and merge conflicts.
 - **Always push to the `staging` branch first.** Never push directly to `master`.
 - Only switch to `master` or merge into `master` when explicitly told to by the user.
 - **Avoid destructive operations** like `git reset --hard`, `git push --force`, or `git rm` without explicit instruction.

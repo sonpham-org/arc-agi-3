@@ -5,6 +5,7 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+<<<<<<< Updated upstream
 ## [1.9.3] — feat: Snake variants server-side activation (tournament + evolution)
 *Author: Claude Opus 4.6 | 2026-03-17*
 
@@ -189,6 +190,16 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 - **RLE encoding** — no longer used in any LLM prompt (grid or diff). `compressRowJS()` kept for backward compat but not called by any scaffolding.
 
 ---
+=======
+## [1.7.3] — feat: Tower Siege game (ts01)
+*Author: Claude Sonnet 4.6 | 2026-03-17*
+
+### Added
+- New game `ts01` Tower Siege: 5-level click-only siege puzzle with 3 unit types (Sapper/bomb, Scout/grapple+2-cell-move, Soldier/contact-kill) unlocking progressively across levels. Gate timing, gap grappling, and guard avoidance are introduced one mechanic per level. Fully deterministic; all 5 levels verified by automated smoke test.
+
+---
+
+>>>>>>> Stashed changes
 ## [1.7.2] — feat: Arena Auto Research layout overhaul
 *Author: Claude Opus 4.6 | 2026-03-16*
 
