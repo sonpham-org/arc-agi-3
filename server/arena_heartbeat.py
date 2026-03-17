@@ -1,11 +1,12 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-17 12:00
+# Date: 2026-03-17 22:30
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
 #   Uses ARENA_CLAUDE_KEY env var (Anthropic API key or OAuth token) for agent evolution.
 #   Uses server/arena_tool_runner.py for LLM tool-calling loops (no external deps).
-#   Runs in two daemon threads: tournament (continuous) + evolution (round-robin games).
+#   Tournament: single thread round-robins all games (prevents SQLite corruption).
+#   Evolution: one thread per game (LLM-bound, mostly idle waiting on API).
 #   Chess960 uses random position each match (time-seeded for true randomization).
 #   Monitor via /api/arena/heartbeat/status endpoint.
 # SRP/DRY check: Pass — reuses existing db_arena functions, game engines, arena_tool_runner
@@ -1431,60 +1432,53 @@ def _warm_live_buffer(game_id='snake'):
         print(f'[tournament] Warm buffer failed (non-fatal): {exc}')
 
 
-def _tournament_grinder(game_id):
-    """Dedicated tournament thread for one game. Grinds matches nonstop."""
-    time.sleep(5)
-    _warm_live_buffer(game_id)
-    _seed_if_empty(game_id)
-    print(f'[tournament:{game_id}] Grinder started — running matches continuously')
-
-    total = 0
-    consecutive_zeros = 0
-    last_cleanup = time.time()
-    while _heartbeat_state['running']:
-        try:
-            played = _run_tournament(game_id=game_id, match_count=TOURNAMENT_BATCH)
-            if played > 0:
-                total += played
-                _heartbeat_state['games_played'] += played
-                consecutive_zeros = 0
-                if total % 50 == 0:
-                    print(f'[tournament:{game_id}] {total} games played')
-            else:
-                consecutive_zeros += 1
-                if consecutive_zeros == 1:
-                    agents = arena_get_leaderboard(game_id, limit=10)
-                    print(f'[tournament:{game_id}] 0 games ({len(agents)} agents). Waiting for more agents...')
-                # Back off when no matches possible (not enough agents / all pairs exhausted)
-                time.sleep(30)
-                continue
-        except Exception as e:
-            _heartbeat_state['last_error'] = f'tournament({game_id}): {e}'
-            print(f'[tournament:{game_id}] Error: {e}')
-            traceback.print_exc()
-            time.sleep(10)
-            continue
-
-        # Periodic cleanup — strip old history blobs every 10 min
-        if time.time() - last_cleanup > 600:
-            try:
-                arena_strip_excess_history(game_id)
-            except Exception:
-                pass
-            last_cleanup = time.time()
-
-
 def _tournament_loop():
-    """Spawn one grinder thread per game — each burns CPU on matches nonstop."""
-    print(f'[tournament] Launching per-game grinder threads (games: {_ACTIVE_GAMES})')
+    """Single tournament thread — round-robins all games sequentially.
+
+    One thread handles all games to avoid concurrent DB writes that corrupt SQLite.
+    Each iteration: pick next game, run a batch of matches, move to next game.
+    Only sleeps when ALL games had zero matches in a full round.
+    """
+    time.sleep(5)
     for game_id in _ACTIVE_GAMES:
-        t = threading.Thread(
-            target=_tournament_grinder,
-            args=(game_id,),
-            daemon=True,
-            name=f'arena-tournament-{game_id}',
-        )
-        t.start()
+        _warm_live_buffer(game_id)
+        _seed_if_empty(game_id)
+    print(f'[tournament] Single-threaded loop started (games: {_ACTIVE_GAMES})')
+
+    totals = {gid: 0 for gid in _ACTIVE_GAMES}
+    last_cleanup = {gid: time.time() for gid in _ACTIVE_GAMES}
+
+    while _heartbeat_state['running']:
+        any_played = False
+
+        for game_id in _ACTIVE_GAMES:
+            if not _heartbeat_state['running']:
+                break
+
+            try:
+                played = _run_tournament(game_id=game_id, match_count=TOURNAMENT_BATCH)
+                if played > 0:
+                    totals[game_id] += played
+                    _heartbeat_state['games_played'] += played
+                    any_played = True
+                    if totals[game_id] % 50 == 0:
+                        print(f'[tournament:{game_id}] {totals[game_id]} games played')
+            except Exception as e:
+                _heartbeat_state['last_error'] = f'tournament({game_id}): {e}'
+                print(f'[tournament:{game_id}] Error: {e}')
+                traceback.print_exc()
+
+            # Periodic cleanup — strip old history blobs every 10 min
+            if time.time() - last_cleanup[game_id] > 600:
+                try:
+                    arena_strip_excess_history(game_id)
+                except Exception:
+                    pass
+                last_cleanup[game_id] = time.time()
+
+        # If no game had any matches this round, back off before retrying
+        if not any_played:
+            time.sleep(30)
 
 
 _GAME_SEEDS = {
