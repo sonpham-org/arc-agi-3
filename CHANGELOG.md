@@ -5,6 +5,19 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.9.9] — fix: Monitor page rewrite — use evolution sessions, not dead arena_llm_calls
+*Author: Claude Opus 4.6 | 2026-03-18*
+
+### Fixed
+- **Monitor page showing stale data** — `arena_monitor.html` was reading from `arena_llm_calls` (no longer written to since v1.9.8). Rewrote to read from `arena_evolution_sessions` which has all active data.
+- **Evolution thread crash risk** — `arena_get_leaderboard()` call at end of evolution tick was outside try/except. If DB threw, the thread would silently die. Wrapped in try/except.
+
+### Changed
+- **`arena_get_llm_monitor_stats()`** — All queries now source from `arena_evolution_sessions` instead of legacy `arena_llm_calls`. Returns per-game breakdown, per-model stats with cache info, and session-level cost/latency/calls data.
+- **Monitor dashboard** — Shows per-evolution stats: API calls, tool calls, tokens (in/out/cache), cost (actual with prompt caching), latency, agents created. Added "By Game" breakdown table and "Cost / Agent" card.
+
+---
+
 ## [1.9.8] — feat: Model rotation, prompt caching, session monitoring, Gemini evolution
 *Author: Claude Opus 4.6 | 2026-03-18*
 

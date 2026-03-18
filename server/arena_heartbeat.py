@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 01:30
+# Date: 2026-03-18 14:00
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
@@ -118,11 +118,23 @@ _GAME_PROGRAM_FALLBACKS = {
 
 
 def _load_default_program(game_id='snake'):
-    """Load default program.md from bundled seeds for the given game."""
-    filename = _GAME_PROGRAM_FILES.get(game_id, 'default_program.md')
+    """Load default program.md from bundled seeds for the given game.
+
+    Always reads the latest dated version (e.g. snake_random_program-2026-03-17.md)
+    so that the LLM prompt matches the filename stored in arena_agents.program_file.
+    Falls back to base filename if no dated version exists.
+    """
+    # Use the resolved filename (latest dated version) so LLM sees what DB records
+    filename = _resolve_program_file(game_id)
     path = os.path.join(_SEEDS_DIR, filename)
     if os.path.exists(path):
         with open(path) as f:
+            return f.read()
+    # Final fallback to base file
+    base = _GAME_PROGRAM_FILES.get(game_id, 'default_program.md')
+    base_path = os.path.join(_SEEDS_DIR, base)
+    if os.path.exists(base_path):
+        with open(base_path) as f:
             return f.read()
     return _GAME_PROGRAM_FALLBACKS.get(game_id, "Create agents with a get_move(state) function.")
 
@@ -719,7 +731,10 @@ def _handle_tool(name, args, game_id, agents, created_list,
             return json.dumps({'error': f"Agent '{agent_name}' not found in DB"})
         try:
             with _db() as conn:
-                conn.execute('UPDATE arena_agents SET code = ? WHERE id = ?', (code, agent['id']))
+                conn.execute(
+                    'UPDATE arena_agents SET code = ?, program_version_id = ?, program_file = ? WHERE id = ?',
+                    (code, program_version_id, program_file, agent['id'])
+                )
             return json.dumps({'success': True, 'message': f"Agent '{agent_name}' updated and passed tests."})
         except Exception as exc:
             return json.dumps({'error': f'DB error: {exc}'})
@@ -1683,7 +1698,10 @@ def _evolution_loop_for_game(game_id, stagger_secs):
             except Exception as exc:
                 print(f'[evolution:{game_id}] Export error (non-fatal): {exc}')
 
-        agent_count = len(arena_get_leaderboard(game_id, limit=200))
+        try:
+            agent_count = len(arena_get_leaderboard(game_id, limit=200))
+        except Exception:
+            agent_count = 100  # default to normal interval on DB error
         if agent_count < 100:
             interval = HEARTBEAT_INTERVAL_FAST_FILL
         else:
