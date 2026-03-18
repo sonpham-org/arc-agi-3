@@ -98,6 +98,10 @@ def run_tool_loop(
 
     messages = [{"role": "user", "content": user_message}]
     headers = _anthropic_auth_headers(api_key)
+    # Enable prompt caching — without this header, cache_control fields are silently ignored
+    existing_beta = headers.get("anthropic-beta", "")
+    cache_beta = "prompt-caching-2024-07-31"
+    headers["anthropic-beta"] = f"{existing_beta},{cache_beta}" if existing_beta else cache_beta
 
     for round_num in range(max_rounds):
         messages = _truncate_messages(messages)
