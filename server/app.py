@@ -654,7 +654,10 @@ def games_page():
 
 @app.route("/code")
 def code_page():
-    """Code Arena — AutoResearch for code optimization challenges."""
+    """Code Arena — AutoResearch for code optimization challenges. Staging only."""
+    from server.helpers import get_mode
+    if get_mode() == "prod":
+        return redirect("/games", code=302)
     return _render_code()
 
 

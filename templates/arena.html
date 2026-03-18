@@ -48,7 +48,7 @@ let currentUser = null;
       <span class="app-title-text">AutoResearch<a class="logo-sub-link to-obs" href="{{ observatory_url }}">&#8594; to Observatory</a></span>
     </span>
     <a class="nav-link active" href="/games">Games</a>
-    <a class="nav-link" href="/code">Code</a>
+    {% if mode != 'prod' %}<a class="nav-link" href="/code">Code</a>{% endif %}
     <span style="flex:1"></span>
     <a class="nav-switch-btn to-obs" href="{{ observatory_url }}">&#8592; to Observatory</a>
     {% if google_client_id %}
