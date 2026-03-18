@@ -1,27 +1,295 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 21:00
-# PURPOSE: Database operations for Arena Auto Research. Manages arena_agents,
-#   arena_games, arena_research, arena_comments, arena_program_versions,
-#   arena_votes, arena_human_sessions, arena_evolution_sessions,
-#   arena_evolution_cycles, and arena_library_requests tables. Handles ELO
-#   calculations, agent pruning, game storage limits, upset detection,
-#   evolution session monitoring/stats, evolution cycle logging (full LLM
+# Date: 2026-03-18 23:55
+# PURPOSE: Database operations for Arena Auto Research. Supports PostgreSQL
+#   (primary, via DATABASE_URL env var) with SQLite fallback (when DATABASE_URL unset).
+#   PostgreSQL eliminates write-lock contention from heartbeat tournament thread.
+#   Manages arena_agents, arena_games, arena_research, arena_comments,
+#   arena_program_versions, arena_votes, arena_human_sessions,
+#   arena_evolution_sessions, arena_evolution_cycles, and arena_library_requests
+#   tables. Handles ELO calculations, agent pruning, game storage limits, upset
+#   detection, evolution session monitoring/stats, evolution cycle logging (full LLM
 #   conversation), game frequency monitoring, and library request logging.
 #   Supports program_version_id, program_file, and evolution_cycle_id on agents.
 #   arena_clear_all_agents() wipes agents+games.
 #   Monitor stats now read from arena_evolution_sessions (not legacy arena_llm_calls).
 #   arena_get_all_pair_counts() — bulk pair count query (replaces O(n^2) individual calls).
 # SRP/DRY check: Pass — arena-specific DB ops only, follows db_sessions/db_auth pattern
-"""Arena Auto Research database operations."""
+"""Arena Auto Research database operations.
+
+Dual-mode: PostgreSQL (if DATABASE_URL set) or SQLite (fallback).
+All SQL uses ? placeholders — the _PGConn wrapper converts to %s for psycopg2.
+"""
 
 import json
 import logging
+import os
 import random
 import time
-
-from db import _db, _get_db
+from contextlib import contextmanager
 
 log = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DUAL-MODE CONNECTION LAYER
+# ═══════════════════════════════════════════════════════════════════════════
+
+_USE_PG = bool(os.environ.get('DATABASE_URL'))
+_pg_pool = None
+_pg_schema_initialized = False
+
+
+class _PGConn:
+    """Wraps psycopg2 connection to match sqlite3.Row API.
+
+    - Converts ? placeholders to %s for psycopg2.
+    - Returns rows as dicts (via RealDictCursor) that support both d['col'] and d[index].
+    - Provides .rowcount on the cursor returned by execute().
+    """
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=None):
+        from psycopg2.extras import RealDictCursor
+        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        sql = sql.replace('?', '%s')
+        cur.execute(sql, params or ())
+        return cur
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+
+def _init_pg_schema(conn):
+    """Create all 11 arena tables in PostgreSQL if they don't exist."""
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS arena_research (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT UNIQUE NOT NULL,
+            program_md TEXT DEFAULT '',
+            program_version INTEGER DEFAULT 0,
+            generation INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'stopped',
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW()),
+            updated_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+
+        CREATE TABLE IF NOT EXISTS arena_agents (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            code TEXT NOT NULL,
+            generation INTEGER DEFAULT 0,
+            elo DOUBLE PRECISION DEFAULT 1000.0,
+            peak_elo DOUBLE PRECISION DEFAULT 1000.0,
+            games_played INTEGER DEFAULT 0,
+            wins INTEGER DEFAULT 0,
+            losses INTEGER DEFAULT 0,
+            draws INTEGER DEFAULT 0,
+            contributor TEXT,
+            is_human INTEGER DEFAULT 0,
+            is_anchor INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            program_version_id INTEGER,
+            program_file TEXT,
+            evolution_cycle_id INTEGER,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+        CREATE INDEX IF NOT EXISTS idx_aa_game_elo ON arena_agents(game_id, elo DESC);
+        CREATE INDEX IF NOT EXISTS idx_aa_game_active ON arena_agents(game_id, active);
+
+        CREATE TABLE IF NOT EXISTS arena_games (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            agent1_id INTEGER REFERENCES arena_agents(id),
+            agent2_id INTEGER REFERENCES arena_agents(id),
+            winner_id INTEGER,
+            agent1_score INTEGER DEFAULT 0,
+            agent2_score INTEGER DEFAULT 0,
+            turns INTEGER DEFAULT 0,
+            history TEXT,
+            is_upset INTEGER DEFAULT 0,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+        CREATE INDEX IF NOT EXISTS idx_ag_game ON arena_games(game_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ag_agents ON arena_games(agent1_id, agent2_id);
+
+        CREATE TABLE IF NOT EXISTS arena_evolution_cycles (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            generation INTEGER DEFAULT 0,
+            worker_label TEXT DEFAULT '',
+            agents_created INTEGER DEFAULT 0,
+            conversation TEXT,
+            started_at DOUBLE PRECISION,
+            finished_at DOUBLE PRECISION,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+
+        CREATE TABLE IF NOT EXISTS arena_comments (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            user_id TEXT,
+            username TEXT,
+            content TEXT NOT NULL,
+            comment_type TEXT DEFAULT 'strategy',
+            parent_id INTEGER,
+            upvotes INTEGER DEFAULT 0,
+            downvotes INTEGER DEFAULT 0,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+        CREATE INDEX IF NOT EXISTS idx_ac_game ON arena_comments(game_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS arena_program_versions (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            author TEXT,
+            change_summary TEXT,
+            votes_for INTEGER DEFAULT 0,
+            votes_against INTEGER DEFAULT 0,
+            vote_deadline DOUBLE PRECISION,
+            applied INTEGER DEFAULT 0,
+            auto_evolved INTEGER DEFAULT 0,
+            trigger_reason TEXT,
+            conversation_log TEXT,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+        CREATE INDEX IF NOT EXISTS idx_apv_game ON arena_program_versions(game_id, version DESC);
+
+        CREATE TABLE IF NOT EXISTS arena_votes (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            version_id INTEGER REFERENCES arena_program_versions(id),
+            user_id TEXT NOT NULL,
+            vote INTEGER NOT NULL,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW()),
+            UNIQUE(version_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS arena_human_sessions (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            human_agent_id INTEGER REFERENCES arena_agents(id),
+            opponent_id INTEGER REFERENCES arena_agents(id),
+            delay_ms INTEGER,
+            winner TEXT,
+            turns INTEGER DEFAULT 0,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+
+        CREATE TABLE IF NOT EXISTS arena_evolution_sessions (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            generation INTEGER DEFAULT 0,
+            model TEXT,
+            provider TEXT DEFAULT 'anthropic',
+            status TEXT DEFAULT 'success',
+            api_calls INTEGER DEFAULT 0,
+            tool_calls INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cache_creation_tokens INTEGER DEFAULT 0,
+            cost_usd DOUBLE PRECISION DEFAULT 0,
+            total_latency_ms DOUBLE PRECISION DEFAULT 0,
+            rounds INTEGER DEFAULT 0,
+            agents_created INTEGER DEFAULT 0,
+            error_message TEXT,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+        CREATE INDEX IF NOT EXISTS idx_aes_game ON arena_evolution_sessions(game_id);
+        CREATE INDEX IF NOT EXISTS idx_aes_time ON arena_evolution_sessions(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS arena_llm_calls (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            generation INTEGER DEFAULT 0,
+            model TEXT,
+            status TEXT,
+            http_status INTEGER,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cost_usd DOUBLE PRECISION DEFAULT 0,
+            latency_ms DOUBLE PRECISION DEFAULT 0,
+            error_message TEXT,
+            auth_type TEXT,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+
+        CREATE TABLE IF NOT EXISTS arena_library_requests (
+            id SERIAL PRIMARY KEY,
+            game_id TEXT NOT NULL,
+            agent_name TEXT,
+            library_name TEXT NOT NULL,
+            created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
+        );
+    """)
+    conn.commit()
+
+
+@contextmanager
+def _arena_db():
+    """Arena DB context manager. PostgreSQL if DATABASE_URL set, else SQLite fallback."""
+    global _pg_pool, _pg_schema_initialized
+    if _USE_PG:
+        import psycopg2
+        from psycopg2.pool import ThreadedConnectionPool
+        if _pg_pool is None:
+            _pg_pool = ThreadedConnectionPool(1, 10, os.environ['DATABASE_URL'])
+        if not _pg_schema_initialized:
+            schema_conn = _pg_pool.getconn()
+            try:
+                _init_pg_schema(schema_conn)
+                _pg_schema_initialized = True
+            finally:
+                _pg_pool.putconn(schema_conn)
+        conn = _pg_pool.getconn()
+        conn.autocommit = False
+        try:
+            yield _PGConn(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            _pg_pool.putconn(conn)
+    else:
+        from db import _db
+        with _db() as conn:
+            yield conn
+
+
+# Alias for backward compatibility — arena_heartbeat.py imports _db from db_arena
+_db = _arena_db
+
+
+def _insert_returning_id(conn, sql, params):
+    """Insert and return the new row's ID. Handles PG RETURNING vs SQLite last_insert_rowid."""
+    if _USE_PG:
+        cur = conn.execute(sql + ' RETURNING id', params)
+        return cur.fetchone()['id']
+    else:
+        conn.execute(sql, params)
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _apv_has_evo_cols(conn):
+    """Check if arena_program_versions has auto_evolved/trigger_reason/conversation_log columns.
+
+    PostgreSQL always has them (schema created with all columns).
+    SQLite may not if migration hasn't run.
+    """
+    if _USE_PG:
+        return True
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(arena_program_versions)").fetchall()}
+    return 'auto_evolved' in cols
+
 
 # Constants
 ELO_K = 32
@@ -42,7 +310,7 @@ MAX_GAMES_WITH_HISTORY = 500  # FIFO — keep frame history for last N games onl
 
 def arena_get_or_create_research(game_id):
     """Get or create research state for a game. Returns dict."""
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute(
             "SELECT * FROM arena_research WHERE game_id = ?", (game_id,)
         ).fetchone()
@@ -60,7 +328,7 @@ def arena_get_or_create_research(game_id):
 
 def arena_increment_generation(game_id):
     """Increment and return the generation counter for a game."""
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute(
             "SELECT generation FROM arena_research WHERE game_id = ?", (game_id,)
         ).fetchone()
@@ -71,15 +339,15 @@ def arena_increment_generation(game_id):
             ).fetchone()
         new_gen = (row['generation'] or 0) + 1
         conn.execute(
-            "UPDATE arena_research SET generation = ?, updated_at = unixepoch('now') WHERE game_id = ?",
-            (new_gen, game_id)
+            "UPDATE arena_research SET generation = ?, updated_at = ? WHERE game_id = ?",
+            (new_gen, time.time(), game_id)
         )
         return new_gen
 
 
 def arena_get_research_stats(game_id):
     """Get summary stats for a game's research."""
-    with _db() as conn:
+    with _arena_db() as conn:
         research = conn.execute(
             "SELECT * FROM arena_research WHERE game_id = ?", (game_id,)
         ).fetchone()
@@ -112,7 +380,7 @@ def arena_get_research_stats(game_id):
 
 def arena_get_leaderboard(game_id, limit=100):
     """Get ELO-sorted leaderboard for a game."""
-    with _db() as conn:
+    with _arena_db() as conn:
         rows = conn.execute("""
             SELECT id, game_id, name, generation, elo, peak_elo,
                    games_played, wins, losses, draws, contributor,
@@ -132,7 +400,7 @@ def arena_submit_agent(game_id, name, code, generation=0, contributor=None,
                        is_human=0, is_anchor=0, program_version_id=None,
                        program_file=None):
     """Submit a new agent or update existing. Returns agent dict or error string."""
-    with _db() as conn:
+    with _arena_db() as conn:
         # Check active agent cap (skip for human pseudo-agents)
         if not is_human:
             active_count = conn.execute(
@@ -156,14 +424,13 @@ def arena_submit_agent(game_id, name, code, generation=0, contributor=None,
             )
             agent_id = existing["id"]
         else:
-            conn.execute(
+            agent_id = _insert_returning_id(conn,
                 """INSERT INTO arena_agents
                    (game_id, name, code, generation, elo, peak_elo, contributor, is_human, is_anchor, program_version_id, program_file)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (game_id, name, code, generation, ELO_START, ELO_START,
                  contributor, is_human, is_anchor, program_version_id, program_file)
             )
-            agent_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
         row = conn.execute("SELECT * FROM arena_agents WHERE id = ?", (agent_id,)).fetchone()
         return dict(row)
@@ -171,7 +438,7 @@ def arena_submit_agent(game_id, name, code, generation=0, contributor=None,
 
 def arena_get_agent(game_id, agent_id):
     """Get a single agent by ID."""
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute(
             "SELECT * FROM arena_agents WHERE id = ? AND game_id = ?",
             (agent_id, game_id)
@@ -181,7 +448,7 @@ def arena_get_agent(game_id, agent_id):
 
 def arena_get_agent_by_name(game_id, name):
     """Get a single agent by name."""
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute(
             "SELECT * FROM arena_agents WHERE game_id = ? AND name = ?",
             (game_id, name)
@@ -191,7 +458,7 @@ def arena_get_agent_by_name(game_id, name):
 
 def arena_get_agent_games(game_id, agent_id, limit=5):
     """Get an agent's recent games with summary data."""
-    with _db() as conn:
+    with _arena_db() as conn:
         rows = conn.execute("""
             SELECT g.id, g.agent1_id, g.agent2_id, g.winner_id,
                    g.agent1_score, g.agent2_score, g.turns, g.is_upset,
@@ -215,7 +482,7 @@ def arena_get_agent_games_for_profile(game_id, agent_id, limit=20):
     Returns games with history (for replay) where available, plus opponent
     ELO fields so the client can partition into 'vs higher' and 'vs lower'.
     """
-    with _db() as conn:
+    with _arena_db() as conn:
         rows = conn.execute("""
             SELECT g.id, g.agent1_id, g.agent2_id, g.winner_id,
                    g.agent1_score, g.agent2_score, g.turns, g.is_upset,
@@ -246,7 +513,7 @@ def arena_get_agent_games_for_profile(game_id, agent_id, limit=20):
 
 def arena_prune_weak_agents(game_id, count=10):
     """Randomly deactivate agents with ELO < 1000. Returns number pruned."""
-    with _db() as conn:
+    with _arena_db() as conn:
         return _prune_weak(conn, game_id, count)
 
 
@@ -278,7 +545,7 @@ def arena_record_game(game_id, agent1_id, agent2_id, winner_id,
 
     Returns: dict with game_id and elo updates, or None if skipped.
     """
-    with _db() as conn:
+    with _arena_db() as conn:
         a1 = conn.execute("SELECT * FROM arena_agents WHERE id = ?", (agent1_id,)).fetchone()
         a2 = conn.execute("SELECT * FROM arena_agents WHERE id = ?", (agent2_id,)).fetchone()
         if not a1 or not a2:
@@ -321,7 +588,7 @@ def arena_record_game(game_id, agent1_id, agent2_id, winner_id,
             if upset_count < MAX_UPSET_RECORDS:
                 history_json = json.dumps(history)
 
-        conn.execute(
+        game_row_id = _insert_returning_id(conn,
             """INSERT INTO arena_games
                (game_id, agent1_id, agent2_id, winner_id,
                 agent1_score, agent2_score, turns, history, is_upset)
@@ -329,7 +596,6 @@ def arena_record_game(game_id, agent1_id, agent2_id, winner_id,
             (game_id, agent1_id, agent2_id, winner_id,
              scores[0], scores[1], turns, history_json, is_upset)
         )
-        game_row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
         # Update agent stats
         for aid in [agent1_id, agent2_id]:
@@ -359,7 +625,7 @@ def arena_record_game(game_id, agent1_id, agent2_id, winner_id,
 
 def arena_update_elo(agent1_id, agent2_id, result):
     """Standalone ELO update (used by external callers)."""
-    with _db() as conn:
+    with _arena_db() as conn:
         return _update_elo(conn, agent1_id, agent2_id, result)
 
 
@@ -392,7 +658,7 @@ def _update_elo(conn, agent1_id, agent2_id, result):
 
 def arena_count_pair_games(agent1_id, agent2_id):
     """Count stored games between two agents."""
-    with _db() as conn:
+    with _arena_db() as conn:
         return _count_pair(conn, agent1_id, agent2_id)
 
 
@@ -410,7 +676,7 @@ def arena_get_all_pair_counts(game_id, agent_ids):
     Single query replaces O(n^2) individual arena_count_pair_games calls."""
     if not agent_ids:
         return {}
-    with _db() as conn:
+    with _arena_db() as conn:
         placeholders = ','.join('?' * len(agent_ids))
         rows = conn.execute(f"""
             SELECT
@@ -432,7 +698,7 @@ def arena_get_all_pair_counts(game_id, agent_ids):
 
 def arena_get_recent_games(game_id, limit=50):
     """Get recent games for a game type."""
-    with _db() as conn:
+    with _arena_db() as conn:
         rows = conn.execute("""
             SELECT g.id, g.agent1_id, g.agent2_id, g.winner_id,
                    g.agent1_score, g.agent2_score, g.turns, g.is_upset, g.created_at,
@@ -452,7 +718,7 @@ def arena_get_recent_games(game_id, limit=50):
 
 def arena_get_recent_games_with_history(game_id, limit=8):
     """Get recent games that still have replay history (not yet stripped)."""
-    with _db() as conn:
+    with _arena_db() as conn:
         rows = conn.execute("""
             SELECT g.id, g.history, g.turns,
                    a1.name as agent1_name, a1.elo as agent1_elo,
@@ -482,7 +748,7 @@ def arena_get_recent_games_with_history(game_id, limit=8):
 
 def arena_get_game(game_id, match_id):
     """Get a single game with full history."""
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute("""
             SELECT g.*, a1.name as agent1_name, a2.name as agent2_name,
                    a1.elo as agent1_elo, a2.elo as agent2_elo,
@@ -507,14 +773,14 @@ def arena_get_game(game_id, match_id):
 
 def arena_get_comments(game_id, limit=100, comment_type=None):
     """Get comments for a game, optionally filtered by comment_type."""
-    with _db() as conn:
+    with _arena_db() as conn:
         if comment_type:
             rows = conn.execute("""
                 SELECT * FROM (
                     SELECT * FROM arena_comments
                     WHERE game_id = ? AND comment_type = ?
                     ORDER BY created_at DESC LIMIT ?
-                ) ORDER BY created_at ASC
+                ) AS sub ORDER BY created_at ASC
             """, (game_id, comment_type, limit)).fetchall()
         else:
             rows = conn.execute("""
@@ -522,7 +788,7 @@ def arena_get_comments(game_id, limit=100, comment_type=None):
                     SELECT * FROM arena_comments
                     WHERE game_id = ?
                     ORDER BY created_at DESC LIMIT ?
-                ) ORDER BY created_at ASC
+                ) AS sub ORDER BY created_at ASC
             """, (game_id, limit)).fetchall()
         return [dict(r) for r in rows]
 
@@ -530,21 +796,20 @@ def arena_get_comments(game_id, limit=100, comment_type=None):
 def arena_post_comment(game_id, user_id, username, content,
                        comment_type="strategy", parent_id=None):
     """Post a strategy comment."""
-    with _db() as conn:
-        conn.execute(
+    with _arena_db() as conn:
+        cid = _insert_returning_id(conn,
             """INSERT INTO arena_comments
                (game_id, user_id, username, content, comment_type, parent_id)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (game_id, user_id, username, content, comment_type, parent_id)
         )
-        cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         row = conn.execute("SELECT * FROM arena_comments WHERE id = ?", (cid,)).fetchone()
         return dict(row)
 
 
 def arena_vote_comment(comment_id, user_id, vote):
     """Upvote (+1) or downvote (-1) a comment. Returns updated comment."""
-    with _db() as conn:
+    with _arena_db() as conn:
         # Check existing vote
         existing = conn.execute(
             "SELECT vote FROM arena_votes WHERE version_id = ? AND user_id = ?",
@@ -576,15 +841,9 @@ def arena_vote_comment(comment_id, user_id, vote):
 # PROGRAM.MD VERSIONING & VOTING
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _apv_has_evo_cols(conn):
-    """Check if arena_program_versions has auto_evolved/trigger_reason/conversation_log columns."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(arena_program_versions)").fetchall()}
-    return 'auto_evolved' in cols
-
-
 def arena_get_program_version(version_id):
     """Get a single program version by ID, including conversation log. Returns dict or None."""
-    with _db() as conn:
+    with _arena_db() as conn:
         has_evo = _apv_has_evo_cols(conn)
         if has_evo:
             evo_cols = "auto_evolved, trigger_reason, conversation_log,"
@@ -612,7 +871,7 @@ def arena_count_agents_since_program(game_id):
 
     Returns (count, version_id, version_created_at) or (0, None, None) if no version.
     """
-    with _db() as conn:
+    with _arena_db() as conn:
         # Find current applied version
         ver = conn.execute(
             """SELECT id, created_at FROM arena_program_versions
@@ -641,7 +900,7 @@ def arena_auto_evolve_program(game_id, content, change_summary,
         if len(conv_json) > 200_000:
             conv_json = conv_json[:200_000]
 
-    with _db() as conn:
+    with _arena_db() as conn:
         has_evo = _apv_has_evo_cols(conn)
         research = conn.execute(
             "SELECT program_version FROM arena_research WHERE game_id = ?", (game_id,)
@@ -650,7 +909,7 @@ def arena_auto_evolve_program(game_id, content, change_summary,
         new_version = current_version + 1
 
         if has_evo:
-            conn.execute(
+            vid = _insert_returning_id(conn,
                 """INSERT INTO arena_program_versions
                    (game_id, version, content, author, change_summary,
                     applied, auto_evolved, conversation_log, trigger_reason)
@@ -659,13 +918,12 @@ def arena_auto_evolve_program(game_id, content, change_summary,
                  conv_json, trigger_reason)
             )
         else:
-            conn.execute(
+            vid = _insert_returning_id(conn,
                 """INSERT INTO arena_program_versions
                    (game_id, version, content, author, change_summary, applied)
                    VALUES (?, ?, ?, ?, ?, 1)""",
                 (game_id, new_version, content, 'AI Evolution', change_summary)
             )
-        vid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
         # Auto-apply: update arena_research with new content
         conn.execute(
@@ -684,7 +942,7 @@ def arena_auto_evolve_program(game_id, content, change_summary,
 
 def arena_get_program_versions(game_id):
     """Get all program versions for a game (without conversation_log for size)."""
-    with _db() as conn:
+    with _arena_db() as conn:
         has_evo = _apv_has_evo_cols(conn)
         evo_select = "auto_evolved, trigger_reason," if has_evo else "0 as auto_evolved, NULL as trigger_reason,"
         rows = conn.execute(
@@ -700,14 +958,13 @@ def arena_get_program_versions(game_id):
 
 def arena_get_program(game_id):
     """Get current program.md and version history."""
-    with _db() as conn:
+    with _arena_db() as conn:
         research = conn.execute(
             "SELECT program_md, program_version FROM arena_research WHERE game_id = ?",
             (game_id,)
         ).fetchone()
         # Check which columns exist (migration may not have run yet)
-        apv_cols = {r[1] for r in conn.execute("PRAGMA table_info(arena_program_versions)").fetchall()}
-        has_evo_cols = 'auto_evolved' in apv_cols
+        has_evo_cols = _apv_has_evo_cols(conn)
         evo_select = "auto_evolved, trigger_reason," if has_evo_cols else "0 as auto_evolved, NULL as trigger_reason,"
         versions = conn.execute(
             f"""SELECT id, version, author, change_summary, votes_for, votes_against,
@@ -735,7 +992,7 @@ def arena_get_program(game_id):
 
 def arena_propose_program(game_id, content, author, change_summary, vote_seconds=10):
     """Propose a program.md change. Starts a vote with deadline."""
-    with _db() as conn:
+    with _arena_db() as conn:
         research = conn.execute(
             "SELECT program_version FROM arena_research WHERE game_id = ?", (game_id,)
         ).fetchone()
@@ -743,20 +1000,19 @@ def arena_propose_program(game_id, content, author, change_summary, vote_seconds
         new_version = current_version + 1
         deadline = time.time() + vote_seconds
 
-        conn.execute(
+        pid = _insert_returning_id(conn,
             """INSERT INTO arena_program_versions
                (game_id, version, content, author, change_summary, vote_deadline)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (game_id, new_version, content, author, change_summary, deadline)
         )
-        pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         row = conn.execute("SELECT * FROM arena_program_versions WHERE id = ?", (pid,)).fetchone()
         return dict(row)
 
 
 def arena_vote_program(version_id, user_id, vote):
     """Vote on a program.md proposal. vote: +1 or -1."""
-    with _db() as conn:
+    with _arena_db() as conn:
         # Check deadline
         prop = conn.execute(
             "SELECT * FROM arena_program_versions WHERE id = ?", (version_id,)
@@ -787,7 +1043,7 @@ def arena_vote_program(version_id, user_id, vote):
 
 def arena_apply_program_vote(version_id):
     """Apply a program.md proposal if votes_for > votes_against."""
-    with _db() as conn:
+    with _arena_db() as conn:
         prop = conn.execute(
             "SELECT * FROM arena_program_versions WHERE id = ?", (version_id,)
         ).fetchone()
@@ -815,20 +1071,19 @@ def arena_get_or_create_human_agent(game_id, delay_ms):
     """Get or create the human-{delay}ms pseudo-agent for a game."""
     delay_label = f"{delay_ms}ms" if delay_ms > 0 else "inf"
     name = f"human-{delay_label}"
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute(
             "SELECT * FROM arena_agents WHERE game_id = ? AND name = ?",
             (game_id, name)
         ).fetchone()
         if row:
             return dict(row)
-        conn.execute(
+        aid = _insert_returning_id(conn,
             """INSERT INTO arena_agents
                (game_id, name, code, generation, elo, peak_elo, contributor, is_human)
                VALUES (?, ?, 'human', 0, ?, ?, 'human', 1)""",
             (game_id, name, ELO_START, ELO_START)
         )
-        aid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         row = conn.execute("SELECT * FROM arena_agents WHERE id = ?", (aid,)).fetchone()
         return dict(row)
 
@@ -858,7 +1113,7 @@ def arena_submit_human_result(game_id, opponent_agent_id, delay_ms, winner, turn
     )
 
     # Also log to human sessions table
-    with _db() as conn:
+    with _arena_db() as conn:
         conn.execute(
             """INSERT INTO arena_human_sessions
                (game_id, human_agent_id, opponent_id, delay_ms, winner, turns)
@@ -880,7 +1135,7 @@ def arena_strip_excess_history(game_id=None):
       - Upset games (is_upset = 1)
       - Human vs AI games (either agent has is_human = 1)
     """
-    with _db() as conn:
+    with _arena_db() as conn:
         # Collect IDs of all human agents so we can exclude their games
         human_ids = {r[0] for r in conn.execute(
             "SELECT id FROM arena_agents WHERE is_human = 1"
@@ -951,7 +1206,7 @@ def arena_log_llm_call(game_id, generation, model, status, http_status,
     """Log an Anthropic API call from arena evolution."""
     input_cost_per_m, output_cost_per_m = _MODEL_COSTS.get(model, (3.0, 15.0))
     cost_usd = (input_tokens * input_cost_per_m + output_tokens * output_cost_per_m) / 1_000_000
-    with _db() as conn:
+    with _arena_db() as conn:
         conn.execute(
             """INSERT INTO arena_llm_calls
                (game_id, generation, model, status, http_status,
@@ -972,7 +1227,7 @@ def arena_log_evolution_session(game_id, generation, model, provider='anthropic'
                                  agents_created=0, error_message=None):
     """Log one evolution session (replaces per-call logging)."""
     try:
-        with _db() as conn:
+        with _arena_db() as conn:
             conn.execute(
                 """INSERT INTO arena_evolution_sessions
                    (game_id, generation, model, provider, status,
@@ -1004,8 +1259,8 @@ def arena_save_evolution_cycle(game_id, generation, conversation_log,
         conv_json = json.dumps(conversation_log, default=str)
         if len(conv_json) > MAX_EVOLUTION_LOG_CHARS:
             conv_json = conv_json[:MAX_EVOLUTION_LOG_CHARS]
-        with _db() as conn:
-            conn.execute(
+        with _arena_db() as conn:
+            cycle_id = _insert_returning_id(conn,
                 """INSERT INTO arena_evolution_cycles
                    (game_id, generation, worker_label, agents_created,
                     conversation, started_at, finished_at)
@@ -1013,7 +1268,6 @@ def arena_save_evolution_cycle(game_id, generation, conversation_log,
                 (game_id, generation, worker_label, agents_created,
                  conv_json, started_at, finished_at)
             )
-            cycle_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             return cycle_id
     except Exception as e:
         log.warning("Failed to save evolution cycle: %s", e)
@@ -1023,7 +1277,7 @@ def arena_save_evolution_cycle(game_id, generation, conversation_log,
 def arena_link_agent_to_cycle(agent_id, cycle_id):
     """Set evolution_cycle_id on an agent."""
     try:
-        with _db() as conn:
+        with _arena_db() as conn:
             conn.execute(
                 "UPDATE arena_agents SET evolution_cycle_id = ? WHERE id = ?",
                 (cycle_id, agent_id)
@@ -1034,7 +1288,7 @@ def arena_link_agent_to_cycle(agent_id, cycle_id):
 
 def arena_get_evolution_cycle(cycle_id):
     """Get a single evolution cycle by ID."""
-    with _db() as conn:
+    with _arena_db() as conn:
         row = conn.execute(
             "SELECT * FROM arena_evolution_cycles WHERE id = ?", (cycle_id,)
         ).fetchone()
@@ -1058,7 +1312,7 @@ def arena_get_agent_profile(game_id, agent_id):
 
     Heavy fields (evolution_log, game histories) are omitted — load via separate endpoints.
     """
-    with _db() as conn:
+    with _arena_db() as conn:
         # Agent basic info + code
         agent_row = conn.execute(
             "SELECT * FROM arena_agents WHERE id = ? AND game_id = ?",
@@ -1136,7 +1390,7 @@ def arena_get_agent_profile(game_id, agent_id):
 
 def arena_get_agent_evolution_log(game_id, agent_id):
     """Get the full evolution conversation log for an agent. Heavy — only call on demand."""
-    with _db() as conn:
+    with _arena_db() as conn:
         agent_row = conn.execute(
             "SELECT evolution_cycle_id FROM arena_agents WHERE id = ? AND game_id = ?",
             (agent_id, game_id)
@@ -1167,7 +1421,7 @@ def arena_get_llm_monitor_stats():
     hour_ago = now - 3600
     day_ago = now - 86400
 
-    with _db() as conn:
+    with _arena_db() as conn:
         # ── Time-bucketed summaries ──
         def _session_counts(since=None):
             where = f"WHERE created_at >= {since}" if since else ""
@@ -1351,13 +1605,14 @@ def arena_get_llm_monitor_stats():
 def arena_log_library_request(game_id, agent_name, library_name):
     """Log a missing library import attempt. Non-blocking, never raises."""
     try:
-        with _db() as conn:
+        with _arena_db() as conn:
             # Deduplicate: only log once per game_id + library combo per hour
+            cutoff = time.time() - 3600
             existing = conn.execute(
                 """SELECT 1 FROM arena_library_requests
                    WHERE game_id = ? AND library_name = ?
-                   AND created_at > unixepoch('now') - 3600""",
-                (game_id, library_name)
+                   AND created_at > ?""",
+                (game_id, library_name, cutoff)
             ).fetchone()
             if not existing:
                 conn.execute(
@@ -1374,7 +1629,7 @@ def arena_log_library_request(game_id, agent_name, library_name):
 def arena_get_library_requests():
     """Get aggregated library requests for the monitor page."""
     try:
-        with _db() as conn:
+        with _arena_db() as conn:
             rows = conn.execute("""
                 SELECT library_name, game_id, COUNT(*) as request_count,
                        MAX(created_at) as last_requested
@@ -1394,10 +1649,7 @@ def arena_clear_all_agents(game_id=None):
     Does NOT touch arena_program_versions (those are the spec history, keep them).
     Returns counts of deleted rows.
     """
-    with _db() as conn:
-        where = "WHERE game_id = ?" if game_id else ""
-        params = (game_id,) if game_id else ()
-
+    with _arena_db() as conn:
         # Get agent IDs first for targeted game deletion
         if game_id:
             agent_ids = [r["id"] for r in conn.execute(
