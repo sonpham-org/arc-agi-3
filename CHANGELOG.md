@@ -5,6 +5,26 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.10.2] — feat: Agent Profile Tabs — Games, Code, Program, Evolution Log
+*Author: Claude Opus 4.6 | 2026-03-18*
+
+### Added
+- **Tabbed agent profile view** — Clicking an agent in the leaderboard now shows a full tabbed profile with 4 tabs: Recent Games (game replays), Code (syntax-highlighted agent source), Program.md (strategy document at creation time), and Evolution Log (full LLM conversation that created the agent).
+- **Evolution cycle storage** — The full LLM conversation from each evolution cycle is now saved to `arena_evolution_cycles` and linked to created agents via `evolution_cycle_id`. Previously the conversation log was generated but discarded.
+- **Profile API endpoint** — `GET /api/arena/agents/<game_id>/<agent_id>/profile` returns all tab data in a single call (agent info, code, program, evolution log, games).
+- **DB migration** — Added `evolution_cycle_id` column to `arena_agents` table.
+
+---
+
+## [1.10.1] — chg: Arena model rotation — drop Sonnet/Opus, add Gemini Flash Lite
+*Author: Claude Opus 4.6 | 2026-03-18*
+
+### Changed
+- **Model rotation** — Removed Sonnet 4.6 and Opus 4.6 from arena evolution (all agents they created failed). New rotation: 3x Haiku 4.5, 1x Gemini 3.1 Flash Lite, 1x Gemini 3.1 Pro.
+- **Cost tracking** — Added `gemini-3.1-flash-lite-preview` pricing ($0.075/$0.30 per 1M tok) to arena tool runner.
+
+---
+
 ## [1.10.0] — fix: Sonnet/Opus evolution + AI Heartbeat analysis reports
 *Author: Claude Opus 4.6 | 2026-03-18*
 

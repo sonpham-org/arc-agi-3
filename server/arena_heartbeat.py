@@ -44,6 +44,8 @@ from db_arena import (
     arena_count_pair_games,
     arena_post_comment,
     arena_strip_excess_history,
+    arena_save_evolution_cycle,
+    arena_link_agent_to_cycle,
     MAX_STORED_GAMES_PER_PAIR,
     _db,
 )
@@ -54,7 +56,7 @@ from db_arena import (
 # ═══════════════════════════════════════════════════════════════════════════
 
 HEARTBEAT_INTERVAL_FAST_FILL = 6 * 60   # 6 minutes per game until 100 agents
-HEARTBEAT_INTERVAL_NORMAL = 6 * 60     # 6 minutes per game steady state
+HEARTBEAT_INTERVAL_NORMAL = 12 * 60    # 12 minutes per game steady state (~5 agents/hr/game)
 HEARTBEAT_INTERVAL_FAST = 6 * 60       # 6 minutes (same — haiku is cheap)
 EVOLUTION_STAGGER_SECS = 60            # offset between per-game threads to avoid burst
 EVOLUTION_ENABLED = os.environ.get('SERVER_MODE', '') == 'prod'
@@ -616,7 +618,8 @@ Create ONE agent. Name it gen{generation}_<strategy> (e.g. gen{generation}_flood
 Study the top agents and create a counter-strategy.
 Call create_agent with name and full Python code."""
 
-    created = []
+    created = []       # list of agent name strings
+    created_ids = []   # list of agent DB ids (for linking to evolution cycle)
 
     # Track program version + file for agent lineage
     program_version_id = None
@@ -631,10 +634,12 @@ Call create_agent with name and full Python code."""
     def tool_handler(name, args):
         return _handle_tool(name, args, game_id, agents, created,
                            contributor=model_label, program_version_id=program_version_id,
-                           program_file=program_file)
+                           program_file=program_file, created_ids=created_ids)
 
     session_stats = None
     error_msg = None
+    conversation_log = []
+    evo_started_at = time.time()
     try:
         if provider == 'gemini':
             from server.arena_tool_runner import run_tool_loop_gemini
@@ -661,10 +666,12 @@ Call create_agent with name and full Python code."""
                 max_rounds=MAX_TOOL_ROUNDS,
             )
         session_stats = result.get('stats', {})
+        conversation_log = result.get('log', [])
     except Exception as e:
         error_msg = str(e)[:500]
         print(f'[heartbeat] Evolution error: {e}')
         traceback.print_exc()
+    evo_finished_at = time.time()
 
     # Log one session record (replaces per-call logging)
     try:
@@ -682,12 +689,29 @@ Call create_agent with name and full Python code."""
     except Exception:
         pass
 
+    # Save evolution cycle (full conversation log) and link agents to it
+    try:
+        cycle_id = arena_save_evolution_cycle(
+            game_id=game_id,
+            generation=generation,
+            conversation_log=conversation_log,
+            worker_label=model_label,
+            agents_created=len(created),
+            started_at=evo_started_at,
+            finished_at=evo_finished_at,
+        )
+        if cycle_id and created_ids:
+            for aid in created_ids:
+                arena_link_agent_to_cycle(aid, cycle_id)
+    except Exception as e:
+        print(f'[heartbeat] Failed to save evolution cycle: {e}')
+
     return created
 
 
 def _handle_tool(name, args, game_id, agents, created_list,
                   contributor='arena_heartbeat', program_version_id=None,
-                  program_file=None):
+                  program_file=None, created_ids=None):
     """Handle tool calls during evolution. Supports all 8 tools."""
 
     if name == 'query_db':
@@ -717,7 +741,7 @@ def _handle_tool(name, args, game_id, agents, created_list,
     if name == 'create_agent':
         return _tool_create_agent(args, game_id, agents, created_list,
                                   contributor=contributor, program_version_id=program_version_id,
-                                  program_file=program_file)
+                                  program_file=program_file, created_ids=created_ids)
 
     if name == 'edit_current_agent':
         agent_name = args.get('name', '')
@@ -1355,7 +1379,7 @@ def _validate_code(game_id, code):
 
 def _tool_create_agent(args, game_id, agents, created_list,
                        contributor='arena_heartbeat', program_version_id=None,
-                       program_file=None):
+                       program_file=None, created_ids=None):
     """Handle the create_agent tool call."""
     agent_name = args.get('name', '')
     code = args.get('code', '')
@@ -1374,6 +1398,8 @@ def _tool_create_agent(args, game_id, agents, created_list,
         if isinstance(result, str):
             return json.dumps({'error': result})
         created_list.append(agent_name)
+        if created_ids is not None and isinstance(result, dict) and result.get('id'):
+            created_ids.append(result['id'])
 
         test_note = ''
         if agents:

@@ -1,12 +1,13 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 15:00
+# Date: 2026-03-18 18:00
 # PURPOSE: Database operations for Arena Auto Research. Manages arena_agents,
 #   arena_games, arena_research, arena_comments, arena_program_versions,
-#   arena_votes, arena_human_sessions, arena_evolution_sessions, and
-#   arena_library_requests tables. Handles ELO calculations, agent pruning,
-#   game storage limits, upset detection, evolution session monitoring/stats,
-#   game frequency monitoring, and library request logging. Supports
-#   program_version_id and program_file on agents for program tracking.
+#   arena_votes, arena_human_sessions, arena_evolution_sessions,
+#   arena_evolution_cycles, and arena_library_requests tables. Handles ELO
+#   calculations, agent pruning, game storage limits, upset detection,
+#   evolution session monitoring/stats, evolution cycle logging (full LLM
+#   conversation), game frequency monitoring, and library request logging.
+#   Supports program_version_id, program_file, and evolution_cycle_id on agents.
 #   arena_clear_all_agents() wipes agents+games.
 #   Monitor stats now read from arena_evolution_sessions (not legacy arena_llm_calls).
 # SRP/DRY check: Pass — arena-specific DB ops only, follows db_sessions/db_auth pattern
@@ -485,13 +486,13 @@ def arena_get_comments(game_id, limit=100, comment_type=None):
             rows = conn.execute("""
                 SELECT * FROM arena_comments
                 WHERE game_id = ? AND comment_type = ?
-                ORDER BY created_at DESC LIMIT ?
+                ORDER BY created_at ASC LIMIT ?
             """, (game_id, comment_type, limit)).fetchall()
         else:
             rows = conn.execute("""
                 SELECT * FROM arena_comments
                 WHERE game_id = ?
-                ORDER BY created_at DESC LIMIT ?
+                ORDER BY created_at ASC LIMIT ?
             """, (game_id, limit)).fetchall()
         return [dict(r) for r in rows]
 
@@ -835,6 +836,173 @@ def arena_log_evolution_session(game_id, generation, model, provider='anthropic'
             )
     except Exception as e:
         log.warning("Failed to log evolution session: %s", e)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EVOLUTION CYCLES (full LLM conversation log per evolution)
+# ═══════════════════════════════════════════════════════════════════════════
+
+MAX_EVOLUTION_LOG_CHARS = 100_000  # cap conversation JSON at ~100KB
+
+
+def arena_save_evolution_cycle(game_id, generation, conversation_log,
+                               worker_label='', agents_created=0,
+                               started_at=None, finished_at=None):
+    """Save one evolution cycle with its full conversation log. Returns cycle id."""
+    try:
+        conv_json = json.dumps(conversation_log, default=str)
+        if len(conv_json) > MAX_EVOLUTION_LOG_CHARS:
+            conv_json = conv_json[:MAX_EVOLUTION_LOG_CHARS]
+        with _db() as conn:
+            conn.execute(
+                """INSERT INTO arena_evolution_cycles
+                   (game_id, generation, worker_label, agents_created,
+                    conversation, started_at, finished_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (game_id, generation, worker_label, agents_created,
+                 conv_json, started_at, finished_at)
+            )
+            cycle_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            return cycle_id
+    except Exception as e:
+        log.warning("Failed to save evolution cycle: %s", e)
+        return None
+
+
+def arena_link_agent_to_cycle(agent_id, cycle_id):
+    """Set evolution_cycle_id on an agent."""
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE arena_agents SET evolution_cycle_id = ? WHERE id = ?",
+                (cycle_id, agent_id)
+            )
+    except Exception as e:
+        log.warning("Failed to link agent %s to cycle %s: %s", agent_id, cycle_id, e)
+
+
+def arena_get_evolution_cycle(cycle_id):
+    """Get a single evolution cycle by ID."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM arena_evolution_cycles WHERE id = ?", (cycle_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        if d.get('conversation'):
+            try:
+                d['conversation'] = json.loads(d['conversation'])
+            except (json.JSONDecodeError, TypeError):
+                d['conversation'] = []
+        return d
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AGENT PROFILE (aggregated data for the tabbed agent view)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def arena_get_agent_profile(game_id, agent_id):
+    """Get full agent profile data: agent info, code, program, evolution log, recent games.
+
+    Returns a single dict with all tab data to avoid multiple round-trips.
+    """
+    with _db() as conn:
+        # Agent basic info + code
+        agent_row = conn.execute(
+            "SELECT * FROM arena_agents WHERE id = ? AND game_id = ?",
+            (agent_id, game_id)
+        ).fetchone()
+        if not agent_row:
+            return None
+        agent = dict(agent_row)
+
+        # Program version details (if agent has one)
+        program_version = None
+        if agent.get('program_version_id'):
+            pv_row = conn.execute(
+                "SELECT id, game_id, version, content, author, change_summary, created_at "
+                "FROM arena_program_versions WHERE id = ?",
+                (agent['program_version_id'],)
+            ).fetchone()
+            if pv_row:
+                program_version = dict(pv_row)
+
+        # Evolution cycle (full conversation log)
+        evolution_log = None
+        evolution_meta = None
+        if agent.get('evolution_cycle_id'):
+            cycle_row = conn.execute(
+                "SELECT * FROM arena_evolution_cycles WHERE id = ?",
+                (agent['evolution_cycle_id'],)
+            ).fetchone()
+            if cycle_row:
+                cycle = dict(cycle_row)
+                try:
+                    evolution_log = json.loads(cycle.get('conversation', '[]'))
+                except (json.JSONDecodeError, TypeError):
+                    evolution_log = []
+                evolution_meta = {
+                    'generation': cycle.get('generation'),
+                    'worker_label': cycle.get('worker_label', ''),
+                    'agents_created': cycle.get('agents_created', 0),
+                    'started_at': cycle.get('started_at'),
+                    'finished_at': cycle.get('finished_at'),
+                }
+
+        # Recent games (same query pattern as existing agent profile games)
+        game_rows = conn.execute("""
+            SELECT g.id, g.game_id, g.agent1_id, g.agent2_id, g.winner_id,
+                   g.agent1_score, g.agent2_score, g.turns, g.history,
+                   g.is_upset, g.created_at,
+                   a1.name as agent1_name, a1.elo as agent1_elo,
+                   a2.name as agent2_name, a2.elo as agent2_elo
+            FROM arena_games g
+            JOIN arena_agents a1 ON g.agent1_id = a1.id
+            JOIN arena_agents a2 ON g.agent2_id = a2.id
+            WHERE g.game_id = ? AND (g.agent1_id = ? OR g.agent2_id = ?)
+            ORDER BY g.created_at DESC LIMIT 20
+        """, (game_id, agent_id, agent_id)).fetchall()
+
+        games = []
+        for row in game_rows:
+            g = dict(row)
+            if g.get('history'):
+                try:
+                    g['history'] = json.loads(g['history'])
+                except (json.JSONDecodeError, TypeError):
+                    g['history'] = []
+            else:
+                g['history'] = []
+            games.append(g)
+
+        # Build safe agent dict (exclude raw code from top-level, keep in 'code' field)
+        agent_info = {
+            'id': agent['id'],
+            'game_id': agent['game_id'],
+            'name': agent['name'],
+            'elo': agent['elo'],
+            'peak_elo': agent.get('peak_elo', agent['elo']),
+            'games_played': agent['games_played'],
+            'wins': agent['wins'],
+            'losses': agent['losses'],
+            'draws': agent['draws'],
+            'generation': agent.get('generation', 0),
+            'contributor': agent.get('contributor'),
+            'is_human': agent.get('is_human', 0),
+            'is_anchor': agent.get('is_anchor', 0),
+            'created_at': agent.get('created_at'),
+        }
+
+        return {
+            'agent': agent_info,
+            'code': agent.get('code', ''),
+            'program_file': agent.get('program_file', ''),
+            'program_version': program_version,
+            'evolution_log': evolution_log,
+            'evolution_meta': evolution_meta,
+            'games': games,
+        }
 
 
 def arena_get_llm_monitor_stats():

@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 15:00
+# Date: 2026-03-18 17:00
 # PURPOSE: Multi-provider tool-calling loop for arena evolution.
 #   Anthropic: prompt caching (system + tools cached across rounds).
 #   Gemini: Google GenAI SDK tool calling.
@@ -45,6 +45,7 @@ _GEMINI_COSTS = {
     'gemini-3.1-pro-preview': (1.25, 10.0),
     'gemini-3-pro-preview': (1.25, 10.0),
     'gemini-2.5-pro': (1.25, 10.0),
+    'gemini-3.1-flash-lite-preview': (0.075, 0.30),
 }
 _CACHE_WRITE_MULT = 1.25   # 25% more than base input
 _CACHE_READ_MULT = 0.10    # 90% cheaper than base input

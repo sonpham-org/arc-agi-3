@@ -1003,6 +1003,60 @@
 .ar-result-win { color: #4FCC30; font-weight: 600; }
 .ar-result-loss { color: #F93C31; font-weight: 600; }
 
+/* ── Agent Profile Tabs ── */
+.ar-profile-tabs {
+  display: flex; flex-shrink: 0; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.ar-profile-tab {
+  padding: 6px 12px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.3px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); cursor: pointer; font-family: inherit;
+  transition: all 0.15s;
+}
+.ar-profile-tab:hover { color: var(--text); }
+.ar-profile-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.ar-profile-tab-content {
+  flex: 1; overflow-y: auto; min-height: 0;
+}
+.ar-profile-code {
+  padding: 8px; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px; line-height: 1.5; white-space: pre-wrap;
+  word-wrap: break-word; color: var(--text); background: #0a0a14;
+  margin: 0; overflow-x: auto;
+}
+.ar-profile-program {
+  padding: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+  word-wrap: break-word; color: var(--text-dim);
+}
+.ar-evo-log {
+  padding: 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.ar-evo-entry {
+  padding: 6px 8px; border-radius: 4px; font-size: 11px;
+  line-height: 1.4; word-wrap: break-word;
+}
+.ar-evo-entry.assistant {
+  background: #1a1a2e; color: var(--text); white-space: pre-wrap;
+}
+.ar-evo-entry.tool-call {
+  background: #0d1b2a; color: #88D8F1; font-family: monospace;
+  font-size: 10px;
+}
+.ar-evo-entry.tool-result {
+  background: #0a0f14; color: #777; font-family: monospace;
+  font-size: 10px; white-space: pre-wrap;
+}
+.ar-evo-entry.error {
+  background: #2a0a0a; color: #F93C31;
+}
+.ar-evo-meta {
+  padding: 8px 10px; font-size: 11px; color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 12px; flex-wrap: wrap;
+}
+
 /* ── Create Agent Controls ── */
 .ar-create-agent-controls {
   display: flex; gap: 4px; align-items: center; padding: 6px 10px;

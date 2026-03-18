@@ -353,6 +353,7 @@ def _init_db():
             active INTEGER DEFAULT 1,
             program_version_id INTEGER DEFAULT NULL,
             program_file TEXT DEFAULT NULL,
+            evolution_cycle_id INTEGER DEFAULT NULL,
             created_at REAL DEFAULT (unixepoch('now')),
             UNIQUE(game_id, name)
         );
@@ -724,6 +725,15 @@ def _migrate_schema(conn):
         try:
             conn.execute("ALTER TABLE arena_agents ADD COLUMN program_file TEXT DEFAULT NULL")
             log.info("Migrated arena_agents: added program_file")
+        except Exception:
+            pass
+
+    # ── 8. arena_agents: add evolution_cycle_id to link agent to its creation cycle ──
+    arena_agent_cols = _get_table_columns(conn, "arena_agents")
+    if "evolution_cycle_id" not in arena_agent_cols and arena_agent_cols:
+        try:
+            conn.execute("ALTER TABLE arena_agents ADD COLUMN evolution_cycle_id INTEGER DEFAULT NULL")
+            log.info("Migrated arena_agents: added evolution_cycle_id")
         except Exception:
             pass
 

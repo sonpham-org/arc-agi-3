@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-18 15:00
+// Date: 2026-03-18 18:00
 // PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
@@ -13,6 +13,7 @@
 //   Arena Observatory: per-agent observability overlay (Agent A obs LEFT, Agent B obs RIGHT).
 //   Auto Research: horizontal game tab bar replaces left column, per-game community/local
 //   research, leaderboard, program.md viewer/editor/voting, human vs AI play dialog.
+//   Agent Profile View: tabbed view (Games, Code, Program, Evolution Log) via /profile API.
 //   Chess rendering uses classic wooden board colors (#F0D9B5/#B58863) with depth shadows.
 // SRP/DRY check: Pass — self-contained arena module, no overlap with main app JS
 
@@ -5412,6 +5413,7 @@ const AR = {
   lbShowAll: false,         // leaderboard show-all toggle
   lbAgents: [],             // cached leaderboard agents for re-render
   agentViewTimers: [],      // canvas animation timers for agent view
+  agentProfile: null,       // cached profile data for tab switching
 };
 
 function switchArenaMode(mode, skipHash) {
@@ -5921,6 +5923,7 @@ function arSelectAgent(gameId, agentId) {
 
 function arDeselectAgent() {
   AR.selectedAgentId = null;
+  AR.agentProfile = null;
   // Clear row highlights
   document.querySelectorAll('.ar-lb-row').forEach(r => r.classList.remove('ar-lb-selected'));
   // Stop agent view animations
@@ -5964,45 +5967,25 @@ async function arLoadAgentView(gameId, agentId) {
   agentView.innerHTML = '<div class="ar-no-data">Loading agent profile...</div>';
 
   try {
-    const data = await fetch(`/api/arena/agents/${gameId}/${agentId}/games`).then(r => r.json());
+    const data = await fetch(`/api/arena/agents/${gameId}/${agentId}/profile`).then(r => r.json());
     if (data.error) {
       agentView.innerHTML = `<div class="ar-no-data">${escHtml(data.error)}</div>`;
       return;
     }
     // Check we're still on this agent
     if (AR.selectedAgentId !== agentId) return;
-    arRenderAgentView(agentView, gameId, data.agent, data.games);
+    // Store profile data for tab switching without refetch
+    AR.agentProfile = data;
+    arRenderAgentView(agentView, gameId, data);
   } catch (e) {
     agentView.innerHTML = '<div class="ar-no-data">Failed to load agent</div>';
   }
 }
 
-function arRenderAgentView(container, gameId, agent, games) {
-  const agentElo = agent.elo;
-
-  // Partition games by opponent ELO
-  const higherElo = [];
-  const lowerElo = [];
-  for (const g of games) {
-    const isAgent1 = g.agent1_id === agent.id;
-    const oppElo = isAgent1 ? g.agent2_elo : g.agent1_elo;
-    if (oppElo >= agentElo) {
-      higherElo.push(g);
-    } else {
-      lowerElo.push(g);
-    }
-  }
-
-  // Prefer games with history (for replay); take up to 2 each
-  const pickWithHistory = (arr, n) => {
-    const withH = arr.filter(g => g.history && g.history.length > 0);
-    const without = arr.filter(g => !g.history || g.history.length === 0);
-    return [...withH, ...without].slice(0, n);
-  };
-  const topHigher = pickWithHistory(higherElo, 2);
-  const topLower = pickWithHistory(lowerElo, 2);
-
+function arRenderAgentView(container, gameId, profileData) {
+  const agent = profileData.agent;
   const wld = `${agent.wins}/${agent.losses}/${agent.draws}`;
+
   let html = `
     <div class="ar-agent-view-header">
       <div class="ar-agent-view-name">${escHtml(agent.name)}</div>
@@ -6016,12 +5999,69 @@ function arRenderAgentView(container, gameId, agent, games) {
         ${agent.generation ? ` &middot; Gen ${agent.generation}` : ''}
       </div>
       <div style="margin-top:4px">
-        <button class="ar-btn ar-btn-xs" onclick="arShowAgentCode('${gameId}',${agent.id},'${escHtml(agent.name)}')">View Code</button>
         ${(agent.is_human || gameId === 'snake_2v2') ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${agent.id},'${escHtml(agent.name)}',${Math.round(agent.elo)})">Play ▶</button>`}
       </div>
-    </div>`;
+    </div>
+    <div class="ar-profile-tabs">
+      <button class="ar-profile-tab active" onclick="arSwitchProfileTab('${gameId}','games',this)">Games</button>
+      <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','code',this)">Code</button>
+      <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','program',this)">Program</button>
+      <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','evolution',this)">Evo Log</button>
+    </div>
+    <div id="arProfileTabContent" class="ar-profile-tab-content"></div>`;
 
-  _arAgentViewSection._idx = 0;  // reset canvas ID counter
+  container.innerHTML = html;
+
+  // Render default tab (Games)
+  arRenderProfileGamesTab(gameId, profileData);
+}
+
+function arSwitchProfileTab(gameId, tab, btn) {
+  // Stop animations when switching away from games tab
+  for (const t of AR.agentViewTimers) clearInterval(t);
+  AR.agentViewTimers = [];
+
+  // Update active tab
+  const tabs = btn.parentElement.querySelectorAll('.ar-profile-tab');
+  tabs.forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+
+  const data = AR.agentProfile;
+  if (!data) return;
+
+  if (tab === 'games') arRenderProfileGamesTab(gameId, data);
+  else if (tab === 'code') arRenderProfileCodeTab(data);
+  else if (tab === 'program') arRenderProfileProgramTab(data);
+  else if (tab === 'evolution') arRenderProfileEvolutionTab(data);
+}
+
+function arRenderProfileGamesTab(gameId, data) {
+  const container = document.getElementById('arProfileTabContent');
+  if (!container) return;
+
+  const agent = data.agent;
+  const games = data.games || [];
+  const agentElo = agent.elo;
+
+  const higherElo = [];
+  const lowerElo = [];
+  for (const g of games) {
+    const isAgent1 = g.agent1_id === agent.id;
+    const oppElo = isAgent1 ? g.agent2_elo : g.agent1_elo;
+    if (oppElo >= agentElo) higherElo.push(g);
+    else lowerElo.push(g);
+  }
+
+  const pickWithHistory = (arr, n) => {
+    const withH = arr.filter(g => g.history && g.history.length > 0);
+    const without = arr.filter(g => !g.history || g.history.length === 0);
+    return [...withH, ...without].slice(0, n);
+  };
+  const topHigher = pickWithHistory(higherElo, 2);
+  const topLower = pickWithHistory(lowerElo, 2);
+
+  let html = '';
+  _arAgentViewSection._idx = 0;
   html += _arAgentViewSection('vs Higher ELO', topHigher, agent, gameId);
   html += _arAgentViewSection('vs Lower ELO', topLower, agent, gameId);
 
@@ -6031,7 +6071,7 @@ function arRenderAgentView(container, gameId, agent, games) {
 
   container.innerHTML = html;
 
-  // Animate canvases that have history
+  // Animate canvases
   const allGames = [...topHigher, ...topLower];
   for (let i = 0; i < allGames.length; i++) {
     const g = allGames[i];
@@ -6042,14 +6082,91 @@ function arRenderAgentView(container, gameId, agent, games) {
   }
 }
 
+function arRenderProfileCodeTab(data) {
+  const container = document.getElementById('arProfileTabContent');
+  if (!container) return;
+  const code = data.code || '(no code)';
+  container.innerHTML = `<pre class="ar-profile-code"><code class="language-python">${escHtml(code)}</code></pre>`;
+  // Syntax highlight if available
+  const codeEl = container.querySelector('code');
+  if (codeEl && typeof hljs !== 'undefined') {
+    codeEl.classList.remove('hljs');
+    hljs.highlightElement(codeEl);
+  }
+}
+
+function arRenderProfileProgramTab(data) {
+  const container = document.getElementById('arProfileTabContent');
+  if (!container) return;
+
+  const programFile = data.program_file;
+  const programVersion = data.program_version;
+
+  if (!programFile && !programVersion) {
+    container.innerHTML = '<div class="ar-no-data" style="padding:12px">No program file (seed agent)</div>';
+    return;
+  }
+
+  let html = '';
+  if (programVersion) {
+    html += `<div class="ar-evo-meta">
+      <span>Version: v${programVersion.version}</span>
+      ${programVersion.change_summary ? `<span>Change: ${escHtml(programVersion.change_summary)}</span>` : ''}
+    </div>`;
+  }
+  html += `<div class="ar-profile-program">${escHtml(programFile || (programVersion && programVersion.content) || '(empty)')}</div>`;
+  container.innerHTML = html;
+}
+
+function arRenderProfileEvolutionTab(data) {
+  const container = document.getElementById('arProfileTabContent');
+  if (!container) return;
+
+  const log = data.evolution_log;
+  const meta = data.evolution_meta;
+
+  if (!log || !log.length) {
+    container.innerHTML = '<div class="ar-no-data" style="padding:12px">No evolution log (seed or offline agent)</div>';
+    return;
+  }
+
+  let html = '';
+  if (meta) {
+    const duration = (meta.started_at && meta.finished_at)
+      ? `${((meta.finished_at - meta.started_at) / 1).toFixed(1)}s`
+      : '';
+    html += `<div class="ar-evo-meta">
+      <span>Gen ${meta.generation || '?'}</span>
+      <span>Model: ${escHtml(meta.worker_label || '?')}</span>
+      ${meta.agents_created ? `<span>Agents: ${meta.agents_created}</span>` : ''}
+      ${duration ? `<span>Duration: ${duration}</span>` : ''}
+    </div>`;
+  }
+
+  html += '<div class="ar-evo-log">';
+  for (const entry of log) {
+    if (entry.type === 'assistant') {
+      html += `<div class="ar-evo-entry assistant">${escHtml(entry.content || '')}</div>`;
+    } else if (entry.type === 'tool_call') {
+      const argsStr = entry.args ? JSON.stringify(entry.args, null, 2) : '';
+      html += `<div class="ar-evo-entry tool-call">⚡ ${escHtml(entry.name || '')}(${escHtml(argsStr)})</div>`;
+    } else if (entry.type === 'tool_result') {
+      html += `<div class="ar-evo-entry tool-result">→ ${escHtml(entry.name || '')}: ${escHtml(entry.result || '')}</div>`;
+    } else if (entry.type === 'error') {
+      html += `<div class="ar-evo-entry error">✗ ${escHtml(entry.content || '')}</div>`;
+    }
+  }
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
 function _arAgentViewSection(title, games, agent, gameId) {
   if (!games.length) {
     return `<div class="ar-agent-view-section">${title}</div>
             <div class="ar-no-data" style="padding:4px 8px;font-size:11px">No games</div>`;
   }
   let html = `<div class="ar-agent-view-section">${title}</div><div class="ar-agent-view-games">`;
-  // Calculate the global index offset for canvas IDs
-  // We'll use a closure trick — store current canvas count on the function
   if (!_arAgentViewSection._idx) _arAgentViewSection._idx = 0;
 
   for (const g of games) {

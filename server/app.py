@@ -280,6 +280,15 @@ def arena_agent_profile_games(game_id, agent_id):
     return jsonify({"agent": agent, "games": games})
 
 
+@app.route("/api/arena/agents/<game_id>/<int:agent_id>/profile")
+def arena_agent_profile(game_id, agent_id):
+    from db_arena import arena_get_agent_profile
+    profile = arena_get_agent_profile(game_id, agent_id)
+    if not profile:
+        return jsonify({"error": "Agent not found"}), 404
+    return jsonify(profile)
+
+
 @app.route("/api/arena/agents/<game_id>", methods=["POST"])
 def arena_agent_submit(game_id):
     data = request.get_json(force=True)

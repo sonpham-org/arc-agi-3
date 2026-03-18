@@ -143,6 +143,58 @@ Every piece of code the agent wrote and ran, plus tool invocations. Enables full
 | `expires_at` | REAL | Expiry time |
 | `used` | INTEGER | `0` or `1` |
 
+## Arena Tables (Agent vs Agent)
+
+### `arena_agents` — AI agents in the arena
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-increment |
+| `game_id` | TEXT NOT NULL | Which arena game (snake, chess960, etc.) |
+| `name` | TEXT NOT NULL | Agent name (unique per game) |
+| `code` | TEXT NOT NULL | Agent strategy code (Python) |
+| `generation` | INTEGER | Evolution generation number |
+| `elo` | REAL | Current ELO rating (default 1000) |
+| `peak_elo` | REAL | Highest ELO ever reached |
+| `games_played` | INTEGER | Total games played |
+| `wins` / `losses` / `draws` | INTEGER | Win/loss/draw counts |
+| `contributor` | TEXT | Creator (model name or username) |
+| `is_human` | INTEGER | `1` = human pseudo-agent |
+| `is_anchor` | INTEGER | `1` = seed/baseline agent |
+| `active` | INTEGER | `0` = pruned |
+| `program_version_id` | INTEGER | FK to `arena_program_versions` |
+| `program_file` | TEXT | Program.md content at creation |
+| `evolution_cycle_id` | INTEGER | FK to `arena_evolution_cycles` (the LLM session that created this agent) |
+| `created_at` | REAL | Unix timestamp |
+
+### `arena_evolution_cycles` — Full LLM conversation logs per evolution
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-increment |
+| `game_id` | TEXT NOT NULL | Which arena game |
+| `generation` | INTEGER | Generation number |
+| `worker_label` | TEXT | Model label (e.g. "Claude Sonnet") |
+| `agents_created` | INTEGER | Number of agents created in this cycle |
+| `agents_passed` | INTEGER | Number that passed validation |
+| `conversation` | TEXT | JSON array of conversation entries (assistant text, tool calls, results) |
+| `started_at` | REAL | Unix timestamp |
+| `finished_at` | REAL | Unix timestamp |
+
+### `arena_games` — Match results
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-increment |
+| `game_id` | TEXT NOT NULL | Which arena game |
+| `agent1_id` / `agent2_id` | INTEGER | FKs to `arena_agents` |
+| `winner_id` | INTEGER | FK to `arena_agents` (NULL for draws) |
+| `agent1_score` / `agent2_score` | INTEGER | Scores |
+| `turns` | INTEGER | Number of turns |
+| `history` | TEXT | JSON array of game frames for replay |
+| `is_upset` | INTEGER | `1` if lower ELO beat higher ELO |
+| `created_at` | REAL | Unix timestamp |
+
 ## Tables Removed
 
 These old tables are replaced by the schema above:
