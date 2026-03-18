@@ -798,6 +798,31 @@ def arena_log_llm_call(game_id, generation, model, status, http_status,
         )
 
 
+def arena_log_evolution_session(game_id, generation, model, provider='anthropic',
+                                 status='success', api_calls=0, tool_calls=0,
+                                 input_tokens=0, output_tokens=0,
+                                 cache_read_tokens=0, cache_creation_tokens=0,
+                                 cost_usd=0, total_latency_ms=0, rounds=0,
+                                 agents_created=0, error_message=None):
+    """Log one evolution session (replaces per-call logging)."""
+    try:
+        with _db() as conn:
+            conn.execute(
+                """INSERT INTO arena_evolution_sessions
+                   (game_id, generation, model, provider, status,
+                    api_calls, tool_calls, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, cost_usd,
+                    total_latency_ms, rounds, agents_created, error_message)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (game_id, generation, model, provider, status,
+                 api_calls, tool_calls, input_tokens, output_tokens,
+                 cache_read_tokens, cache_creation_tokens, cost_usd,
+                 total_latency_ms, rounds, agents_created, error_message)
+            )
+    except Exception as e:
+        log.warning("Failed to log evolution session: %s", e)
+
+
 def arena_get_llm_monitor_stats():
     """Get aggregated LLM call stats for the monitoring dashboard."""
     now = time.time()
@@ -914,6 +939,47 @@ def arena_get_llm_monitor_stats():
             ORDER BY request_count DESC
         """).fetchall()
         stats['library_requests'] = [dict(r) for r in lib_rows]
+
+        # ── Evolution sessions (new session-level monitoring) ──
+        session_rows = conn.execute("""
+            SELECT id, game_id, generation, model, provider, status,
+                   api_calls, tool_calls, input_tokens, output_tokens,
+                   cache_read_tokens, cache_creation_tokens, cost_usd,
+                   total_latency_ms, rounds, agents_created,
+                   error_message, created_at
+            FROM arena_evolution_sessions
+            ORDER BY created_at DESC LIMIT 100
+        """).fetchall()
+        stats['recent_sessions'] = [dict(r) for r in session_rows]
+
+        # Session aggregates
+        sess_agg = conn.execute("""
+            SELECT COUNT(*) as total_sessions,
+                   SUM(agents_created) as total_agents,
+                   SUM(api_calls) as total_api_calls,
+                   SUM(tool_calls) as total_tool_calls,
+                   SUM(input_tokens) as total_input_tokens,
+                   SUM(output_tokens) as total_output_tokens,
+                   SUM(cache_read_tokens) as total_cache_read,
+                   SUM(cost_usd) as total_cost,
+                   AVG(tool_calls) as avg_tool_calls_per_session,
+                   AVG(total_latency_ms) as avg_latency_per_session
+            FROM arena_evolution_sessions
+        """).fetchone()
+        stats['session_totals'] = dict(sess_agg) if sess_agg else {}
+
+        # Per-model session breakdown
+        sess_model = conn.execute("""
+            SELECT model, provider,
+                   COUNT(*) as sessions,
+                   SUM(agents_created) as agents,
+                   SUM(cost_usd) as cost,
+                   AVG(tool_calls) as avg_tools,
+                   SUM(cache_read_tokens) as cache_read
+            FROM arena_evolution_sessions
+            GROUP BY model ORDER BY sessions DESC
+        """).fetchall()
+        stats['sessions_by_model'] = [dict(r) for r in sess_model]
 
         return stats
 

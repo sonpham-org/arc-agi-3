@@ -465,6 +465,30 @@ def _init_db():
         CREATE INDEX IF NOT EXISTS idx_alc_created ON arena_llm_calls(created_at);
         CREATE INDEX IF NOT EXISTS idx_alc_status ON arena_llm_calls(status);
 
+        -- Arena evolution sessions (one record per evolution cycle)
+        CREATE TABLE IF NOT EXISTS arena_evolution_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            generation INTEGER,
+            model TEXT,
+            provider TEXT DEFAULT 'anthropic',
+            status TEXT,
+            api_calls INTEGER DEFAULT 0,
+            tool_calls INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cache_creation_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
+            total_latency_ms REAL DEFAULT 0,
+            rounds INTEGER DEFAULT 0,
+            agents_created INTEGER DEFAULT 0,
+            error_message TEXT,
+            created_at REAL DEFAULT (unixepoch('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_aes_game ON arena_evolution_sessions(game_id);
+        CREATE INDEX IF NOT EXISTS idx_aes_created ON arena_evolution_sessions(created_at);
+
         -- Arena library requests (logged when agents try to import unavailable packages)
         CREATE TABLE IF NOT EXISTS arena_library_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

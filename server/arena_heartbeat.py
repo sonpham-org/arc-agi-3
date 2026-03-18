@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 00:15
+# Date: 2026-03-18 01:30
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
@@ -64,9 +64,15 @@ MAX_TOOL_ROUNDS = 6
 ELO_START = 1000.0
 ELO_K = 32
 
-# Agent evolution model — Haiku only for now (cost-efficient while seeding variants)
+# Agent evolution model rotation: 3 haiku, 1 sonnet, 1 opus, 1 gemini
+# (model_id, label, provider)
 _EVOLUTION_MODELS = [
-    ('claude-haiku-4-5-20251001', 'claude-haiku-4.5'),
+    ('claude-haiku-4-5-20251001', 'claude-haiku-4.5', 'anthropic'),
+    ('claude-haiku-4-5-20251001', 'claude-haiku-4.5', 'anthropic'),
+    ('claude-haiku-4-5-20251001', 'claude-haiku-4.5', 'anthropic'),
+    ('claude-sonnet-4-6', 'claude-sonnet-4.6', 'anthropic'),
+    ('claude-opus-4-6', 'claude-opus-4.6', 'anthropic'),
+    ('gemini-3.1-pro-preview', 'gemini-3.1-pro', 'gemini'),
 ]
 
 # Heartbeat state (for monitoring)
@@ -551,11 +557,20 @@ _EVOLUTION_TOOLS = [
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _run_evolution(api_key, game_id='snake'):
-    """Run one evolution cycle. Rotates Haiku/Sonnet/Opus each generation."""
+    """Run one evolution cycle. Rotates Haiku/Sonnet/Opus/Gemini each generation."""
     generation = arena_increment_generation(game_id)
 
-    model_id, model_label = _EVOLUTION_MODELS[(generation - 1) % len(_EVOLUTION_MODELS)]
-    print(f'[evolution] Gen {generation} using {model_label} ({model_id})')
+    model_id, model_label, provider = _EVOLUTION_MODELS[(generation - 1) % len(_EVOLUTION_MODELS)]
+    print(f'[evolution] Gen {generation} using {model_label} ({model_id}) [{provider}]')
+
+    # Resolve API key for this provider
+    if provider == 'gemini':
+        evo_key = os.environ.get('GEMINI_API_KEY', '')
+        if not evo_key:
+            print(f'[evolution] No GEMINI_API_KEY, skipping gen {generation}')
+            return []
+    else:
+        evo_key = api_key
 
     program_data = arena_get_program(game_id)
     program_md = (program_data.get('content') if program_data else '') or _load_default_program(game_id)
@@ -588,15 +603,11 @@ Create ONE agent. Name it gen{generation}_<strategy> (e.g. gen{generation}_flood
 Study the top agents and create a counter-strategy.
 Call create_agent with name and full Python code."""
 
-    from server.arena_tool_runner import run_tool_loop, set_monitor_context
-
-    set_monitor_context(game_id=game_id, generation=generation)
     created = []
 
     # Track program version + file for agent lineage
     program_version_id = None
     if program_data and program_data.get('versions'):
-        # Find the most recently applied version
         for v in program_data['versions']:
             if v.get('applied') == 1:
                 program_version_id = v['id']
@@ -609,20 +620,54 @@ Call create_agent with name and full Python code."""
                            contributor=model_label, program_version_id=program_version_id,
                            program_file=program_file)
 
+    session_stats = None
+    error_msg = None
     try:
-        run_tool_loop(
-            api_key=api_key,
-            system_prompt=system_prompt,
-            user_message=user_prompt,
-            tools=_EVOLUTION_TOOLS,
-            handler=tool_handler,
-            model=model_id,
-            max_tokens=8192,
-            max_rounds=MAX_TOOL_ROUNDS,
-        )
+        if provider == 'gemini':
+            from server.arena_tool_runner import run_tool_loop_gemini
+            result = run_tool_loop_gemini(
+                api_key=evo_key,
+                system_prompt=system_prompt,
+                user_message=user_prompt,
+                tools=_EVOLUTION_TOOLS,
+                handler=tool_handler,
+                model=model_id,
+                max_tokens=8192,
+                max_rounds=MAX_TOOL_ROUNDS,
+            )
+        else:
+            from server.arena_tool_runner import run_tool_loop
+            result = run_tool_loop(
+                api_key=evo_key,
+                system_prompt=system_prompt,
+                user_message=user_prompt,
+                tools=_EVOLUTION_TOOLS,
+                handler=tool_handler,
+                model=model_id,
+                max_tokens=8192,
+                max_rounds=MAX_TOOL_ROUNDS,
+            )
+        session_stats = result.get('stats', {})
     except Exception as e:
+        error_msg = str(e)[:500]
         print(f'[heartbeat] Evolution error: {e}')
         traceback.print_exc()
+
+    # Log one session record (replaces per-call logging)
+    try:
+        from db_arena import arena_log_evolution_session
+        arena_log_evolution_session(
+            game_id=game_id,
+            generation=generation,
+            model=model_id,
+            provider=provider,
+            status='success' if created else ('error' if error_msg else 'no_agent'),
+            agents_created=len(created),
+            error_message=error_msg,
+            **(session_stats or {}),
+        )
+    except Exception:
+        pass
 
     return created
 
@@ -1602,7 +1647,8 @@ def _evolution_loop_for_game(game_id, stagger_secs):
             continue
 
         api_key = os.environ.get('ARENA_CLAUDE_KEY', '')
-        if not api_key:
+        gemini_key = os.environ.get('GEMINI_API_KEY', '')
+        if not api_key and not gemini_key:
             time.sleep(HEARTBEAT_INTERVAL_NORMAL)
             continue
 

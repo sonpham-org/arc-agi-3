@@ -1,5 +1,5 @@
 # Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-16 23:45
+# Date: 2026-03-17 23:30
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
 #   session persistence (save/resume/branch via SQLite), game step proxying, model registry
 #   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
@@ -291,6 +291,20 @@ def arena_agent_submit(game_id):
     program_version_id = data.get("program_version_id")
     result = _ar_svc.submit_agent(game_id, name, code, contributor=contributor,
                                    program_version_id=program_version_id)
+    if isinstance(result, dict) and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@app.route("/api/arena/agents/<game_id>/offline", methods=["POST"])
+def arena_agent_offline_submit(game_id):
+    data = request.get_json(force=True)
+    name = data.get("name", "")
+    code = data.get("code", "")
+    provider = data.get("provider", "unknown")
+    model = data.get("model", "unknown")
+    result = _ar_svc.submit_offline_agent(game_id, name, code,
+                                           provider=provider, model=model)
     if isinstance(result, dict) and "error" in result:
         return jsonify(result), 400
     return jsonify(result), 201

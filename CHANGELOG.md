@@ -5,6 +5,33 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.9.7] — feat: Offline agent generation CLI + upload API
+*Author: Claude Opus 4.6 | 2026-03-17*
+
+### Added
+- **Offline agent upload API** — `POST /api/arena/agents/<game_id>/offline` accepts agents generated locally. Server runs full 12-scenario validation before admitting to tournament pool. Rate limited to 20/day.
+- **`offline_agent_runner.py`** — CLI tool for generating arena agents locally using any LLM provider. Fetches Program.md + leaderboard from server, runs LLM tool-calling loop, validates agent, uploads to arena.
+- **`offline_llm.py`** — Multi-provider LLM tool-calling module supporting Anthropic, OpenAI, Google Gemini, and LM Studio (OpenAI-compatible). All providers use httpx directly (no SDK dependencies).
+- **`offline_` naming convention** — All offline agents are auto-prefixed `offline_` and enforced server-side. Instantly identifiable on the leaderboard.
+- **`submit_offline_agent()`** in `arena_research_service.py` — Offline-specific validation + rate limiting.
+
+### Usage
+```bash
+# Generate with Anthropic
+python offline_agent_runner.py --game snake --provider anthropic
+
+# Generate with local LM Studio
+python offline_agent_runner.py --game snake --provider lmstudio
+
+# Generate 3 agents with Gemini
+python offline_agent_runner.py --game snake --provider gemini --count 3
+
+# Dry run (validate only, no upload)
+python offline_agent_runner.py --game snake --provider openai --dry-run
+```
+
+---
+
 ## [1.9.6] — feat: Simplified Program.md + open library imports + library request logging
 *Author: Claude Opus 4.6 | 2026-03-18*
 
