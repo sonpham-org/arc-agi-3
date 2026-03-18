@@ -947,10 +947,10 @@
 }
 .ar-lb-row.ar-lb-selected td { color: var(--text); }
 
-/* ── Human Agent Rows (purple) ── */
-.ar-lb-row.ar-lb-human td { color: #A356D6; }
+/* ── Human Agent Rows (purple tint) ── */
+.ar-lb-row.ar-lb-human { background: #A356D612; }
+.ar-lb-row.ar-lb-human:hover { background: #A356D622; }
 .ar-lb-row.ar-lb-human .ar-agent-name { color: #A356D6; }
-.ar-lb-row.ar-lb-human .ar-elo { color: #A356D6; }
 
 /* ── Agent Profile View ── */
 .ar-agent-view {
