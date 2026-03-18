@@ -1,12 +1,13 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 14:00
+# Date: 2026-03-18 15:00
 # PURPOSE: Database operations for Arena Auto Research. Manages arena_agents,
 #   arena_games, arena_research, arena_comments, arena_program_versions,
 #   arena_votes, arena_human_sessions, arena_evolution_sessions, and
 #   arena_library_requests tables. Handles ELO calculations, agent pruning,
 #   game storage limits, upset detection, evolution session monitoring/stats,
-#   and library request logging. Supports program_version_id and program_file
-#   on agents for program tracking. arena_clear_all_agents() wipes agents+games.
+#   game frequency monitoring, and library request logging. Supports
+#   program_version_id and program_file on agents for program tracking.
+#   arena_clear_all_agents() wipes agents+games.
 #   Monitor stats now read from arena_evolution_sessions (not legacy arena_llm_calls).
 # SRP/DRY check: Pass — arena-specific DB ops only, follows db_sessions/db_auth pattern
 """Arena Auto Research database operations."""
@@ -544,6 +545,17 @@ def arena_vote_comment(comment_id, user_id, vote):
 # PROGRAM.MD VERSIONING & VOTING
 # ═══════════════════════════════════════════════════════════════════════════
 
+def arena_get_program_version(version_id):
+    """Get a single program version by ID. Returns dict or None."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT id, game_id, version, content, author, change_summary, created_at "
+            "FROM arena_program_versions WHERE id = ?",
+            (version_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def arena_get_program(game_id):
     """Get current program.md and version history."""
     with _db() as conn:
@@ -964,6 +976,54 @@ def arena_get_llm_monitor_stats():
             ORDER BY request_count DESC
         """).fetchall()
         stats['library_requests'] = [dict(r) for r in lib_rows]
+
+        # ── Game frequency (tournament matches from arena_games) ──
+        def _game_counts(since=None):
+            where = f"WHERE created_at >= {since}" if since else ""
+            row = conn.execute(f"""
+                SELECT COUNT(*) as total_games,
+                       SUM(CASE WHEN winner_id IS NOT NULL THEN 1 ELSE 0 END) as decisive,
+                       SUM(CASE WHEN winner_id IS NULL THEN 1 ELSE 0 END) as draws,
+                       AVG(turns) as avg_turns
+                FROM arena_games {where}
+            """).fetchone()
+            return dict(row)
+
+        stats['game_freq'] = {
+            'last_hour': _game_counts(hour_ago),
+            'last_24h': _game_counts(day_ago),
+            'all_time': _game_counts(),
+        }
+
+        # Per-game breakdown of match frequency
+        game_freq_rows = conn.execute("""
+            SELECT game_id,
+                   COUNT(*) as total_games,
+                   SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as last_hour,
+                   SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as last_24h,
+                   AVG(turns) as avg_turns,
+                   MAX(created_at) as last_game_at
+            FROM arena_games
+            GROUP BY game_id ORDER BY total_games DESC
+        """, (hour_ago, day_ago)).fetchall()
+        stats['game_freq']['by_game'] = [dict(r) for r in game_freq_rows]
+
+        # Hourly game counts (last 72h) — for the frequency chart
+        hourly_game_rows = conn.execute("""
+            SELECT CAST((created_at / 3600) AS INTEGER) * 3600 as hour_ts,
+                   COUNT(*) as games,
+                   COUNT(DISTINCT game_id) as active_games
+            FROM arena_games
+            WHERE created_at >= ?
+            GROUP BY hour_ts ORDER BY hour_ts
+        """, (now - 72 * 3600,)).fetchall()
+        stats['game_freq']['hourly'] = [dict(r) for r in hourly_game_rows]
+
+        # Gap detection: time since last game overall
+        last_game_row = conn.execute(
+            "SELECT MAX(created_at) as last_game FROM arena_games"
+        ).fetchone()
+        stats['game_freq']['last_game_at'] = last_game_row['last_game'] if last_game_row else None
 
         return stats
 

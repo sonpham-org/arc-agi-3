@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-17 15:00
+// Date: 2026-03-18 15:00
 // PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
@@ -5887,6 +5887,7 @@ function arRenderLeaderboard(gameId, agents) {
       <td class="ar-contributor">${escHtml(a.contributor || '—')}</td>
       <td style="white-space:nowrap">
         <button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">Code</button>
+        ${a.program_version_id ? `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowAgentProgram(${a.program_version_id},'${escHtml(a.name)}')">Prog</button>` : ''}
         ${(a.is_human || gameId === 'snake_2v2') ? '' : `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
       </td>
     </tr>`;
@@ -6156,6 +6157,19 @@ async function arShowAgentCode(gameId, agentId, name) {
 }
 
 
+async function arShowAgentProgram(versionId, agentName) {
+  try {
+    const ver = await fetch(`/api/arena/program-version/${versionId}`).then(r => r.json());
+    if (ver.error) return;
+    document.getElementById('arProgramModalTitle').textContent = `${agentName} — Program.md (v${ver.version})`;
+    document.getElementById('arProgramModalCode').textContent = ver.content || '(empty)';
+    document.getElementById('arProgramModal').style.display = 'flex';
+  } catch (e) {
+    // Silently fail
+  }
+}
+
+
 /* ── Lower Tab Switching ── */
 
 function arSwitchLowerTab(tab) {
@@ -6183,6 +6197,14 @@ function arSwitchLowerTab(tab) {
 
 /* ── AI Heartbeat (community + AI chat) ── */
 
+/** Render lightweight markdown (bold, italic, bullet points) to HTML. No headings. */
+function _arRenderMd(text) {
+  return escHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/^- /gm, '\u2022 ');
+}
+
 async function arLoadHeartbeat(gameId) {
   try {
     const comments = await fetch(`/api/arena/comments/${gameId}?type=heartbeat`).then(r => r.json());
@@ -6203,7 +6225,7 @@ async function arLoadHeartbeat(gameId) {
             <button class="ar-vote-btn" onclick="arVoteHeartbeat(${c.id},-1)">\u25BC ${c.downvotes}</button>
           </span>
         </div>
-        <div class="ar-hb-body">${escHtml(c.content)}</div>
+        <div class="ar-hb-body">${isAI ? _arRenderMd(c.content) : escHtml(c.content)}</div>
       </div>`;
     }).join('');
     container.scrollTop = container.scrollHeight;

@@ -56,7 +56,7 @@
 <body>
 
 <h1>Arena Evolution Monitor</h1>
-<div class="subtitle">Evolution sessions &middot; agent creation &middot; LLM cost tracking</div>
+<div class="subtitle">Evolution sessions &middot; agent creation &middot; LLM cost tracking &middot; game frequency</div>
 
 <div class="refresh-bar">
   <button onclick="loadStats()">Refresh</button>
@@ -84,6 +84,20 @@
       <canvas id="dailyChart" height="160"></canvas>
     </div>
   </div>
+
+  <!-- Game Frequency (tournament matches) -->
+  <h2>Game Frequency (Tournament Matches)</h2>
+  <div class="grid" id="gameFreqCards"></div>
+  <div style="display:grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 12px;">
+    <div class="chart-container">
+      <div class="chart-label">Games per hour (last 72h)</div>
+      <canvas id="gameFreqChart" height="160"></canvas>
+    </div>
+  </div>
+  <table id="gameFreqTable">
+    <thead><tr><th>Game</th><th>Last Hour</th><th>Last 24h</th><th>All Time</th><th>Avg Turns</th><th>Last Match</th><th>Games/hr (24h)</th></tr></thead>
+    <tbody></tbody>
+  </table>
 
   <!-- By Model -->
   <h2>By Model</h2>
@@ -380,6 +394,83 @@ function renderErrorTable(errors) {
   </tr>`).join('');
 }
 
+function renderGameFreq(stats) {
+  const gf = stats.game_freq || {};
+  const now = Date.now() / 1000;
+  const lastGameAt = gf.last_game_at;
+  const gap = lastGameAt ? now - lastGameAt : null;
+  const gapStr = gap != null ? fmtDuration(gap) : '-';
+  const gapWarn = gap != null && gap > 600; // warn if >10min since last game
+
+  const periods = [
+    {key: 'last_hour', label: 'Last Hour'},
+    {key: 'last_24h', label: 'Last 24h'},
+    {key: 'all_time', label: 'All Time'},
+  ];
+  let html = '';
+
+  // Summary cards
+  for (const p of periods) {
+    const g = gf[p.key] || {};
+    const total = g.total_games || 0;
+    const rate = p.key === 'last_hour' ? (total).toFixed(0) + '/hr'
+               : p.key === 'last_24h' ? (total / 24).toFixed(1) + '/hr'
+               : '-';
+    html += `<div class="card">
+      <div class="card-title">${p.label}</div>
+      <div class="row">
+        <div class="big-num blue">${fmt(total)}</div>
+        <div class="stat"><span>matches</span></div>
+        ${rate !== '-' ? `<div class="stat gray">(${rate})</div>` : ''}
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div class="stat green">${fmt(g.decisive)} decisive</div>
+        <div class="stat yellow">${fmt(g.draws)} draws</div>
+        <div class="stat gray">avg ${fmt(g.avg_turns, 0)} turns</div>
+      </div>
+    </div>`;
+  }
+
+  // Gap card
+  html += `<div class="card">
+    <div class="card-title">Since Last Match</div>
+    <div class="row">
+      <div class="big-num ${gapWarn ? 'red' : 'green'}">${gapStr}</div>
+      ${gapWarn ? '<div class="stat red">stalled?</div>' : ''}
+    </div>
+    <div class="row" style="margin-top:6px">
+      <div class="stat gray">${lastGameAt ? fmtTime(lastGameAt) : 'no games yet'}</div>
+    </div>
+  </div>`;
+
+  document.getElementById('gameFreqCards').innerHTML = html;
+
+  // Hourly frequency chart
+  const hourly = gf.hourly || [];
+  const hLabels = hourly.map(h => {
+    const d = new Date(h.hour_ts * 1000);
+    return d.getHours() + ':00';
+  });
+  drawBarChart('gameFreqChart', hLabels, hourly.map(h => h.games || 0), '#1E93FF');
+
+  // Per-game frequency table
+  const byGame = gf.by_game || [];
+  const tbody = document.querySelector('#gameFreqTable tbody');
+  tbody.innerHTML = byGame.map(g => {
+    const ratePerHr = g.last_24h > 0 ? (g.last_24h / 24).toFixed(1) : '0';
+    const lastAgo = g.last_game_at ? fmtDuration(now - g.last_game_at) + ' ago' : '-';
+    return `<tr>
+      <td><span class="game-tag">${g.game_id}</span></td>
+      <td class="blue">${fmt(g.last_hour)}</td>
+      <td>${fmt(g.last_24h)}</td>
+      <td>${fmt(g.total_games)}</td>
+      <td>${fmt(g.avg_turns, 0)}</td>
+      <td class="gray">${lastAgo}</td>
+      <td>${ratePerHr}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function loadStats() {
   try {
     const resp = await fetch(API_URL);
@@ -395,6 +486,7 @@ async function loadStats() {
     renderSummary(stats);
     renderCostCards(stats);
     renderCostCharts(stats);
+    renderGameFreq(stats);
     renderModelTable(stats.by_model);
     renderGameTable(stats.by_game);
     renderSessionTable(stats.recent_sessions);

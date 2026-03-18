@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 14:00
+# Date: 2026-03-18 15:00
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
@@ -1734,7 +1734,7 @@ Your report should be 3-5 bullet points covering:
 - Any issues (high error rates, models failing to create agents, stagnation)
 - What strategy direction the next evolutions should explore
 
-Be concise and specific. Use agent names when referencing strategies. No pleasantries."""
+Use markdown formatting: **bold** for agent names and key metrics, *italic* for strategy descriptions and commentary. Do NOT use headings (#), just bullet points with bold/italic emphasis. Be concise and specific. No pleasantries."""
 
     user = f"Analyze this evolution data and write a brief status report:\n\n{data_block}"
 

@@ -1,5 +1,5 @@
 # Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-17 23:30
+# Date: 2026-03-18 15:00
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
 #   session persistence (save/resume/branch via SQLite), game step proxying, model registry
 #   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
@@ -182,6 +182,7 @@ def game_ab():
 
 from server.services import arena_research_service as _ar_svc
 from db_arena import (
+    arena_clear_all_agents as _ar_clear_all_agents,
     arena_get_comments as _ar_get_comments,
     arena_post_comment as _ar_post_comment,
     arena_vote_comment as _ar_vote_comment,
@@ -310,6 +311,31 @@ def arena_agent_offline_submit(game_id):
     return jsonify(result), 201
 
 
+@app.route("/api/arena/agents/<game_id>/clear", methods=["POST"])
+def arena_agents_clear(game_id):
+    """Clear all agents and games for a game_id. Requires ARENA_ADMIN_KEY."""
+    admin_key = os.environ.get("ARENA_ADMIN_KEY", "")
+    req_key = request.headers.get("X-Admin-Key", "")
+    if not admin_key or req_key != admin_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    ok, err = _ar_svc.validate_game_id(game_id)
+    if not ok:
+        return jsonify({"error": err}), 400
+    result = _ar_clear_all_agents(game_id)
+    return jsonify(result)
+
+
+@app.route("/api/arena/agents/clear-all", methods=["POST"])
+def arena_agents_clear_all():
+    """Clear ALL agents and games across all arena games. Requires ARENA_ADMIN_KEY."""
+    admin_key = os.environ.get("ARENA_ADMIN_KEY", "")
+    req_key = request.headers.get("X-Admin-Key", "")
+    if not admin_key or req_key != admin_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    result = _ar_clear_all_agents()
+    return jsonify(result)
+
+
 @app.route("/api/arena/games/<game_id>")
 def arena_games_list(game_id):
     ok, err = _ar_svc.validate_game_id(game_id)
@@ -434,6 +460,15 @@ def arena_program_vote(game_id):
 def arena_program_apply(game_id, version_id):
     applied = _ar_apply_vote(version_id)
     return jsonify({"applied": applied})
+
+
+@app.route("/api/arena/program-version/<int:version_id>")
+def arena_program_version_get(version_id):
+    from db_arena import arena_get_program_version
+    ver = arena_get_program_version(version_id)
+    if not ver:
+        return jsonify({"error": "Version not found"}), 404
+    return jsonify(ver)
 
 
 @app.route("/api/arena/heartbeat/status")

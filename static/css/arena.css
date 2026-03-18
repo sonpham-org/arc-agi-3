@@ -1,5 +1,5 @@
 /* Author: Claude Opus 4.6
-   Date: 2026-03-16 23:45
+   Date: 2026-03-18 15:00
    PURPOSE: Styles for AutoResearch Arena — Agent vs Agent page. Three-column layout with
    side panels (agent settings/logs) and center panel (game selection/match canvas).
    Supports Code mode (built-in AI strategies) and Harness mode (LLM scaffolding).
@@ -862,7 +862,7 @@
 
 /* ── Col 2: Leaderboard + Recent Games (narrow ~10%) ── */
 .ar-mid-col {
-  width: 20%; min-width: 280px; max-width: 480px;
+  width: 26%; min-width: 320px; max-width: 580px;
   flex-shrink: 0; display: flex; flex-direction: column;
   background: var(--surface); border-left: 1px solid var(--border);
   overflow: hidden;
@@ -887,7 +887,7 @@
 
 /* ── Col 3: Live Tournament (30%) ── */
 .ar-right-col {
-  flex: 0 0 30%; display: flex; flex-direction: column;
+  flex: 0 0 39%; display: flex; flex-direction: column;
   background: var(--surface); border-left: 1px solid var(--border);
   overflow-y: auto;
 }
@@ -1214,19 +1214,19 @@
 @media (max-width: 1400px) {
   .arena-side-panel { width: 360px; }
   .ar-mid-col { min-width: 180px; }
-  .ar-right-col { min-width: 180px; }
+  .ar-right-col { min-width: 220px; }
 }
 @media (max-width: 1100px) {
   .arena-side-panel { width: 300px; }
   .arena-obs-panel { width: 320px; }
-  .ar-mid-col { min-width: 160px; }
-  .ar-right-col { min-width: 160px; width: 20%; }
+  .ar-mid-col { min-width: 200px; }
+  .ar-right-col { min-width: 200px; width: 26%; }
 }
 @media (max-width: 900px) {
   .arena-side-panel { width: 260px; }
   .arena-obs-panel { width: 280px; }
   .ar-mid-col { display: none; }
-  .ar-right-col { width: 30%; min-width: 150px; }
+  .ar-right-col { width: 39%; min-width: 180px; }
 }
 @media (max-width: 750px) {
   .arena-layout { flex-direction: column; }
