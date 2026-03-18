@@ -5616,23 +5616,49 @@ async function arSelectGame(gameId, mode) {
   document.getElementById('arStatusText').textContent = `Loading ${game ? game.title : gameId}...`;
 
   try {
-    // Priority fetch: research data (program.md, leaderboard, stats) — render immediately
-    const researchData = await fetch(`/api/arena/research/${gameId}`).then(r => r.json()).catch(() => null);
+    // Phase 1: Fast parallel fetches — lightweight endpoints that return quickly
+    // program, top 20 agents, comments, recent games — all small queries
+    const [programData, topAgents, commentsData, recentGamesData] = await Promise.all([
+      fetch(`/api/arena/program/${gameId}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/arena/agents/${gameId}?limit=20`).then(r => r.json()).catch(() => []),
+      fetch(`/api/arena/comments/${gameId}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/arena/games/${gameId}?limit=20`).then(r => r.json()).catch(() => []),
+    ]);
 
-    if (researchData && researchData.error) {
-      document.getElementById('arStatusText').textContent = `Error: ${researchData.error}`;
-      return;
-    }
+    // Deselect agent on game switch
+    if (AR.selectedAgentId) arDeselectAgent();
 
-    // Render core content immediately (program.md, leaderboard, status bar)
-    if (researchData) arRenderResearch(gameId, researchData, null);
+    // Render core content immediately — user sees the page
+    if (programData) arRenderProgram(programData);
+    AR.lbShowAll = false;
+    arRenderLeaderboard(gameId, topAgents || []);
+    arRenderHeartbeatDirect(commentsData || []);
+    if (Array.isArray(recentGamesData)) arRenderRecentGames(recentGamesData);
+    document.getElementById('arAgentCount').textContent = `${(topAgents || []).length}+ agents`;
+    document.getElementById('arStatusText').textContent =
+      `${game ? game.title : gameId} | Loading full stats...`;
 
-    // Hide loading overlay — main content is visible now
+    // Hide loading overlay — core UI is visible
     if (overlay) overlay.style.display = 'none';
 
-    // Lazy load secondary content (non-blocking, renders when ready)
-    fetch(`/api/arena/games/${gameId}?limit=20`).then(r => r.json()).then(data => {
-      if (Array.isArray(data)) arRenderRecentGames(data);
+    // Phase 2: Slow background fetches — full stats, full leaderboard, live tournament
+    fetch(`/api/arena/research/${gameId}`).then(r => r.json()).then(data => {
+      if (data && !data.error) {
+        document.getElementById('arStatusText').textContent =
+          `${game ? game.title : gameId} | Gen ${data.generation} | ${data.agent_count} agents | ${data.game_count} games` +
+          (data.best_agent ? ` | Best: ${data.best_agent} (${data.best_elo})` : '');
+        document.getElementById('arAgentCount').textContent = `${data.agent_count} agents`;
+        if (data.leaderboard && data.leaderboard.length > 0) {
+          arRenderLeaderboard(gameId, data.leaderboard);
+        }
+        if (typeof arRenderEloChart === 'function') arRenderEloChart(gameId, data.leaderboard || []);
+        const progTa = document.getElementById('arProgramTextarea');
+        if (progTa) {
+          const content = data.program?.content || _AR_DEFAULT_PROGRAM;
+          progTa.value = content;
+          AR._lastProgramContent = content;
+        }
+      }
     }).catch(() => {});
 
     fetch(`/api/arena/live-tournament/${gameId}`).then(r => r.json()).then(data => {
@@ -5675,12 +5701,6 @@ function arRenderResearch(gameId, data, recentGamesData) {
   AR.lbShowAll = false;
   arRenderLeaderboard(gameId, data.leaderboard || []);
   document.getElementById('arAgentCount').textContent = `${data.agent_count} agents`;
-
-  // AI Heartbeat chat (secondary tab — lazy load is fine)
-  arLoadHeartbeat(gameId);
-
-  // Recent games — use pre-fetched data if available, else lazy-load
-  if (recentGamesData) arRenderRecentGames(recentGamesData);
 
   // ELO chart
   if (typeof arRenderEloChart === 'function') arRenderEloChart(gameId, data.leaderboard || []);
@@ -6396,6 +6416,30 @@ function _arRenderMd(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^- /gm, '\u2022 ');
+}
+
+function arRenderHeartbeatDirect(comments) {
+  const container = document.getElementById('arHeartbeatList');
+  if (!container) return;
+  if (!comments || !comments.length) {
+    container.innerHTML = '<div class="ar-no-data">No messages yet. Say hello!</div>';
+    return;
+  }
+  container.innerHTML = comments.map(c => {
+    const isAI = c.username === 'AI' || c.username === 'Heartbeat';
+    return `<div class="ar-hb-msg ${isAI ? 'ar-hb-ai' : 'ar-hb-human'}">
+      <div class="ar-hb-meta">
+        <span class="ar-hb-author ${isAI ? 'ar-hb-ai-author' : ''}">${isAI ? '\u{1F916} ' : ''}${escHtml(c.username)}</span>
+        <span class="ar-hb-time">${arTimeAgo(c.created_at)}</span>
+        <span class="ar-hb-votes">
+          <button class="ar-vote-btn" onclick="arVoteHeartbeat(${c.id},1)">\u25B2 ${c.upvotes}</button>
+          <button class="ar-vote-btn" onclick="arVoteHeartbeat(${c.id},-1)">\u25BC ${c.downvotes}</button>
+        </span>
+      </div>
+      <div class="ar-hb-body">${isAI ? _arRenderMd(c.content) : escHtml(c.content)}</div>
+    </div>`;
+  }).join('');
+  container.scrollTop = container.scrollHeight;
 }
 
 async function arLoadHeartbeat(gameId) {
