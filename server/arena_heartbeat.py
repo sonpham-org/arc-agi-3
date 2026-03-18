@@ -63,6 +63,7 @@ EVOLUTION_AGENTS_PER_TICK = 1
 MAX_TOOL_ROUNDS = 6
 ELO_START = 1000.0
 ELO_K = 32
+ANALYSIS_EVERY_N_EVOS = 10  # post AI analysis comment every N evolutions per game
 
 # Agent evolution model rotation: 3 haiku, 1 sonnet, 1 opus, 1 gemini
 # (model_id, label, provider)
@@ -1651,9 +1652,134 @@ def _seed_if_empty(game_id):
     print(f'[tournament] Seeding complete for {game_id}')
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#   AI Heartbeat Analysis — periodic LLM-powered status reports
+# ═══════════════════════════════════════════════════════════════════════════
+
+_evo_counts = {}  # per-game counter for analysis cadence
+
+
+def _run_ai_analysis(api_key, game_id):
+    """Use Haiku to analyze evolution state and post a status report as a heartbeat comment."""
+    try:
+        from db_arena import arena_get_llm_monitor_stats
+        stats = arena_get_llm_monitor_stats()
+    except Exception as exc:
+        print(f'[analysis:{game_id}] Failed to get stats: {exc}')
+        return
+
+    # Build a data snapshot for the LLM
+    agents = arena_get_leaderboard(game_id, limit=20)
+    if not agents:
+        return
+
+    # Top agents summary
+    top_agents = []
+    for a in agents[:10]:
+        win_rate = a['wins'] / max(a['games_played'], 1) * 100
+        top_agents.append(
+            f"  #{len(top_agents)+1} {a['name']} ELO={a['elo']:.0f} "
+            f"W/L/D={a['wins']}/{a['losses']}/{a['draws']} "
+            f"({win_rate:.0f}% WR, {a['games_played']} games)"
+        )
+
+    # Recent evolutions for this game
+    recent = [s for s in stats.get('recent_sessions', []) if s['game_id'] == game_id][:15]
+    evo_lines = []
+    for s in recent:
+        evo_lines.append(
+            f"  Gen {s['generation']}: {s['model'].replace('claude-', '').replace('-20251001', '')} "
+            f"→ {s['status']} ({s['agents_created']} agents, ${s['cost_usd']:.4f}, "
+            f"{s['total_latency_ms']/1000:.1f}s)"
+        )
+
+    # Per-game stats
+    game_stats = next((g for g in stats.get('by_game', []) if g['game_id'] == game_id), {})
+
+    # Per-model stats for this game (from recent sessions)
+    model_perf = {}
+    for s in [r for r in stats.get('recent_sessions', []) if r['game_id'] == game_id]:
+        m = s['model'].replace('claude-', '').replace('-20251001', '')
+        if m not in model_perf:
+            model_perf[m] = {'sessions': 0, 'agents': 0, 'cost': 0}
+        model_perf[m]['sessions'] += 1
+        model_perf[m]['agents'] += (s['agents_created'] or 0)
+        model_perf[m]['cost'] += (s['cost_usd'] or 0)
+
+    model_lines = []
+    for m, p in sorted(model_perf.items(), key=lambda x: -x[1]['sessions']):
+        rate = p['agents'] / max(p['sessions'], 1) * 100
+        model_lines.append(f"  {m}: {p['sessions']} sessions, {p['agents']} agents ({rate:.0f}% creation rate), ${p['cost']:.4f}")
+
+    data_block = f"""=== {game_id} Arena Status ===
+
+Top Agents:
+{chr(10).join(top_agents)}
+
+Recent Evolutions (last {len(evo_lines)}):
+{chr(10).join(evo_lines) if evo_lines else '  (none)'}
+
+Model Performance:
+{chr(10).join(model_lines) if model_lines else '  (none)'}
+
+Totals for {game_id}: {game_stats.get('sessions', 0)} evolutions, {game_stats.get('agents', 0)} agents, ${game_stats.get('cost', 0):.4f} spent
+Overall: {stats['all_time'].get('total_sessions', 0)} evolutions across all games, ${stats['all_time'].get('total_cost', 0):.4f} total
+"""
+
+    system = """You are the AI Heartbeat for an agent evolution arena. You analyze evolution data and post a brief status report.
+
+Your report should be 3-5 bullet points covering:
+- Which strategies are dominating and why (look at top ELO agents and their names for clues)
+- Which models are most effective at creating agents (creation rate, cost efficiency)
+- Any issues (high error rates, models failing to create agents, stagnation)
+- What strategy direction the next evolutions should explore
+
+Be concise and specific. Use agent names when referencing strategies. No pleasantries."""
+
+    user = f"Analyze this evolution data and write a brief status report:\n\n{data_block}"
+
+    try:
+        import httpx as _httpx
+        from llm_providers_anthropic import _anthropic_auth_headers
+        headers = _anthropic_auth_headers(api_key)
+        resp = _httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 1024,
+                "system": system,
+                "messages": [{"role": "user", "content": user}],
+            },
+            timeout=60.0,
+        )
+        if resp.status_code != 200:
+            print(f'[analysis:{game_id}] API error: {resp.status_code}')
+            return
+
+        data = resp.json()
+        text = data.get('content', [{}])[0].get('text', '')
+        if not text:
+            return
+
+        # Truncate to reasonable comment length
+        if len(text) > 1500:
+            text = text[:1500] + '...'
+
+        arena_post_comment(
+            game_id, 'ai-heartbeat', 'AI Heartbeat',
+            text, comment_type='heartbeat'
+        )
+        print(f'[analysis:{game_id}] Posted status report ({len(text)} chars)')
+
+    except Exception as exc:
+        print(f'[analysis:{game_id}] Error: {exc}')
+
+
 def _evolution_loop_for_game(game_id, stagger_secs):
     """Per-game evolution loop. Each game gets its own thread, staggered to avoid API bursts."""
     time.sleep(10 + stagger_secs)
+    _evo_counts[game_id] = 0
     print(f'[evolution:{game_id}] Started (stagger={stagger_secs}s, interval={HEARTBEAT_INTERVAL_NORMAL}s)')
 
     while _heartbeat_state['running']:
@@ -1691,6 +1817,14 @@ def _evolution_loop_for_game(game_id, stagger_secs):
             _heartbeat_state['last_error'] = f'{game_id}: {e}'
             print(f'[evolution:{game_id}] Error: {e}')
             traceback.print_exc()
+
+        # Periodic AI analysis — post status report every N evolutions
+        _evo_counts[game_id] = _evo_counts.get(game_id, 0) + 1
+        if _evo_counts[game_id] % ANALYSIS_EVERY_N_EVOS == 0 and api_key:
+            try:
+                _run_ai_analysis(api_key, game_id)
+            except Exception as exc:
+                print(f'[analysis:{game_id}] Error (non-fatal): {exc}')
 
         if created or time.time() - _last_export_time >= EXPORT_INTERVAL:
             try:

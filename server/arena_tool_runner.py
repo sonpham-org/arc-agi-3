@@ -1,10 +1,11 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 01:30
+# Date: 2026-03-18 15:00
 # PURPOSE: Multi-provider tool-calling loop for arena evolution.
 #   Anthropic: prompt caching (system + tools cached across rounds).
 #   Gemini: Google GenAI SDK tool calling.
 #   Session-level stats (api_calls, tool_calls, tokens, cache hits, cost).
 #   Returns {log, stats} — caller logs one session record, not per-call.
+#   Per-model max_tokens and timeout scaling for verbose models (Sonnet/Opus).
 # SRP/DRY check: Pass — only arena tool-calling loop, no other tool loop exists server-side
 
 import json
@@ -21,6 +22,18 @@ DEFAULT_MAX_ROUNDS = 6
 REQUEST_TIMEOUT = 120.0
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 5
+
+# Sonnet/Opus are much more verbose than Haiku — need higher limits
+_MODEL_MAX_TOKENS = {
+    'claude-haiku-4-5-20251001': 8192,
+    'claude-sonnet-4-6': 16384,
+    'claude-opus-4-6': 16384,
+}
+_MODEL_TIMEOUT = {
+    'claude-haiku-4-5-20251001': 120.0,
+    'claude-sonnet-4-6': 180.0,
+    'claude-opus-4-6': 300.0,
+}
 
 # Cost per 1M tokens (input, output)
 _ANTHROPIC_COSTS = {
@@ -70,6 +83,10 @@ def run_tool_loop(
     stats = _empty_stats()
     conversation_log = []
 
+    # Per-model limits: Sonnet/Opus need higher max_tokens and timeout
+    effective_max_tokens = _MODEL_MAX_TOKENS.get(model, max_tokens)
+    effective_timeout = _MODEL_TIMEOUT.get(model, REQUEST_TIMEOUT)
+
     # Build tools with cache_control on last tool for prompt caching
     ant_tools = [
         {"name": t["name"], "description": t["description"],
@@ -87,7 +104,7 @@ def run_tool_loop(
 
         body = {
             "model": model,
-            "max_tokens": max_tokens,
+            "max_tokens": effective_max_tokens,
             "system": [
                 {"type": "text", "text": system_prompt,
                  "cache_control": {"type": "ephemeral"}}
@@ -98,7 +115,7 @@ def run_tool_loop(
 
         start_ms = time.time() * 1000
         try:
-            raw = _call_with_retry(headers, body)
+            raw = _call_with_retry(headers, body, timeout=effective_timeout)
         except Exception as exc:
             stats['total_latency_ms'] += time.time() * 1000 - start_ms
             conversation_log.append({"type": "error", "content": str(exc)})
@@ -131,6 +148,12 @@ def run_tool_loop(
             )
 
         messages.append({"role": "assistant", "content": content})
+
+        if stop_reason == "max_tokens":
+            # Response truncated — nudge model to call create_agent on next round
+            print(f"    [arena-tool] max_tokens hit on round {round_num + 1}, nudging to call tool")
+            messages.append({"role": "user", "content": "Your response was truncated. Please call create_agent now with the code you have. Keep it concise."})
+            continue
 
         if stop_reason != "tool_use":
             cache_info = ""
@@ -349,14 +372,14 @@ def _gemini_schema(schema):
     return schema
 
 
-def _call_with_retry(headers: dict, body: dict) -> dict:
+def _call_with_retry(headers: dict, body: dict, timeout: float = REQUEST_TIMEOUT) -> dict:
     """POST to Anthropic API with exponential backoff on 429/5xx."""
     backoff = INITIAL_BACKOFF
     last_status = 0
     for attempt in range(MAX_RETRIES + 1):
         try:
             resp = httpx.post(
-                ANTHROPIC_API_URL, headers=headers, json=body, timeout=REQUEST_TIMEOUT,
+                ANTHROPIC_API_URL, headers=headers, json=body, timeout=timeout,
             )
         except Exception as exc:
             if attempt < MAX_RETRIES:

@@ -5,6 +5,18 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.10.0] — fix: Sonnet/Opus evolution + AI Heartbeat analysis reports
+*Author: Claude Opus 4.6 | 2026-03-18*
+
+### Fixed
+- **Sonnet/Opus unable to create agents** — `max_tokens` was 8192 for all models. Sonnet/Opus are more verbose and hit the limit, causing `stop_reason: max_tokens` which silently exits the tool loop without creating an agent. Now: Haiku=8192, Sonnet=16384, Opus=16384. Also handle `max_tokens` stop by nudging the model to call `create_agent` on next round.
+- **Opus timeout** — `REQUEST_TIMEOUT` was 120s for all models. Opus can take 3-5 min. Now per-model: Haiku=120s, Sonnet=180s, Opus=300s.
+
+### Added
+- **AI Heartbeat analysis** — Every 10 evolutions per game, Haiku analyzes the arena state (top agents, model performance, creation rates, costs) and posts a status report as a heartbeat comment. Covers: dominant strategies, model effectiveness, issues, and suggested directions.
+
+---
+
 ## [1.9.9] — fix: Monitor page rewrite — use evolution sessions, not dead arena_llm_calls
 *Author: Claude Opus 4.6 | 2026-03-18*
 
