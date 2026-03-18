@@ -576,13 +576,24 @@ def arena_vote_comment(comment_id, user_id, vote):
 # PROGRAM.MD VERSIONING & VOTING
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _apv_has_evo_cols(conn):
+    """Check if arena_program_versions has auto_evolved/trigger_reason/conversation_log columns."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(arena_program_versions)").fetchall()}
+    return 'auto_evolved' in cols
+
+
 def arena_get_program_version(version_id):
     """Get a single program version by ID, including conversation log. Returns dict or None."""
     with _db() as conn:
+        has_evo = _apv_has_evo_cols(conn)
+        if has_evo:
+            evo_cols = "auto_evolved, trigger_reason, conversation_log,"
+        else:
+            evo_cols = "0 as auto_evolved, NULL as trigger_reason, NULL as conversation_log,"
         row = conn.execute(
-            "SELECT id, game_id, version, content, author, change_summary, "
-            "auto_evolved, trigger_reason, conversation_log, created_at "
-            "FROM arena_program_versions WHERE id = ?",
+            f"SELECT id, game_id, version, content, author, change_summary, "
+            f"{evo_cols} created_at "
+            f"FROM arena_program_versions WHERE id = ?",
             (version_id,)
         ).fetchone()
         if not row:
@@ -631,20 +642,29 @@ def arena_auto_evolve_program(game_id, content, change_summary,
             conv_json = conv_json[:200_000]
 
     with _db() as conn:
+        has_evo = _apv_has_evo_cols(conn)
         research = conn.execute(
             "SELECT program_version FROM arena_research WHERE game_id = ?", (game_id,)
         ).fetchone()
         current_version = research["program_version"] if research else 0
         new_version = current_version + 1
 
-        conn.execute(
-            """INSERT INTO arena_program_versions
-               (game_id, version, content, author, change_summary,
-                applied, auto_evolved, conversation_log, trigger_reason)
-               VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)""",
-            (game_id, new_version, content, 'AI Evolution', change_summary,
-             conv_json, trigger_reason)
-        )
+        if has_evo:
+            conn.execute(
+                """INSERT INTO arena_program_versions
+                   (game_id, version, content, author, change_summary,
+                    applied, auto_evolved, conversation_log, trigger_reason)
+                   VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)""",
+                (game_id, new_version, content, 'AI Evolution', change_summary,
+                 conv_json, trigger_reason)
+            )
+        else:
+            conn.execute(
+                """INSERT INTO arena_program_versions
+                   (game_id, version, content, author, change_summary, applied)
+                   VALUES (?, ?, ?, ?, ?, 1)""",
+                (game_id, new_version, content, 'AI Evolution', change_summary)
+            )
         vid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
         # Auto-apply: update arena_research with new content
@@ -653,9 +673,10 @@ def arena_auto_evolve_program(game_id, content, change_summary,
             (content, new_version, time.time(), game_id)
         )
 
+        evo_select = "auto_evolved, trigger_reason," if has_evo else "0 as auto_evolved, NULL as trigger_reason,"
         row = conn.execute(
-            "SELECT id, game_id, version, author, change_summary, auto_evolved, "
-            "trigger_reason, applied, created_at FROM arena_program_versions WHERE id = ?",
+            f"SELECT id, game_id, version, author, change_summary, {evo_select} "
+            f"applied, created_at FROM arena_program_versions WHERE id = ?",
             (vid,)
         ).fetchone()
         return dict(row)
@@ -664,9 +685,11 @@ def arena_auto_evolve_program(game_id, content, change_summary,
 def arena_get_program_versions(game_id):
     """Get all program versions for a game (without conversation_log for size)."""
     with _db() as conn:
+        has_evo = _apv_has_evo_cols(conn)
+        evo_select = "auto_evolved, trigger_reason," if has_evo else "0 as auto_evolved, NULL as trigger_reason,"
         rows = conn.execute(
-            """SELECT id, game_id, version, author, change_summary, votes_for, votes_against,
-                      applied, auto_evolved, trigger_reason, created_at
+            f"""SELECT id, game_id, version, author, change_summary, votes_for, votes_against,
+                      applied, {evo_select} created_at
                FROM arena_program_versions
                WHERE game_id = ?
                ORDER BY version DESC""",
@@ -682,16 +705,24 @@ def arena_get_program(game_id):
             "SELECT program_md, program_version FROM arena_research WHERE game_id = ?",
             (game_id,)
         ).fetchone()
+        # Check which columns exist (migration may not have run yet)
+        apv_cols = {r[1] for r in conn.execute("PRAGMA table_info(arena_program_versions)").fetchall()}
+        has_evo_cols = 'auto_evolved' in apv_cols
+        evo_select = "auto_evolved, trigger_reason," if has_evo_cols else "0 as auto_evolved, NULL as trigger_reason,"
         versions = conn.execute(
-            """SELECT id, version, author, change_summary, votes_for, votes_against,
-                      vote_deadline, applied, auto_evolved, trigger_reason, created_at
+            f"""SELECT id, version, author, change_summary, votes_for, votes_against,
+                      vote_deadline, applied, {evo_select} created_at
                FROM arena_program_versions WHERE game_id = ? ORDER BY version DESC LIMIT 50""",
             (game_id,)
         ).fetchall()
         # Check for active proposal (vote_deadline in the future)
         now = time.time()
         active_proposal = conn.execute(
-            "SELECT * FROM arena_program_versions WHERE game_id = ? AND vote_deadline > ? AND applied = 0 ORDER BY id DESC LIMIT 1",
+            f"""SELECT id, version, author, change_summary, votes_for, votes_against,
+                      vote_deadline, applied, {evo_select} created_at
+               FROM arena_program_versions
+               WHERE game_id = ? AND vote_deadline > ? AND applied = 0
+               ORDER BY id DESC LIMIT 1""",
             (game_id, now)
         ).fetchone()
         return {
