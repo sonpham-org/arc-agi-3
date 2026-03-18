@@ -117,6 +117,7 @@ def _init_pg_schema(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_ag_game ON arena_games(game_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_ag_agents ON arena_games(agent1_id, agent2_id);
+        CREATE INDEX IF NOT EXISTS idx_ag_history ON arena_games(game_id, created_at DESC) WHERE history IS NOT NULL AND history != '[]';
 
         CREATE TABLE IF NOT EXISTS arena_evolution_cycles (
             id SERIAL PRIMARY KEY,
