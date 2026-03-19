@@ -649,8 +649,13 @@ def arena_monitor_stats():
     auth_err = _require_arena_admin()
     if auth_err:
         return auth_err
-    from db_arena import arena_get_llm_monitor_stats
-    return jsonify(arena_get_llm_monitor_stats())
+    try:
+        from db_arena import arena_get_llm_monitor_stats
+        return jsonify(arena_get_llm_monitor_stats())
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
 @app.route("/api/arena/library-requests")

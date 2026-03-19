@@ -529,8 +529,11 @@ async function loadStats() {
   try {
     const resp = await fetch(API_URL);
     if (!resp.ok) {
-      document.getElementById('loading').textContent = `Error: ${resp.status} ${resp.statusText}`;
+      let errMsg = `Error: ${resp.status} ${resp.statusText}`;
+      try { const errData = await resp.json(); errMsg += '\n' + (errData.error || '') + '\n' + (errData.traceback || ''); } catch(e) {}
+      document.getElementById('loading').textContent = errMsg;
       document.getElementById('loading').style.display = '';
+      document.getElementById('loading').style.whiteSpace = 'pre-wrap';
       document.getElementById('dashboard').style.display = 'none';
       return;
     }
