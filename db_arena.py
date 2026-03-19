@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 _USE_PG = bool(os.environ.get('DATABASE_URL'))
 _pg_pool = None
 _pg_schema_initialized = False
+_pg_init_lock = __import__('threading').Lock()
 
 
 class _PGConn:
@@ -242,15 +243,16 @@ def _arena_db():
     if _USE_PG:
         import psycopg2
         from psycopg2.pool import ThreadedConnectionPool
-        if _pg_pool is None:
-            _pg_pool = ThreadedConnectionPool(1, 10, os.environ['DATABASE_URL'])
-        if not _pg_schema_initialized:
-            schema_conn = _pg_pool.getconn()
-            try:
-                _init_pg_schema(schema_conn)
-                _pg_schema_initialized = True
-            finally:
-                _pg_pool.putconn(schema_conn)
+        with _pg_init_lock:
+            if _pg_pool is None:
+                _pg_pool = ThreadedConnectionPool(2, 20, os.environ['DATABASE_URL'])
+            if not _pg_schema_initialized:
+                schema_conn = _pg_pool.getconn()
+                try:
+                    _init_pg_schema(schema_conn)
+                    _pg_schema_initialized = True
+                finally:
+                    _pg_pool.putconn(schema_conn)
         conn = _pg_pool.getconn()
         conn.autocommit = False
         try:
