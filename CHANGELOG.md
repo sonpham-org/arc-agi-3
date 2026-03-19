@@ -5,6 +5,21 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.13.1] — feat: Tower Siege real-time two-player mode (ts01 v3)
+*Author: Claude Sonnet 4.6 | 2026-03-19*
+
+### Changed
+- **Real-time mode** — World auto-ticks via ACT7 at 4 FPS (live mode). No turn alternation: both players click freely at any time. Added `"live"` tag and `"default_fps": 4` to metadata.
+- **Per-entity action cooldowns** — After any move/tool, unit must wait 3 ticks (0.75 s); after P2 moves a guard, it must wait 4 ticks (1 s). Prevents click-spamming. Cooling entities shown as dim (LGRAY background + color dot).
+- **Bomb timer** — Wall removed after 4 ticks (1 s) instead of 1 tick.
+- **Freeze after contact-kill** — Soldier frozen 4 ticks (1 s) instead of 1 tick.
+- **Gate period** — 12 ticks (3 s cycle at 4 FPS) instead of 3 turns.
+- **Turn limits redesigned** as tick counts: L1=120 (30 s), L2=160 (40 s), L3=200 (50 s), L4=240 (60 s), L5=160 (40 s, tight).
+- **HUD** — Replaced `T:XX/YY` turn counter with `{N}S` seconds countdown (turns red at <10 s). Right panel shows `LIVE` label in green instead of `ATK`/`DEF`.
+- **New version directory** `environment_files/ts/00000003/` — prior versions left intact for replay.
+
+---
+
 ## [1.12.1] — feat: Snake Random benchmark bots + blue anchor styling
 *Author: Claude Opus 4.6 | 2026-03-18*
 

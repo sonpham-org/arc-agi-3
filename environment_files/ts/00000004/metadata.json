@@ -1,0 +1,9 @@
+{
+  "game_id": "ts01",
+  "title": "Tower Siege",
+  "default_fps": 4,
+  "baseline_actions": [],
+  "tags": ["live"],
+  "local_dir": "ts",
+  "date_downloaded": "2026-03-19"
+}
