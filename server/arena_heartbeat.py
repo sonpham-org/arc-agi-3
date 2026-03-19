@@ -1568,7 +1568,7 @@ def _run_tournament(game_id='snake', match_count=20):
     Phase 4 — QUEUE: Push results to DB writer queue (single-thread safety).
     """
     # ── Phase 1: Load ──
-    agents = arena_get_leaderboard(game_id, limit=200)
+    agents = arena_get_leaderboard(game_id, limit=1000)
     for a in agents:
         full = arena_get_agent(game_id, a['id'])
         if full:
