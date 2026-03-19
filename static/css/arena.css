@@ -1107,6 +1107,7 @@
 .ar-elo-high { color: #4FCC30; }
 .ar-elo-low { color: var(--text-dim); }
 .ar-contributor { color: var(--text-dim); font-size: 10px; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+.ar-program-col { color: var(--text-dim); font-size: 10px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ar-badge-human {
   font-size: 9px; background: #1E93FF33; color: #1E93FF; padding: 0 4px;
   border-radius: 3px; font-weight: 600;

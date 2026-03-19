@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-18 18:00
+// Date: 2026-03-19 12:00
 // PURPOSE: AutoResearch Arena — Agent vs Agent game engine, AI strategies, match runner,
 //   and UI controller. Manages the three-column layout with side panels (agent
 //   settings → observatory logs) and center panel (game selection → match canvas).
@@ -2508,7 +2508,7 @@ function renderOthelloFrame(ctx, frame, size) {
       ctx.beginPath(); ctx.arc(cx+1, cy+1, radius, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
       ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2);
-      ctx.fillStyle = board[r][c]===1 ? ARC3[9] : ARC3[8]; ctx.fill();
+      ctx.fillStyle = board[r][c]===1 ? ARC3[5] : ARC3[0]; ctx.fill();
       if (isLast) { ctx.strokeStyle=ARC3[11]; ctx.lineWidth=2; ctx.stroke(); }
     }
   }
@@ -2523,7 +2523,7 @@ function renderOthelloPreview(canvas) {
   }
   for (const [r,c,p] of [[3,3,-1],[3,4,1],[4,3,1],[4,4,-1]]) {
     ctx.beginPath(); ctx.arc(c*sq+sq/2,r*sq+sq/2,radius,0,Math.PI*2);
-    ctx.fillStyle = p===1 ? ARC3[9] : ARC3[8]; ctx.fill();
+    ctx.fillStyle = p===1 ? ARC3[5] : ARC3[0]; ctx.fill();
   }
 }
 
@@ -5928,7 +5928,7 @@ function arRenderLeaderboard(gameId, agents) {
   AR.lbAgents = agents;
   const tbody = document.getElementById('arLeaderboardBody');
   if (!agents.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="ar-no-data">No agents yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="ar-no-data">No agents yet</td></tr>';
     return;
   }
   const CAP = 50;
@@ -5952,9 +5952,8 @@ function arRenderLeaderboard(gameId, agents) {
       <td>${a.wins}/${a.losses}/${a.draws}</td>
       <td>${a.games_played}</td>
       <td class="ar-contributor">${escHtml(a.contributor || '—')}</td>
+      <td class="ar-program-col" title="${escHtml(a.program_file || '')}">${a.program_file ? escHtml(a.program_file.replace(/_program/g, '').replace(/\.md$/, '')) : '—'}</td>
       <td style="white-space:nowrap">
-        <button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowAgentCode('${gameId}',${a.id},'${escHtml(a.name)}')">Code</button>
-        ${a.program_version_id ? `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowAgentProgram(${a.program_version_id},'${escHtml(a.name)}')">Prog</button>` : ''}
         ${(a.is_human || gameId === 'snake_2v2') ? '' : `<button class="ar-btn ar-btn-xs" onclick="event.stopPropagation();arShowHumanDialog('${gameId}',${a.id},'${escHtml(a.name)}',${Math.round(a.elo)})">Play ▶</button>`}
       </td>
     </tr>`;
@@ -5962,7 +5961,7 @@ function arRenderLeaderboard(gameId, agents) {
 
   if (agents.length > CAP) {
     const label = showAll ? 'Show top 50' : `Show all (${agents.length})`;
-    html += `<tr class="ar-lb-show-more"><td colspan="7"><a href="#" onclick="event.preventDefault();AR.lbShowAll=!AR.lbShowAll;arRenderLeaderboard('${gameId}',AR.lbAgents)">${label}</a></td></tr>`;
+    html += `<tr class="ar-lb-show-more"><td colspan="8"><a href="#" onclick="event.preventDefault();AR.lbShowAll=!AR.lbShowAll;arRenderLeaderboard('${gameId}',AR.lbAgents)">${label}</a></td></tr>`;
   }
   tbody.innerHTML = html;
 }
@@ -6064,14 +6063,15 @@ function arRenderAgentView(container, gameId, profileData) {
       <div class="ar-agent-view-meta">
         ${agent.contributor ? `By: ${escHtml(agent.contributor)}` : ''}
         ${agent.generation ? ` &middot; Gen ${agent.generation}` : ''}
+        ${profileData.program_file ? ` &middot; Program: ${escHtml(profileData.program_file)}` : ''}
       </div>
       <div style="margin-top:4px">
         ${(agent.is_human || gameId === 'snake_2v2') ? '' : `<button class="ar-btn ar-btn-xs" onclick="arShowHumanDialog('${gameId}',${agent.id},'${escHtml(agent.name)}',${Math.round(agent.elo)})">Play ▶</button>`}
       </div>
     </div>
     <div class="ar-profile-tabs">
-      <button class="ar-profile-tab active" onclick="arSwitchProfileTab('${gameId}','games',this)">Games</button>
-      <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','code',this)">Code</button>
+      <button class="ar-profile-tab active" onclick="arSwitchProfileTab('${gameId}','code',this)">Code</button>
+      <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','games',this)">Games</button>
       <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','program',this)">Program</button>
       <button class="ar-profile-tab" onclick="arSwitchProfileTab('${gameId}','evolution',this)">Evo Log</button>
     </div>
@@ -6079,8 +6079,8 @@ function arRenderAgentView(container, gameId, profileData) {
 
   container.innerHTML = html;
 
-  // Render default tab (Games)
-  arRenderProfileGamesTab(gameId, profileData);
+  // Render default tab (Code)
+  arRenderProfileCodeTab(profileData);
 }
 
 function arSwitchProfileTab(gameId, tab, btn) {

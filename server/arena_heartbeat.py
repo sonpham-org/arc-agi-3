@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 21:00
+# Date: 2026-03-19 12:00
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
@@ -61,9 +61,9 @@ from db_arena import (
 #   Config
 # ═══════════════════════════════════════════════════════════════════════════
 
-HEARTBEAT_INTERVAL_FAST_FILL = 6 * 60   # 6 minutes per game until 100 agents
-HEARTBEAT_INTERVAL_NORMAL = 12 * 60    # 12 minutes per game steady state (~5 agents/hr/game)
-HEARTBEAT_INTERVAL_FAST = 6 * 60       # 6 minutes (same — haiku is cheap)
+HEARTBEAT_INTERVAL_FAST_FILL = 30 * 60   # 30 minutes per game until 100 agents (5x slowdown)
+HEARTBEAT_INTERVAL_NORMAL = 60 * 60    # 60 minutes per game steady state (5x slowdown)
+HEARTBEAT_INTERVAL_FAST = 30 * 60       # 30 minutes (5x slowdown)
 EVOLUTION_STAGGER_SECS = 60            # offset between per-game threads to avoid burst
 EVOLUTION_ENABLED = os.environ.get('SERVER_MODE', '') == 'prod'
 TOURNAMENT_GAMES_PER_TICK = 20
@@ -1686,6 +1686,8 @@ def _db_writer_thread():
     print('[tournament] DB writer thread stopped')
 
 
+TOURNAMENT_ENABLED = os.environ.get('SERVER_MODE', '') == 'prod'
+
 def _tournament_loop_for_game(game_id):
     """Per-game tournament thread — dedicated CPU for one game.
     Computes matches CPU-bound, pushes results to DB writer queue."""
@@ -1698,6 +1700,9 @@ def _tournament_loop_for_game(game_id):
     last_cleanup = time.time()
 
     while _heartbeat_state['running']:
+        if not TOURNAMENT_ENABLED:
+            time.sleep(HEARTBEAT_INTERVAL_NORMAL)
+            continue
         try:
             played = _run_tournament(game_id=game_id, match_count=TOURNAMENT_BATCH)
             if played > 0:
@@ -1785,7 +1790,7 @@ def _seed_if_empty(game_id):
 _evo_counts = {}  # per-game counter for analysis cadence
 
 PROGRAM_EVO_AGENT_THRESHOLD = 10   # evolve program after N agents created under it
-PROGRAM_EVO_TIME_THRESHOLD = 2 * 3600  # ... or after 2 hours
+PROGRAM_EVO_TIME_THRESHOLD = 10 * 3600  # ... or after 10 hours (5x slowdown)
 
 
 def _should_evolve_program(game_id):
