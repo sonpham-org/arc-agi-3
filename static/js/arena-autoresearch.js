@@ -1,5 +1,5 @@
 // Author: Claude Opus 4.6
-// Date: 2026-03-17 22:00
+// Date: 2026-03-19 12:00
 // PURPOSE: Arena Auto Research — in-browser evolution + tournament engine.
 //   Phase 2: headless match runner, per-game state adapters, live tournament canvases.
 //   Phase 4: human vs AI play mode — keyboard/click input, timed moves, result submission.
@@ -2705,8 +2705,8 @@ async function _hpDoAiTurn() {
 
   _hpUpdateStatus(`Turn ${HumanPlay.turns + 1} | AI thinking...`);
 
-  // Build Python-format state and fetch AI move from server
-  const aiState = _hpBuildPythonState(engine, 'B');
+  // Build state and fetch AI move from server
+  const aiState = _arBuildState(gameId, engine, 'B', HumanPlay.humanMemory || '');
   const raw = await _hpFetchAiMove(aiState);
 
   if (!HumanPlay.active || engine.over) return;
