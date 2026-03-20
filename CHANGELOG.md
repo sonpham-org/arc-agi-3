@@ -5,6 +5,14 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.13.3] — fix: Postgres monitor GROUP BY error
+*Author: GPT-5.3 Codex | 2026-03-19*
+
+### Fixed
+- **Arena monitor 500 on PostgreSQL** — `arena_get_llm_monitor_stats()` selected `provider` while grouping only by `model`, which is invalid on PostgreSQL and caused `/api/arena/monitor/stats` to fail with a grouping error. Updated the query to group by both `model` and `provider`.
+
+---
+
 ## [1.13.2] — fix: split tournament and evolution heartbeats
 *Author: GPT-5.3 Codex | 2026-03-19*
 

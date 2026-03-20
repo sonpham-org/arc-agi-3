@@ -1,5 +1,5 @@
-# Author: Claude Opus 4.6
-# Date: 2026-03-18 23:55
+# Author: GPT-5.3 Codex
+# Date: 2026-03-19 17:20
 # PURPOSE: Database operations for Arena Auto Research. Supports PostgreSQL
 #   (primary, via DATABASE_URL env var) with SQLite fallback (when DATABASE_URL unset).
 #   PostgreSQL eliminates write-lock contention from heartbeat tournament thread.
@@ -1464,7 +1464,7 @@ def arena_get_llm_monitor_stats():
                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
                    SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END) as failures
             FROM arena_evolution_sessions
-            GROUP BY model ORDER BY sessions DESC
+            GROUP BY model, provider ORDER BY sessions DESC
         """).fetchall()
         stats['by_model'] = [dict(r) for r in model_rows]
 
