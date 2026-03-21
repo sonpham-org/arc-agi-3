@@ -1,5 +1,5 @@
-# Author: GPT-5.3 Codex
-# Date: 2026-03-19 16:40
+# Author: Claude Opus 4.6
+# Date: 2026-03-21 12:00
 # PURPOSE: Server-side arena heartbeat — runs evolution + tournament for multiple games.
 #   Supports snake (classic + random maps + royale + 2v2), chess960, othello.
 #   Game engines dispatched via _ACTIVE_GAMES.
@@ -55,6 +55,7 @@ from db_arena import (
     arena_link_agent_to_cycle,
     MAX_STORED_GAMES_PER_PAIR,
     PROVISIONAL_GAMES,
+    ARENA_LEADERBOARD_LIMIT,
     _db,
 )
 
@@ -1574,7 +1575,7 @@ def _run_tournament(game_id='snake', match_count=20):
     Phase 4 — QUEUE: Push results to DB writer queue (single-thread safety).
     """
     # ── Phase 1: Load ──
-    agents = arena_get_leaderboard(game_id, limit=1000)
+    agents = arena_get_leaderboard(game_id, limit=ARENA_LEADERBOARD_LIMIT)
     for a in agents:
         full = arena_get_agent(game_id, a['id'])
         if full:
@@ -2175,7 +2176,7 @@ def _evolution_loop_for_game(game_id, stagger_secs):
                 print(f'[evolution:{game_id}] Export error (non-fatal): {exc}')
 
         try:
-            agent_count = len(arena_get_leaderboard(game_id, limit=200))
+            agent_count = len(arena_get_leaderboard(game_id, limit=ARENA_LEADERBOARD_LIMIT))
         except Exception:
             agent_count = 100  # default to normal interval on DB error
         if agent_count < 100:

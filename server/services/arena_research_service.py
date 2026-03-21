@@ -1,5 +1,5 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 23:30
+# Date: 2026-03-21 12:00
 # PURPOSE: Service layer for Arena Auto Research. Validates inputs, orchestrates
 #   DB calls from db_arena.py, enforces rate limits and submission gates.
 #   Pure business logic — no Flask request/response objects. Supports snake variant
@@ -187,7 +187,8 @@ def get_research_overview(game_id):
         return {"error": err}
     arena_get_or_create_research(game_id)
     stats = arena_get_research_stats(game_id)
-    leaderboard = arena_get_leaderboard(game_id, limit=200)
+    from db_arena import ARENA_LEADERBOARD_LIMIT
+    leaderboard = arena_get_leaderboard(game_id, limit=ARENA_LEADERBOARD_LIMIT)
     program = arena_get_program(game_id)
     # If DB has no program content, load default from seed file
     if program and not program.get("content"):

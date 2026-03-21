@@ -1,5 +1,5 @@
-# Author: GPT-5.3 Codex
-# Date: 2026-03-19 17:10
+# Author: Claude Opus 4.6
+# Date: 2026-03-21 12:00
 # PURPOSE: Flask server for ARC-AGI-3 web player. Responsibilities: static file serving,
 #   session persistence (save/resume/branch via SQLite), game step proxying, model registry
 #   API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy), observatory,
@@ -211,9 +211,9 @@ def arena_agents_list(game_id):
     ok, err = _ar_svc.validate_game_id(game_id)
     if not ok:
         return jsonify({"error": err}), 400
-    from db_arena import arena_get_leaderboard
-    limit = request.args.get("limit", 200, type=int)
-    leaderboard = arena_get_leaderboard(game_id, limit=min(limit, 200))
+    from db_arena import arena_get_leaderboard, ARENA_LEADERBOARD_LIMIT
+    limit = request.args.get("limit", ARENA_LEADERBOARD_LIMIT, type=int)
+    leaderboard = arena_get_leaderboard(game_id, limit=min(limit, ARENA_LEADERBOARD_LIMIT))
     return jsonify(leaderboard)
 
 
@@ -362,8 +362,9 @@ def arena_games_list(game_id):
     ok, err = _ar_svc.validate_game_id(game_id)
     if not ok:
         return jsonify({"error": err}), 400
+    from db_arena import ARENA_LEADERBOARD_LIMIT
     limit = request.args.get("limit", 50, type=int)
-    games = _ar_get_recent_games(game_id, limit=min(limit, 200))
+    games = _ar_get_recent_games(game_id, limit=min(limit, ARENA_LEADERBOARD_LIMIT))
     return jsonify(games)
 
 

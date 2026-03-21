@@ -1,5 +1,5 @@
-# Author: GPT-5.3 Codex
-# Date: 2026-03-19 17:20
+# Author: Claude Opus 4.6
+# Date: 2026-03-21 12:00
 # PURPOSE: Database operations for Arena Auto Research. Supports PostgreSQL
 #   (primary, via DATABASE_URL env var) with SQLite fallback (when DATABASE_URL unset).
 #   PostgreSQL eliminates write-lock contention from heartbeat tournament thread.
@@ -306,6 +306,7 @@ ELO_GAP_SKIP = 400
 UPSET_ELO_GAP = 200
 MAX_UPSET_RECORDS = 500
 MAX_GAMES_WITH_HISTORY = 500  # FIFO — keep frame history for last N games only
+ARENA_LEADERBOARD_LIMIT = int(os.environ.get('ARENA_LEADERBOARD_LIMIT', '500'))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
