@@ -1,13 +1,10 @@
 # Author: Claude Opus 4.6
-# Date: 2026-03-18 16:00
-# PURPOSE: SQLite database layer for ARC-AGI-3. Manages schema migrations, session
+# Date: 2026-03-21 14:00
+# PURPOSE: SQLite database layer for ARC Observatory. Manages schema migrations, session
 #   persistence (sessions, session_actions, llm_calls), observatory data, share links,
 #   auth (magic links, Google OAuth), leaderboard, and tool execution logging.
 #   Single DB file on Railway Volume. Schema docs in .claude/database_structure.md.
-#   Modified in Phase 2 to support imports from session_manager.py.
-#   Phase 17: Refactored into domain-specific modules (db_sessions, db_auth, db_exports, etc.)
-#            with db.py as thin facade + connection manager.
-#   Added arena_agents.program_version_id migration for snake variant program tracking.
+#   Arena tables removed — Arena is now a standalone service (autoresearch-arena repo).
 # SRP/DRY check: Pass — all DB operations consolidated here; session state in session_manager.py
 """ARC-AGI-3 Database Layer — SQLite persistence.
 
@@ -317,189 +314,6 @@ def _init_db():
         CREATE INDEX IF NOT EXISTS idx_sessions_leaderboard
             ON sessions(player_type, steps, levels DESC);
 
-        -- ═══════════════════════════════════════════════════════════════════
-        -- Arena Auto Research tables
-        -- ═══════════════════════════════════════════════════════════════════
-
-        -- Per-game auto research context
-        CREATE TABLE IF NOT EXISTS arena_research (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            program_md TEXT DEFAULT '',
-            program_version INTEGER DEFAULT 0,
-            generation INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'stopped',
-            created_at REAL DEFAULT (unixepoch('now')),
-            updated_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_ar_game ON arena_research(game_id);
-
-        -- Agents (shared genome pool per game)
-        CREATE TABLE IF NOT EXISTS arena_agents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            code TEXT NOT NULL,
-            generation INTEGER DEFAULT 0,
-            elo REAL DEFAULT 1000.0,
-            peak_elo REAL DEFAULT 1000.0,
-            games_played INTEGER DEFAULT 0,
-            wins INTEGER DEFAULT 0,
-            losses INTEGER DEFAULT 0,
-            draws INTEGER DEFAULT 0,
-            contributor TEXT,
-            is_human INTEGER DEFAULT 0,
-            is_anchor INTEGER DEFAULT 0,
-            active INTEGER DEFAULT 1,
-            program_version_id INTEGER DEFAULT NULL,
-            program_file TEXT DEFAULT NULL,
-            evolution_cycle_id INTEGER DEFAULT NULL,
-            created_at REAL DEFAULT (unixepoch('now')),
-            UNIQUE(game_id, name)
-        );
-        CREATE INDEX IF NOT EXISTS idx_aa_game_elo ON arena_agents(game_id, elo DESC);
-        CREATE INDEX IF NOT EXISTS idx_aa_game_active ON arena_agents(game_id, active);
-
-        -- Games (matches between agents)
-        CREATE TABLE IF NOT EXISTS arena_games (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            agent1_id INTEGER REFERENCES arena_agents(id),
-            agent2_id INTEGER REFERENCES arena_agents(id),
-            winner_id INTEGER REFERENCES arena_agents(id),
-            agent1_score INTEGER DEFAULT 0,
-            agent2_score INTEGER DEFAULT 0,
-            turns INTEGER DEFAULT 0,
-            history TEXT DEFAULT '[]',
-            is_upset INTEGER DEFAULT 0,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_ag_game ON arena_games(game_id);
-        CREATE INDEX IF NOT EXISTS idx_ag_agents ON arena_games(agent1_id, agent2_id);
-        CREATE INDEX IF NOT EXISTS idx_ag_created ON arena_games(created_at);
-
-        -- Evolution cycles (LLM conversations that produced agents)
-        CREATE TABLE IF NOT EXISTS arena_evolution_cycles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            generation INTEGER,
-            worker_label TEXT,
-            agents_created INTEGER DEFAULT 0,
-            agents_passed INTEGER DEFAULT 0,
-            conversation TEXT DEFAULT '[]',
-            started_at REAL,
-            finished_at REAL
-        );
-        CREATE INDEX IF NOT EXISTS idx_aec_game ON arena_evolution_cycles(game_id);
-
-        -- Community discussion (strategy comments + votes)
-        CREATE TABLE IF NOT EXISTS arena_comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            user_id TEXT,
-            username TEXT DEFAULT 'Anon',
-            content TEXT NOT NULL,
-            comment_type TEXT DEFAULT 'strategy',
-            parent_id INTEGER REFERENCES arena_comments(id),
-            upvotes INTEGER DEFAULT 0,
-            downvotes INTEGER DEFAULT 0,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_ac_game ON arena_comments(game_id, created_at DESC);
-
-        -- Program.md version history (for voting)
-        CREATE TABLE IF NOT EXISTS arena_program_versions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            author TEXT,
-            change_summary TEXT,
-            votes_for INTEGER DEFAULT 0,
-            votes_against INTEGER DEFAULT 0,
-            vote_deadline REAL,
-            applied INTEGER DEFAULT 0,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_apv_game ON arena_program_versions(game_id, version DESC);
-
-        -- Vote tracking (prevent double-voting)
-        CREATE TABLE IF NOT EXISTS arena_votes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            version_id INTEGER REFERENCES arena_program_versions(id),
-            user_id TEXT NOT NULL,
-            vote INTEGER NOT NULL,
-            created_at REAL DEFAULT (unixepoch('now')),
-            UNIQUE(version_id, user_id)
-        );
-
-        -- Human play sessions
-        CREATE TABLE IF NOT EXISTS arena_human_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            human_agent_id INTEGER REFERENCES arena_agents(id),
-            opponent_id INTEGER REFERENCES arena_agents(id),
-            delay_ms INTEGER NOT NULL,
-            winner TEXT,
-            turns INTEGER DEFAULT 0,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_ahs_game ON arena_human_sessions(game_id);
-
-        -- Arena LLM call monitoring (every Anthropic API call from evolution)
-        CREATE TABLE IF NOT EXISTS arena_llm_calls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT DEFAULT 'snake',
-            generation INTEGER,
-            model TEXT,
-            status TEXT,
-            http_status INTEGER,
-            input_tokens INTEGER DEFAULT 0,
-            output_tokens INTEGER DEFAULT 0,
-            cost_usd REAL DEFAULT 0,
-            latency_ms REAL DEFAULT 0,
-            error_message TEXT,
-            auth_type TEXT,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_alc_created ON arena_llm_calls(created_at);
-        CREATE INDEX IF NOT EXISTS idx_alc_status ON arena_llm_calls(status);
-
-        -- Arena evolution sessions (one record per evolution cycle)
-        CREATE TABLE IF NOT EXISTS arena_evolution_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            generation INTEGER,
-            model TEXT,
-            provider TEXT DEFAULT 'anthropic',
-            status TEXT,
-            api_calls INTEGER DEFAULT 0,
-            tool_calls INTEGER DEFAULT 0,
-            input_tokens INTEGER DEFAULT 0,
-            output_tokens INTEGER DEFAULT 0,
-            cache_read_tokens INTEGER DEFAULT 0,
-            cache_creation_tokens INTEGER DEFAULT 0,
-            cost_usd REAL DEFAULT 0,
-            total_latency_ms REAL DEFAULT 0,
-            rounds INTEGER DEFAULT 0,
-            agents_created INTEGER DEFAULT 0,
-            error_message TEXT,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_aes_game ON arena_evolution_sessions(game_id);
-        CREATE INDEX IF NOT EXISTS idx_aes_created ON arena_evolution_sessions(created_at);
-
-        -- Arena library requests (logged when agents try to import unavailable packages)
-        CREATE TABLE IF NOT EXISTS arena_library_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            agent_name TEXT DEFAULT 'unknown',
-            library_name TEXT NOT NULL,
-            created_at REAL DEFAULT (unixepoch('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_alr_lib ON arena_library_requests(library_name);
-
         -- Frequently queried columns
         CREATE INDEX IF NOT EXISTS idx_session_actions_session
             ON session_actions(session_id);
@@ -710,54 +524,6 @@ def _migrate_schema(conn):
         conn.execute("DROP TABLE session_steps")
         log.info("Dropped old session_steps table (session_actions exists)")
 
-    # ── 6. arena_agents: add program_version_id for snake variant tracking ──
-    arena_agent_cols = _get_table_columns(conn, "arena_agents")
-    if "program_version_id" not in arena_agent_cols and arena_agent_cols:
-        try:
-            conn.execute("ALTER TABLE arena_agents ADD COLUMN program_version_id INTEGER DEFAULT NULL")
-            log.info("Migrated arena_agents: added program_version_id")
-        except Exception:
-            pass
-
-    # ── 7. arena_agents: add program_file for Program.md filename tracking ──
-    arena_agent_cols = _get_table_columns(conn, "arena_agents")
-    if "program_file" not in arena_agent_cols and arena_agent_cols:
-        try:
-            conn.execute("ALTER TABLE arena_agents ADD COLUMN program_file TEXT DEFAULT NULL")
-            log.info("Migrated arena_agents: added program_file")
-        except Exception:
-            pass
-
-    # ── 8. arena_agents: add evolution_cycle_id to link agent to its creation cycle ──
-    arena_agent_cols = _get_table_columns(conn, "arena_agents")
-    if "evolution_cycle_id" not in arena_agent_cols and arena_agent_cols:
-        try:
-            conn.execute("ALTER TABLE arena_agents ADD COLUMN evolution_cycle_id INTEGER DEFAULT NULL")
-            log.info("Migrated arena_agents: added evolution_cycle_id")
-        except Exception:
-            pass
-
-    # ── 9. arena_program_versions: add columns for auto-evolution ──
-    apv_cols = _get_table_columns(conn, "arena_program_versions")
-    if "conversation_log" not in apv_cols and apv_cols:
-        try:
-            conn.execute("ALTER TABLE arena_program_versions ADD COLUMN conversation_log TEXT DEFAULT NULL")
-            log.info("Migrated arena_program_versions: added conversation_log")
-        except Exception:
-            pass
-    if "trigger_reason" not in apv_cols and apv_cols:
-        try:
-            conn.execute("ALTER TABLE arena_program_versions ADD COLUMN trigger_reason TEXT DEFAULT NULL")
-            log.info("Migrated arena_program_versions: added trigger_reason")
-        except Exception:
-            pass
-    if "auto_evolved" not in apv_cols and apv_cols:
-        try:
-            conn.execute("ALTER TABLE arena_program_versions ADD COLUMN auto_evolved INTEGER DEFAULT 0")
-            log.info("Migrated arena_program_versions: added auto_evolved")
-        except Exception:
-            pass
-
     conn.commit()
 
 
@@ -884,30 +650,6 @@ from db_deprecated import (
     _get_session_turns,
 )
 
-# Arena Auto Research
-from db_arena import (
-    arena_get_or_create_research,
-    arena_get_leaderboard,
-    arena_submit_agent,
-    arena_get_agent,
-    arena_record_game,
-    arena_update_elo,
-    arena_get_recent_games,
-    arena_get_game,
-    arena_count_pair_games,
-    arena_prune_weak_agents,
-    arena_get_comments,
-    arena_post_comment,
-    arena_vote_comment,
-    arena_get_program,
-    arena_propose_program,
-    arena_vote_program,
-    arena_apply_program_vote,
-    arena_submit_human_result,
-    arena_get_or_create_human_agent,
-    arena_get_research_stats,
-    arena_strip_excess_history,
-)
 
 # Facade exports
 __all__ = [
