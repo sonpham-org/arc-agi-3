@@ -91,6 +91,10 @@ app = Flask(__name__,
             template_folder=str(_ROOT / "templates"),
             static_folder=str(_ROOT / "static"))
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+# Gzip/Brotli compression for all responses >500 bytes
+from flask_compress import Compress
+Compress(app)
 # Stable secret key — needed for Flask session (Google OAuth CSRF state).
 # Derive from GOOGLE_CLIENT_SECRET or env var so all gunicorn workers share the same key.
 app.secret_key = os.environ.get("FLASK_SECRET_KEY",

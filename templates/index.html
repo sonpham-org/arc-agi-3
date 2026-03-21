@@ -10,7 +10,7 @@
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 {% endif %}
 <!-- Puter.js loaded lazily when a Puter model is selected -->
-<link rel="stylesheet" href="/static/css/main.css?v={{ static_v }}">
+<link rel="stylesheet" href="/static/css/main.min.css?v={{ static_v }}">
 </head>
 <body>
 {% if turnstile_site_key %}
@@ -670,58 +670,8 @@ window.PROMPTS = {{ prompts | tojson }};
 })();
 </script>
 
-<!-- Application JS (load order matters) -->
-<script src="/static/js/utils/formatting.js?v={{ static_v }}"></script>
-<script src="/static/js/config/scaffolding-schemas.js?v={{ static_v }}"></script>
-<script src="/static/js/state.js?v={{ static_v }}"></script>
-<script src="/static/js/engine.js?v={{ static_v }}"></script>
-<script src="/static/js/reasoning.js?v={{ static_v }}"></script>
-<script src="/static/js/utils/tokens.js?v={{ static_v }}"></script>
-<script src="/static/js/rendering/grid-renderer.js?v={{ static_v }}"></script>
-<!-- UI modules (Phase 24 split for focused concerns) -->
-<script src="/static/js/ui-models.js?v={{ static_v }}"></script>
-<script src="/static/js/ui-tokens.js?v={{ static_v }}"></script>
-<script src="/static/js/ui-tabs.js?v={{ static_v }}"></script>
-<script src="/static/js/ui-grid.js?v={{ static_v }}"></script>
-<script src="/static/js/ui.js?v={{ static_v }}"></script>
-<script src="/static/js/utils/json-parsing.js?v={{ static_v }}"></script>
-<!-- LLM modules (Phase 12 split for reduced complexity) -->
-<script src="/static/js/llm-config.js?v={{ static_v }}"></script>
-<script src="/static/js/llm-timeline.js?v={{ static_v }}"></script>
-<script src="/static/js/llm-reasoning.js?v={{ static_v }}"></script>
-<script src="/static/js/llm-controls.js?v={{ static_v }}"></script>
-<script src="/static/js/llm-executor.js?v={{ static_v }}"></script>
-<script src="/static/js/llm.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding-rlm.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding-three-system.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding-agent-spawn.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding-world-model.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding-linear.js?v={{ static_v }}"></script>
-<script src="/static/js/scaffolding-rgb.js?v={{ static_v }}"></script>
-<script src="/static/js/session-storage.js?v={{ static_v }}"></script>
-<script src="/static/js/session-replay.js?v={{ static_v }}"></script>
-<script src="/static/js/session-persistence.js?v={{ static_v }}"></script>
-<script src="/static/js/session-views-grid.js?v={{ static_v }}"></script>
-<script src="/static/js/session-views-history.js?v={{ static_v }}"></script>
-<script src="/static/js/session-views.js?v={{ static_v }}"></script>
-<script src="/static/js/auth.js?v={{ static_v }}"></script>
-<script src="/static/js/session.js?v={{ static_v }}"></script>
-<script src="/static/js/observatory/obs-log-renderer.js?v={{ static_v }}"></script>
-<script src="/static/js/observatory/obs-scrubber.js?v={{ static_v }}"></script>
-<script src="/static/js/observatory/obs-swimlane-renderer.js?v={{ static_v }}"></script>
-<script src="/static/js/observatory/obs-memory.js?v={{ static_v }}"></script>
-<script src="/static/js/memory-inspector.js?v={{ static_v }}"></script>
-<script src="/static/js/observatory/obs-lifecycle.js?v={{ static_v }}"></script>
-<script src="/static/js/observatory.js?v={{ static_v }}"></script>
-<script src="/static/js/human-social.js?v={{ static_v }}"></script>
-<script src="/static/js/human-render.js?v={{ static_v }}"></script>
-<script src="/static/js/human-input.js?v={{ static_v }}"></script>
-<script src="/static/js/human-session.js?v={{ static_v }}"></script>
-<script src="/static/js/human-game.js?v={{ static_v }}"></script>
-<script src="/static/js/human.js?v={{ static_v }}"></script>
-<script src="/static/js/leaderboard.js?v={{ static_v }}"></script>
-<script src="/static/js/dev.js?v={{ static_v }}"></script>
+<!-- Application JS — single minified bundle (49 files concatenated in load order) -->
+<script defer src="/static/js/bundle.min.js?v={{ static_v }}"></script>
 
 <!-- Dev panel (developer-only level selector) -->
 <div id="devPanel" style="display:none;position:fixed;bottom:16px;right:16px;z-index:9999;
