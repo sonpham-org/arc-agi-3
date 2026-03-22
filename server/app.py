@@ -100,6 +100,11 @@ Compress(app)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY",
                                  os.environ.get("GOOGLE_CLIENT_SECRET", "arc-dev-fallback-key"))
 _STATIC_VERSION = str(int(time.time()))  # cache-bust static files on each deploy
+
+
+def _is_https() -> bool:
+    """Return True if the request is served over HTTPS (including behind Railway's proxy)."""
+    return request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
 app.logger.setLevel(logging.INFO)
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -223,7 +228,7 @@ def turnstile_verify():
     resp = make_response(jsonify({"status": "ok"}))
     resp.set_cookie("ts_verified", session_hash,
                      max_age=TURNSTILE_TOKEN_TTL, httponly=True,
-                     samesite="Lax", secure=request.is_secure)
+                     samesite="Lax", secure=_is_https())
     return resp
 
 
@@ -309,7 +314,7 @@ def auth_verify():
     resp.status_code = 302
     resp.set_cookie("arc_auth", token,
                      max_age=auth_info["ttl"], httponly=True,
-                     samesite="Lax", secure=request.is_secure)
+                     samesite="Lax", secure=_is_https())
     return resp
 
 
@@ -393,10 +398,9 @@ def auth_google_callback():
     
     # Set cookie and redirect
     resp = make_response("", 302, {"Location": "/?logged_in=1"})
-    # Note: secure=False behind proxy (Railway terminates SSL), but SameSite=Lax is sufficient
     resp.set_cookie("arc_auth", auth_info["token"],
                      max_age=auth_info["ttl"], httponly=True,
-                     samesite="Lax", secure=False)
+                     samesite="Lax", secure=_is_https())
     return resp
 
 
