@@ -50,7 +50,6 @@ function initHumanView() {
     _setupHumanCanvasClick();
     _setupHumanKeyboard();
   }
-  _loadHumanGameResults();
 }
 
 async function _loadHumanGames() {
@@ -153,8 +152,6 @@ async function _humanSelectGame(gameId) {
   // Build level selector thumbnails
   await _humanBuildLevelSelector();
 
-  // Load game results
-  _loadHumanGameResults();
 }
 
 // ── Level Selector ──────────────────────────────────────────────────────
@@ -172,20 +169,27 @@ async function _humanBuildLevelSelector() {
     card.onclick = () => _humanJumpToLevel(i);
     grid.appendChild(card);
 
-    // Generate thumbnail by jumping to level, rendering, then jumping back
+    // Draw numbered placeholder immediately so cards never appear blank
+    const thumbCanvas = card.querySelector('.level-thumb');
+    const pctx = thumbCanvas.getContext('2d');
+    pctx.fillStyle = '#1c2128';
+    pctx.fillRect(0, 0, 128, 128);
+    pctx.fillStyle = 'rgba(88,166,255,0.35)';
+    pctx.font = 'bold 48px monospace';
+    pctx.textAlign = 'center';
+    pctx.textBaseline = 'middle';
+    pctx.fillText(String(i + 1), 64, 64);
+
+    // Try to render a real game thumbnail (overwrites placeholder when available)
     try {
-      let levelState;
       if (FEATURES.pyodide_game && _pyodideGameActive) {
-        levelState = await _sendGameWorkerMsg({ type: 'jump_level', level: i });
-      } else {
-        // Server mode: use dev jump (won't work without secret, fallback to blank)
-        levelState = null;
-      }
-      if (levelState && levelState.grid) {
-        _renderThumbnail(card.querySelector('.level-thumb'), levelState.grid);
+        const levelState = await _sendGameWorkerMsg({ type: 'jump_level', level: i });
+        if (levelState && levelState.grid) {
+          _renderThumbnail(thumbCanvas, levelState.grid);
+        }
       }
     } catch (e) {
-      // Thumbnail failed, leave blank
+      // Thumbnail failed — placeholder remains
     }
   }
 
@@ -319,12 +323,9 @@ function switchHumanSubTab(tab) {
   bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
   document.getElementById('humanSubLevels').style.display = tab === 'levels' ? '' : 'none';
   document.getElementById('humanSubComments').style.display = tab === 'comments' ? 'flex' : 'none';
-  document.getElementById('humanSubResults').style.display = tab === 'results' ? '' : 'none';
   if (tab === 'levels') bar.children[0]?.classList.add('active');
-  else if (tab === 'results') bar.children[1]?.classList.add('active');
-  else bar.children[2]?.classList.add('active');
+  else bar.children[1]?.classList.add('active');
 
-  if (tab === 'results') _loadHumanGameResults();
   if (tab === 'comments') loadComments();
 }
 

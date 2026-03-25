@@ -442,7 +442,8 @@ def list_games():
             return c_date > e_date
         if candidate.game_id != existing.game_id:
             return candidate.game_id > existing.game_id
-        return candidate.local_dir > existing.local_dir
+        # Guard: None local_dir sorts last (never beats a real path)
+        return (candidate.local_dir or "") > (existing.local_dir or "")
 
     seen = {}
     for e in envs:
@@ -455,10 +456,13 @@ def list_games():
             key = short
         if key not in seen or _is_newer_env(e, seen[key]):
             seen[key] = e
+    # Exclude games with no local source — they exist in the ARC Prize API but
+    # aren't downloaded yet and will fail with a 500 if a user tries to play them.
     games = [
         {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps,
          "tags": getattr(e, 'tags', [])}
         for e in seen.values()
+        if e.local_dir is not None
     ]
     # In prod mode, hide non-foundation games unless ?show_all=1
     if get_mode() == "prod" and request.args.get("show_all") != "1":
@@ -475,9 +479,12 @@ def game_source(game_id):
     envs = arc.get_environments()
     bare_id = game_id.split("-")[0]
     matching = [e for e in envs if e.game_id == game_id or e.game_id == bare_id]
-    env_info = max(matching, key=lambda e: (_env_date(e.local_dir), e.local_dir)) if matching else None
-    if env_info is None:
-        return jsonify({"error": f"Game {game_id} not found"}), 404
+    # Prefer the entry with an actual local_dir (has source on disk) over API-only entries
+    matching_local = [e for e in matching if e.local_dir is not None]
+    candidates = matching_local or matching
+    env_info = max(candidates, key=lambda e: (_env_date(e.local_dir), e.local_dir or "")) if candidates else None
+    if env_info is None or env_info.local_dir is None:
+        return jsonify({"error": f"Game {game_id} not available locally"}), 404
     local_dir = Path(env_info.local_dir)
     # .py file is named after the canonical game_id (e.g. lb03.py, ls20.py, ft09.py)
     canonical_id = env_info.game_id.split("-")[0]

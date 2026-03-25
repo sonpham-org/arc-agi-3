@@ -284,11 +284,10 @@
               </div>
             </div>
           </div>
-          <!-- Right panel: Level selector + Game Results -->
+          <!-- Right panel: Level selector + Comments -->
           <div class="right-panel panel-disabled" id="humanRightPanel" style="pointer-events:none;opacity:0.4;">
             <div class="subtab-bar">
               <button class="active" onclick="switchHumanSubTab('levels')">Select Level</button>
-              <button onclick="switchHumanSubTab('results')">Game Results</button>
               <button onclick="switchHumanSubTab('comments')">Comments</button>
             </div>
             <!-- Level selector -->
@@ -298,7 +297,7 @@
               </div>
             </div>
             <!-- Comments -->
-            <div class="subtab-pane" id="humanSubComments" style="display:none;overflow:hidden;padding:0;display:none;flex-direction:column;">
+            <div class="subtab-pane" id="humanSubComments" style="display:none;overflow:hidden;padding:0;flex-direction:column;">
               <div style="padding:10px 10px 0;font-size:11px;color:var(--text-dim);line-height:1.5;border-bottom:1px solid var(--border);padding-bottom:8px;">
                 Feedback to make the game "Easier for humans, harder for AI"
               </div>
@@ -314,12 +313,6 @@
                 <div id="commentsList" class="comments-list">
                   <div class="empty-state" style="height:auto;font-size:12px;">Select a game to see comments.</div>
                 </div>
-              </div>
-            </div>
-            <!-- Game Results -->
-            <div class="subtab-pane" id="humanSubResults" style="display:none;overflow:auto;padding:10px;">
-              <div id="humanResultsBody">
-                <div class="empty-state" style="height:auto;font-size:12px;">Play a game to see results here.</div>
               </div>
             </div>
             <!-- Buy Me a Coffee (always interactive, even when panel is disabled) -->

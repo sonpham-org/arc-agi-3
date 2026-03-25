@@ -5,6 +5,18 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.13.9] — fix: unplayable Foundation games hidden; level selector placeholders; remove Game Results tab
+*Author: Claude Sonnet 4.6 | 2026-03-25*
+
+### Fixed
+- **"Game engine failed: Unexpected token '<'" on new Foundation games** — Games in the ARC Prize API but not downloaded locally (`local_dir=None`) appeared in the sidebar and caused `Path(None)` TypeError in `game_source()`, returning HTML 500 instead of JSON. Fixed: `list_games()` now filters out `local_dir=None` entries; `game_source()` guards against it with a proper JSON 404. `_env_date()` and `_is_newer_env()` hardened for `None` local_dirs.
+- **Level selector showing blank/black canvases** — Level cards showed empty `<canvas>` elements when thumbnails failed. Now draws a numbered placeholder immediately; real thumbnail overwrites when available.
+
+### Removed
+- **"Game Results" tab from Play as Human right panel** — showed nothing useful. Removed button, pane, and all related JS calls.
+
+---
+
 ## [1.13.8] — feat: restore Agent Spawn harness with prompt caching; fix settings blank on stale scaffolding type
 *Author: Claude Sonnet 4.6 | 2026-03-25*
 

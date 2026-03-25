@@ -62,12 +62,14 @@ def get_arcade():
     return arcade_instance
 
 
-def _env_date(local_dir: str) -> str:
+def _env_date(local_dir: str | None) -> str:
     """Read date_downloaded from a game version directory's metadata.json.
 
     Returns an ISO date string (e.g. '2026-03-25') for use as a sort key.
-    Returns '' if missing or unreadable — sorts last under reverse order.
+    Returns '' if local_dir is None, missing, or unreadable — sorts last.
     """
+    if not local_dir:
+        return ""
     try:
         meta = Path(local_dir) / "metadata.json"
         if meta.exists():
