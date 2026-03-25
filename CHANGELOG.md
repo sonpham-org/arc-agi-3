@@ -17,6 +17,8 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 - **API key inputs are now visible (type=text)** — All BYOK key fields, ARC API key, and Auto Research key inputs changed from `type="password"` to `type="text"` so users can see what they pasted.
 - **Anthropic BYOK placeholder updated** — Now reads "API key (sk-ant-api...) or OAuth token (sk-ant-oat...)" to clarify both key types are accepted.
 - **OAuth notice in Prompts tab** — When an Anthropic OAuth token is detected, the Prompts tab shows a banner explaining the auto-prepended system preamble.
+- **Anthropic proxy timeout bumped 120s → 300s** — Opus 4.6 responses can take several minutes; the old timeout caused premature 502s. Gunicorn worker timeout also raised to 330s.
+- **Automatic retry on transient failures** — Browser-side Anthropic calls now retry up to 3 times (with 5s/10s backoff) on 502, 504, and 529 (overloaded) errors instead of failing immediately.
 
 ---
 

@@ -1,5 +1,5 @@
 # Author: Claude Sonnet 4.6 + Claude Opus 4.6
-# Date: 2026-03-25 16:30
+# Date: 2026-03-25 16:50
 # PURPOSE: Flask server for ARC-AGI-3 web player (Observatory). Responsibilities: static file
 #   serving, session persistence (save/resume/branch via SQLite), game step proxying, model
 #   registry API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy),
@@ -694,12 +694,14 @@ def anthropic_proxy():
                 "User-Agent": "sonpham-arc3/1.2.8 (ARC Prize research; https://three.arcprize.org; https://arc.markbarney.net; https://arc3.sonpham.net; contact mark@markbarney.net)",
             },
             json={**body, "metadata": {"user_id": "arc-prize-research"}},
-            timeout=120.0,
+            timeout=300.0,
         )
         return jsonify(resp.json()), resp.status_code
+    except _hx.ReadTimeout:
+        return jsonify({"error": "Anthropic took too long to respond — try again", "retryable": True}), 504
     except Exception as e:
         import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 502
+        return jsonify({"error": str(e), "retryable": True}), 502
 
 
 @app.route("/api/llm/cf-proxy", methods=["POST"])

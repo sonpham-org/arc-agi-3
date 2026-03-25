@@ -1,5 +1,5 @@
-// Author: Claude Sonnet 4.6
-// Date: 2026-03-25 12:00
+// Author: Claude Sonnet 4.6 + Claude Opus 4.6
+// Date: 2026-03-25 16:50
 // PURPOSE: Core scaffolding infrastructure for ARC-AGI-3 web UI. Handles API mode
 //   switching (local vs official), model discovery (loadModels + LM Studio via direct browser fetch),
 //   model select population, BYOK key management, LLM call routing (callLLM → _callLLMInner
@@ -576,23 +576,35 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
       body.system = [{ type: 'text', text: systemMsg.content, cache_control: { type: 'ephemeral' } }];
     }
     const isOAuth = key.startsWith('sk-ant-oat');
-    let resp;
-    if (isOAuth) {
-      // OAuth tokens can't go direct (CORS preflight fails) — proxy through server
-      body.api_key = key;
-      resp = await fetch('/api/llm/anthropic-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-    } else {
-      resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify(body),
-      });
+    let resp, data;
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      if (isOAuth) {
+        // OAuth tokens can't go direct (CORS preflight fails) — proxy through server
+        body.api_key = key;
+        resp = await fetch('/api/llm/anthropic-proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        resp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+          body: JSON.stringify(body),
+        });
+      }
+      data = await resp.json();
+      // Retry on transient failures (502, 504, 529 overloaded)
+      const retryable = [502, 504, 529].includes(resp.status) || data?.error?.type === 'overloaded_error';
+      if (!resp.ok && retryable && attempt < MAX_RETRIES) {
+        const wait = attempt * 5;  // 5s, 10s backoff
+        console.warn(`[Anthropic] ${resp.status} on attempt ${attempt}/${MAX_RETRIES}, retrying in ${wait}s...`);
+        await new Promise(r => setTimeout(r, wait * 1000));
+        continue;
+      }
+      break;
     }
-    const data = await resp.json();
     if (!resp.ok || data.error) {
       const errMsg = data.error?.message || JSON.stringify(data.error || resp.statusText);
       if (resp.status === 400 && errMsg.includes('too long')) {
