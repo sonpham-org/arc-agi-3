@@ -5,6 +5,14 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.13.6] — fix: game version selection uses date_downloaded, not hash sort
+*Author: Claude Sonnet 4.6 | 2026-03-25*
+
+### Fixed
+- **LS20 serving wrong version** — When two Foundation game versions exist (e.g. `ls20-cb3b57cc` and `ls20-9607627b`), the server picked the one with the lexicographically larger hash suffix. `cb3b57cc > 9607627b` alphabetically, so the older version (2026-03-18) beat the newer one (2026-03-25) even though the newer one has updated mechanics. Fixed in `server/helpers.py` (`get_game_version`, new `_env_date` helper) and `server/app.py` (`list_games` deduplication and `game_source` env selection) to prefer the version with the newer `date_downloaded` in `metadata.json`. Alphabetical game_id is now only a tiebreaker.
+
+---
+
 ## [1.13.5] — feat: hide 5 games from prod, remove 5 advanced harnesses from UI
 *Author: Claude Sonnet 4.6 | 2026-03-25*
 

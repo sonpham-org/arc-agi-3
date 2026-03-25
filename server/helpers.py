@@ -1,8 +1,15 @@
+# Author: Claude Sonnet 4.6
+# Date: 2026-03-25 12:30
+# PURPOSE: Shared helper functions for Flask blueprints. Provides mode detection,
+#   feature flags, arcade instance management, game version resolution, frame-to-grid
+#   conversion, env state serialization, prompt loading, and auth caching.
+# SRP/DRY check: Pass — utility functions only; no business logic here.
 """Shared helper functions for Flask blueprints.
 
 This module contains utility functions needed by multiple blueprints.
 """
 
+import json
 import os
 import time
 import subprocess
@@ -55,23 +62,41 @@ def get_arcade():
     return arcade_instance
 
 
+def _env_date(local_dir: str) -> str:
+    """Read date_downloaded from a game version directory's metadata.json.
+
+    Returns an ISO date string (e.g. '2026-03-25') for use as a sort key.
+    Returns '' if missing or unreadable — sorts last under reverse order.
+    """
+    try:
+        meta = Path(local_dir) / "metadata.json"
+        if meta.exists():
+            return json.loads(meta.read_text()).get("date_downloaded", "")
+    except Exception:
+        pass
+    return ""
+
+
 def get_game_version(game_id: str) -> str:
     """Return the latest version directory name for a game.
 
     Version directories are under environment_files/<game_dir>/<version>/
-    where version is typically a zero-padded 8-digit number (e.g., '00000014')
-    or a hash (e.g., 'cb3b57cc'). Returns the highest/latest one.
+    where version is a zero-padded number (e.g. '00000014') or a commit hash
+    (e.g. 'cb3b57cc'). Returns the directory with the newest date_downloaded in
+    metadata.json; falls back to alphabetical-descending when dates are equal.
     """
-    bare_id = game_id if Path(f"environment_files/{game_id}").is_dir() else game_id[:2]
+    bare_id = game_id.split("-")[0]
+    if not Path(f"environment_files/{bare_id}").is_dir():
+        bare_id = bare_id[:2]
     game_dir = Path(f"environment_files/{bare_id}")
     if not game_dir.is_dir():
         return "unknown"
     try:
-        versions = sorted(
-            [d.name for d in game_dir.iterdir() if d.is_dir()],
-            reverse=True,
-        )
-        return versions[0] if versions else "unknown"
+        dirs = [d for d in game_dir.iterdir() if d.is_dir()]
+        if not dirs:
+            return "unknown"
+        dirs.sort(key=lambda d: (_env_date(str(d)) or d.name), reverse=True)
+        return dirs[0].name
     except Exception:
         return "unknown"
 

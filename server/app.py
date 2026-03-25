@@ -1,5 +1,5 @@
 # Author: Claude Sonnet 4.6
-# Date: 2026-03-25 12:00
+# Date: 2026-03-25 12:35
 # PURPOSE: Flask server for ARC-AGI-3 web player (Observatory). Responsibilities: static file
 #   serving, session persistence (save/resume/branch via SQLite), game step proxying, model
 #   registry API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy),
@@ -126,7 +126,8 @@ _server_port_prod = 5001
 
 from server.helpers import (
     get_mode, feature_enabled, get_enabled_features, get_arcade, get_game_version,
-    frame_to_grid, env_state_dict, _load_prompts, FEATURES, HIDDEN_GAMES, get_current_user
+    _env_date, frame_to_grid, env_state_dict, _load_prompts, FEATURES, HIDDEN_GAMES,
+    get_current_user
 )
 
 # Service layer imports (Phase 14 refactor)
@@ -428,6 +429,21 @@ def list_games():
     envs = arc.get_environments()
     # Deduplicate: prefer short IDs (ls20) over old hash IDs (ls20-cb3b57cc),
     # and for observatory games (2-letter dir), keep only the latest version (ac02 > ac01).
+    # Among same-length IDs (Foundation games with multiple hash versions), prefer the
+    # one with the newer date_downloaded in metadata.json — not alphabetical hash order.
+    def _is_newer_env(candidate, existing):
+        if len(candidate.game_id) < len(existing.game_id):
+            return True
+        if len(candidate.game_id) > len(existing.game_id):
+            return False
+        c_date = _env_date(candidate.local_dir)
+        e_date = _env_date(existing.local_dir)
+        if c_date != e_date:
+            return c_date > e_date
+        if candidate.game_id != existing.game_id:
+            return candidate.game_id > existing.game_id
+        return candidate.local_dir > existing.local_dir
+
     seen = {}
     for e in envs:
         short = e.game_id.split("-")[0]
@@ -437,9 +453,7 @@ def list_games():
             key = prefix
         else:
             key = short
-        if key not in seen or len(e.game_id) < len(seen[key].game_id) or \
-                (len(e.game_id) == len(seen[key].game_id) and e.game_id > seen[key].game_id) or \
-                (e.game_id == seen[key].game_id and e.local_dir > seen[key].local_dir):
+        if key not in seen or _is_newer_env(e, seen[key]):
             seen[key] = e
     games = [
         {"game_id": e.game_id, "title": e.title, "default_fps": e.default_fps,
@@ -461,7 +475,7 @@ def game_source(game_id):
     envs = arc.get_environments()
     bare_id = game_id.split("-")[0]
     matching = [e for e in envs if e.game_id == game_id or e.game_id == bare_id]
-    env_info = max(matching, key=lambda e: e.local_dir) if matching else None
+    env_info = max(matching, key=lambda e: (_env_date(e.local_dir), e.local_dir)) if matching else None
     if env_info is None:
         return jsonify({"error": f"Game {game_id} not found"}), 404
     local_dir = Path(env_info.local_dir)
