@@ -1,5 +1,5 @@
-# Author: Claude Sonnet 4.6
-# Date: 2026-03-25 12:35
+# Author: Claude Sonnet 4.6 + Claude Opus 4.6
+# Date: 2026-03-25 16:30
 # PURPOSE: Flask server for ARC-AGI-3 web player (Observatory). Responsibilities: static file
 #   serving, session persistence (save/resume/branch via SQLite), game step proxying, model
 #   registry API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy),
@@ -668,6 +668,21 @@ def anthropic_proxy():
         return jsonify({"error": "This proxy is for OAuth tokens (sk-ant-oat*) only"}), 400
     if not body.get("model"):
         return jsonify({"error": "model is required"}), 400
+
+    # OAuth tokens require this system preamble to route Sonnet through the correct
+    # quota bucket. Without it, Sonnet returns 400 invalid_request_error.
+    _OAUTH_SYSTEM_BLOCK = {
+        "type": "text",
+        "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+    }
+    existing = body.get("system")
+    if not existing:
+        body["system"] = [_OAUTH_SYSTEM_BLOCK]
+    elif isinstance(existing, list):
+        body["system"] = [_OAUTH_SYSTEM_BLOCK] + existing
+    else:  # plain string
+        body["system"] = [_OAUTH_SYSTEM_BLOCK, {"type": "text", "text": existing}]
+
     try:
         resp = _hx.post(
             "https://api.anthropic.com/v1/messages",

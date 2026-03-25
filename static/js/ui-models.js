@@ -1,5 +1,5 @@
-// Author: Claude Sonnet 4.6
-// Date: 2026-03-25 12:00
+// Author: Claude Sonnet 4.6 + Claude Opus 4.6
+// Date: 2026-03-25 16:30
 // PURPOSE: Model selector population, model info display, BYOK key management UI.
 //   Extracted from ui.js (Phase 24). Renders BYOK key input fields per provider.
 // SRP/DRY check: Pass — model UI isolated from LLM call logic
@@ -22,7 +22,7 @@ const PROVIDER_LABELS = {
 
 const _BYOK_FREE_PROVIDERS = new Set(['puter', 'copilot', 'ollama', 'local', 'lmstudio']);
 const _BYOK_PROVIDER_EXTRA_FIELDS = {
-  cloudflare: [{ key: 'byok_cf_account_id', label: 'Cloudflare Account ID', placeholder: 'Paste Account ID here...', hint: 'Found in Cloudflare dashboard → Workers & Pages.', type: 'password' }],
+  cloudflare: [{ key: 'byok_cf_account_id', label: 'Cloudflare Account ID', placeholder: 'Paste Account ID here...', hint: 'Found in Cloudflare dashboard → Workers & Pages.', type: 'text' }],
   lmstudio: [{ key: 'byok_lmstudio_base_url', label: 'LM Studio Base URL', placeholder: 'http://localhost:1234', hint: 'LM Studio local server. Enable CORS in LM Studio → Settings. Use a tunnel URL (e.g. Cloudflare Tunnel) for remote access.', type: 'text' }],
 };
 
@@ -95,9 +95,9 @@ function updateAllByokKeys() {
     html += `<div style="margin-bottom:8px;">`;
     html += `<div style="font-size:10px;color:var(--dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">${label} API Key</div>`;
     const placeholder = provider === 'anthropic'
-      ? 'Paste API key (sk-ant-api...)...'
+      ? 'API key (sk-ant-api...) or OAuth token (sk-ant-oat...)'
       : `Paste API key for ${label} here...`;
-    html += `<input type="password" class="text-input" data-byok-provider="${provider}" value="${saved.replace(/"/g, '&quot;')}" placeholder="${placeholder}" style="margin-bottom:4px;font-size:10px;font-family:monospace;">`;
+    html += `<input type="text" class="text-input" data-byok-provider="${provider}" value="${saved.replace(/"/g, '&quot;')}" placeholder="${placeholder}" style="margin-bottom:4px;font-size:10px;font-family:monospace;">`;
     // Extra fields (e.g. Cloudflare Account ID)
     const extras = _BYOK_PROVIDER_EXTRA_FIELDS[provider] || [];
     for (const extra of extras) {
@@ -106,7 +106,12 @@ function updateAllByokKeys() {
       html += `<input type="${extra.type || 'text'}" class="text-input" data-byok-extra="${extra.key}" value="${extraSaved.replace(/"/g, '&quot;')}" placeholder="${extra.placeholder}" style="margin-bottom:2px;">`;
       if (extra.hint) html += `<div style="font-size:9px;color:var(--dim);font-style:italic;">${extra.hint}</div>`;
     }
-    html += `<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div></div>`;
+    html += `<div style="font-size:9px;color:var(--dim);font-style:italic;">Key stored locally only — never sent to our server.</div>`;
+    // OAuth token hint for Anthropic
+    if (provider === 'anthropic' && saved.startsWith('sk-ant-oat')) {
+      html += `<div style="font-size:9px;color:var(--accent);margin-top:3px;">OAuth token — system preamble will be prepended automatically for API routing.</div>`;
+    }
+    html += `</div>`;
   }
   container.innerHTML = html;
 
@@ -114,6 +119,10 @@ function updateAllByokKeys() {
   container.querySelectorAll('input[data-byok-provider]').forEach(inp => {
     inp.addEventListener('input', () => {
       localStorage.setItem(`byok_key_${inp.dataset.byokProvider}`, inp.value.trim());
+      // Refresh Prompts tab OAuth notice when Anthropic key changes
+      if (inp.dataset.byokProvider === 'anthropic' && typeof renderPromptsTab === 'function') {
+        renderPromptsTab();
+      }
     });
   });
   container.querySelectorAll('input[data-byok-extra]').forEach(inp => {

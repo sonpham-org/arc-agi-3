@@ -5,6 +5,21 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.14.0] — fix: Claude OAuth token support for Sonnet 4.6; visible API key inputs
+*Author: Claude Sonnet 4.6 + Claude Opus 4.6 | 2026-03-25*
+
+### Fixed
+- **OAuth tokens (sk-ant-oat*) now work with Sonnet 4.6** — Anthropic requires the system message to begin with `"You are Claude Code, Anthropic's official CLI for Claude."` to route Sonnet requests through the correct OAuth quota bucket. Without it, Sonnet returned HTTP 400 `invalid_request_error`. This preamble is now auto-prepended in all three Anthropic call paths: browser CORS proxy (`server/app.py`), server-side provider (`llm_providers_anthropic.py`), and CLI agent (`agent_llm.py`). Haiku was unaffected but benefits from the same fix.
+- **Model IDs reverted to short-form** — `claude-sonnet-4-6` and `claude-opus-4-6` no longer carry incorrect date suffixes that caused 404s.
+- **CLAUDE_CODE_TOKEN env var** — All server-side Anthropic paths now fall back to `CLAUDE_CODE_TOKEN` if `ANTHROPIC_API_KEY` is unset, enabling OAuth tokens for CLI/batch workflows.
+
+### Changed
+- **API key inputs are now visible (type=text)** — All BYOK key fields, ARC API key, and Auto Research key inputs changed from `type="password"` to `type="text"` so users can see what they pasted.
+- **Anthropic BYOK placeholder updated** — Now reads "API key (sk-ant-api...) or OAuth token (sk-ant-oat...)" to clarify both key types are accepted.
+- **OAuth notice in Prompts tab** — When an Anthropic OAuth token is detected, the Prompts tab shows a banner explaining the auto-prepended system preamble.
+
+---
+
 ## [1.13.9] — fix: unplayable Foundation games hidden; level selector placeholders; remove Game Results tab
 *Author: Claude Sonnet 4.6 | 2026-03-25*
 

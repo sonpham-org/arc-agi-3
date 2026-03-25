@@ -90,6 +90,18 @@ function renderPromptsTab() {
   const features = _PROMPTS_TAB_FEATURES[schemaId] || { compact: false, interrupt: false };
   const promptSections = _getPromptSections(schemaId);
   let html = '';
+
+  // Show notice when an Anthropic OAuth token is active — the API requires a
+  // system preamble ("You are Claude Code...") that gets prepended automatically.
+  const anthropicKey = (typeof getByokKey === 'function' ? getByokKey('anthropic') : '') || '';
+  if (anthropicKey.startsWith('sk-ant-oat')) {
+    html += '<div style="padding:8px 10px;margin-bottom:10px;background:var(--surface);border:1px solid var(--accent);border-radius:4px;font-size:10px;line-height:1.5;">'
+      + '<strong style="color:var(--accent);">OAuth token detected</strong> — Anthropic requires the system message to begin with '
+      + '<code style="font-size:9px;background:var(--bg);padding:1px 4px;border-radius:2px;">"You are Claude Code, Anthropic\'s official CLI for Claude."</code> '
+      + 'for OAuth routing. This is prepended automatically before your prompts are sent. It does not appear in the text fields below.'
+      + '</div>';
+  }
+
   for (const { section, name, label } of promptSections) {
     const key = `${section}.${name}`;
     html += `<div class="mem-section"><label>${label}</label>`;

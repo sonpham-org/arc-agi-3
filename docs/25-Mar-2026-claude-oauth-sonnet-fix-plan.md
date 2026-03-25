@@ -52,11 +52,12 @@ For CLI/batch (`llm_providers_anthropic.py`), the same injection must happen whe
 ## TODOs
 
 - [x] Revert `models.py` api_model values
-- [ ] Inject system block in `server/app.py` `anthropic_proxy()`
-- [ ] Inject system block in `llm_providers_anthropic.py` `_call_anthropic()`
+- [x] Inject system block in `server/app.py` `anthropic_proxy()`
+- [x] Inject system block in `llm_providers_anthropic.py` `_call_anthropic()`
+- [x] Inject system block in `agent_llm.py` `_call_anthropic()` *(gap — missed in original plan, added by Opus)*
 - [ ] Restart server and verify via curl
 - [ ] Open browser at localhost:5050, test Sonnet 4.6 with OAuth token end-to-end
-- [ ] CHANGELOG entry
+- [x] CHANGELOG entry
 - [ ] Push to staging
 
 ---
