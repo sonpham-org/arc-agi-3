@@ -32,7 +32,7 @@
     <a class="nav-link" href="#contributors" onclick="event.preventDefault();showAppView('contributors')">&#128150; Contributors</a>
     <a class="nav-link" href="#feedback" onclick="event.preventDefault();showAppView('feedback')">Roadmap / Feedback</a>
     <span style="flex:1;"></span>
-    <a class="nav-switch-btn to-arena" href="/arena">to AutoResearch Arena &#8594;</a>
+    <a class="nav-switch-btn to-arena" href="https://arena.sonpham.net">to AutoResearch Arena &#8594;</a>
     {% if google_client_id %}
     <a id="loginBtn" class="btn" style="font-size:11px;padding:2px 10px;display:none;text-decoration:none;" href="/api/auth/google">Log in</a>
     {% else %}
@@ -670,7 +670,7 @@ window.PROMPTS = {{ prompts | tojson }};
 })();
 </script>
 
-<!-- Application JS — single minified bundle (49 files concatenated in load order) -->
+<!-- Application JS — single minified bundle (45 files concatenated in load order) -->
 <script defer src="/static/js/bundle.min.js?v={{ static_v }}"></script>
 
 <!-- Dev panel (developer-only level selector) -->

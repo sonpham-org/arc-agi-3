@@ -1,7 +1,24 @@
 # Changelog
 
 All notable changes to this project will be documented here.
-Format: [SemVer](https://semver.org/) — what / why / how. Author and model noted per entry. New entries at the top. 
+Format: [SemVer](https://semver.org/) — what / why / how. Author and model noted per entry. New entries at the top.
+
+---
+
+## [1.13.5] — feat: hide 5 games from prod, remove 5 advanced harnesses from UI
+*Author: Claude Sonnet 4.6 | 2026-03-25*
+
+### Changed
+- **HIDDEN_GAMES expanded** — Added `ar` (Arbitrage Runner), `gh` (Ghost Heist), `pc` (Parallel Clone), `ts` (Tower Siege), `td` (Tower Defense) to `HIDDEN_GAMES` in `server/state.py`. These games are now hidden from `/api/games` in prod (still visible in staging and via `?show_all=1`).
+- **Advanced harnesses removed from Play as Agent UI** — Removed `rlm`, `three_system`, `two_system`, `agent_spawn`, and `world_model` entries from `SCAFFOLDING_SCHEMAS` in `static/js/config/scaffolding-schemas.js`. The harness selector now shows only: Linear, Linear w/ Interrupt, RGB. The corresponding JS files (`scaffolding-rlm.js`, `scaffolding-three-system.js`, `scaffolding-agent-spawn.js`, `scaffolding-world-model.js`) are kept on disk for reference but no longer loaded by `templates/index.html`. Dead model-select populate/restore blocks for the removed harnesses removed from `scaffolding.js`.
+
+---
+
+## [1.13.4] — fix: Browse Session sidebar matches Play as Human/Agent
+*Author: Claude Sonnet 4.6 | 2026-03-25*
+
+### Fixed
+- **Browse Session sidebar visual consistency** — The game list sidebar in Browse Session mode was narrower (220px vs 260px) and had a different header style (smaller font, dimmed color, lighter padding) compared to Play as Human and Play as Agent. Updated `.browse-sidebar` to 260px, and updated `.browse-sidebar-header` to match `.sidebar h2` (13px font, accent color, 14px/16px padding). Also removed the 4px inner padding from `.browse-sidebar-list` so game cards align flush like the other modes.
 
 ---
 

@@ -1,13 +1,13 @@
-// Author: Claude Opus 4.6 (1M context)
-// Date: 2026-03-16 00:00
+// Author: Claude Sonnet 4.6
+// Date: 2026-03-25 10:00
 // PURPOSE: Core scaffolding infrastructure for ARC-AGI-3 web UI. Handles API mode
 //   switching (local vs official), model discovery (loadModels + LM Studio via direct browser fetch),
 //   model select population, BYOK key management, LLM call routing (callLLM → _callLLMInner
 //   for Puter.js, Gemini, Anthropic, OpenAI, Cloudflare, Groq, Mistral, HuggingFace, LM Studio),
 //   prompt template loading (getPrompt), grid representation encoders (gridToLexical/LP16,
 //   gridToNumeric, gridToRgbAgent, formatGrid dispatcher), and Anthropic prompt caching via cache_control.
-//   Phase 5 extracted scaffolding-specific logic into scaffolding-rlm.js,
-//   scaffolding-three-system.js, scaffolding-agent-spawn.js, and scaffolding-linear.js.
+//   Active scaffolding types: linear, linear_interrupt, rgb. Harnesses rlm, three_system,
+//   two_system, agent_spawn, world_model are removed from the UI (schemas and script tags removed).
 //   Phase 3 extracted JSON parsing to utils/json-parsing.js.
 // SRP/DRY check: Pass — scaffolding types in separate files; JSON parsing in json-parsing.js;
 //   tokens in utils/tokens.js; this file is the shared LLM call infrastructure
@@ -265,124 +265,6 @@ function _populateAllModelSelects() {
   if (iSavedVal && [...isel.options].some(o => o.value === iSavedVal)) isel.value = iSavedVal;
   } // end interrupt select block
 
-  // Populate RLM model selects if they exist
-  for (const rlmSelId of ['sf_rlm_modelSelect', 'sf_rlm_subModelSelect']) {
-    const rlmSel = document.getElementById(rlmSelId);
-    if (!rlmSel) continue;
-    const rlmSaved = rlmSel.value;
-    rlmSel.innerHTML = '<option value="">Select a model...</option>';
-    _populateSubModelSelect(rlmSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, rlmSaved);
-  }
-  // Restore RLM model selections from saved settings
-  try {
-    const rlmRaw = localStorage.getItem('arc_scaffolding_rlm');
-    if (rlmRaw) {
-      const rlmS = JSON.parse(rlmRaw);
-      const rlmMap = { sf_rlm_modelSelect: rlmS.model, sf_rlm_subModelSelect: rlmS.sub_model };
-      for (const [id, val] of Object.entries(rlmMap)) {
-        const el = document.getElementById(id);
-        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
-      }
-    }
-  } catch (e) { console.warn('[scaffolding] localStorage restore RLM settings error:', e.message); }
-
-  // Populate Three-System model selects if they exist
-  for (const tsSelId of ['sf_ts_plannerModelSelect', 'sf_ts_monitorModelSelect', 'sf_ts_wmModelSelect']) {
-    const tsSel = document.getElementById(tsSelId);
-    if (!tsSel) continue;
-    const tsSaved = tsSel.value;
-    tsSel.innerHTML = '<option value="">Select a model...</option>';
-    _populateSubModelSelect(tsSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, tsSaved);
-  }
-  // Restore Three-System model selections from saved settings
-  try {
-    const tsRaw = localStorage.getItem('arc_scaffolding_three_system');
-    if (tsRaw) {
-      const tsS = JSON.parse(tsRaw);
-      const tsMap = {
-        sf_ts_plannerModelSelect: tsS.planner_model,
-        sf_ts_monitorModelSelect: tsS.monitor_model,
-        sf_ts_wmModelSelect: tsS.wm_model,
-      };
-      for (const [id, val] of Object.entries(tsMap)) {
-        const el = document.getElementById(id);
-        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
-      }
-    }
-  } catch (e) { console.warn('[scaffolding] localStorage restore Three-System settings error:', e.message); }
-
-  // Populate Two-System model selects if they exist
-  for (const tsSelId of ['sf_2s_plannerModelSelect', 'sf_2s_monitorModelSelect']) {
-    const tsSel = document.getElementById(tsSelId);
-    if (!tsSel) continue;
-    const tsSaved = tsSel.value;
-    tsSel.innerHTML = '<option value="">Select a model...</option>';
-    _populateSubModelSelect(tsSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, tsSaved);
-  }
-  // Restore Two-System model selections from saved settings
-  try {
-    const ts2Raw = localStorage.getItem('arc_scaffolding_two_system');
-    if (ts2Raw) {
-      const ts2S = JSON.parse(ts2Raw);
-      const ts2Map = {
-        sf_2s_plannerModelSelect: ts2S.planner_model,
-        sf_2s_monitorModelSelect: ts2S.monitor_model,
-      };
-      for (const [id, val] of Object.entries(ts2Map)) {
-        const el = document.getElementById(id);
-        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
-      }
-    }
-  } catch (e) { console.warn('[scaffolding] localStorage restore Two-System settings error:', e.message); }
-
-  // Populate World Model harness model selects if they exist
-  for (const wmSelId of ['sf_wm_agentModelSelect', 'sf_wm_wmModelSelect']) {
-    const wmSel = document.getElementById(wmSelId);
-    if (!wmSel) continue;
-    const wmSaved = wmSel.value;
-    wmSel.innerHTML = '<option value="">Select a model...</option>';
-    _populateSubModelSelect(wmSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, wmSaved);
-  }
-  // Restore World Model model selections from saved settings
-  try {
-    const wmRaw = localStorage.getItem('arc_scaffolding_world_model');
-    if (wmRaw) {
-      const wmS = JSON.parse(wmRaw);
-      const wmMap = {
-        sf_wm_agentModelSelect: wmS.model,
-        sf_wm_wmModelSelect: wmS.wm_model,
-      };
-      for (const [id, val] of Object.entries(wmMap)) {
-        const el = document.getElementById(id);
-        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
-      }
-    }
-  } catch (e) { console.warn('[scaffolding] localStorage restore World Model settings error:', e.message); }
-
-  // Populate Agent Spawn model selects if they exist
-  for (const asSelId of ['sf_as_orchestratorModelSelect', 'sf_as_subagentModelSelect']) {
-    const asSel = document.getElementById(asSelId);
-    if (!asSel) continue;
-    const asSaved = asSel.value;
-    asSel.innerHTML = '<option value="">Select a model...</option>';
-    _populateSubModelSelect(asSel, groups, providerOrder, providerLabels, byokGroups, byokProviderOrder, asSaved);
-  }
-  // Restore Agent Spawn model selections from saved settings
-  try {
-    const asRaw = localStorage.getItem('arc_scaffolding_agent_spawn');
-    if (asRaw) {
-      const asS = JSON.parse(asRaw);
-      const asMap = {
-        sf_as_orchestratorModelSelect: asS.orchestrator_model,
-        sf_as_subagentModelSelect: asS.subagent_model,
-      };
-      for (const [id, val] of Object.entries(asMap)) {
-        const el = document.getElementById(id);
-        if (el && val && [...el.options].some(o => o.value === val)) el.value = val;
-      }
-    }
-  } catch (e) { console.warn('[scaffolding] localStorage restore Agent Spawn settings error:', e.message); }
-
   // Populate RGB model selects if they exist
   for (const rgbSelId of ['sf_rgb_analyzerModelSelect']) {
     const rgbSel = document.getElementById(rgbSelId);
@@ -409,14 +291,6 @@ function _populateAllModelSelects() {
   const mainVal = document.getElementById('modelSelect')?.value || '';
   if (mainVal) syncModelToSubSelects(mainVal);
   updateAllByokKeys();
-
-  // Sync cascade last-vals so the first cascade after restore uses the
-  // correct previous value (not the empty-string set at listener-setup time).
-  for (const id of ['sf_ts_plannerModelSelect', 'sf_2s_plannerModelSelect',
-                     'sf_wm_agentModelSelect', 'sf_as_orchestratorModelSelect']) {
-    const el = document.getElementById(id);
-    if (el) el.dataset.cascadeLastVal = el.value;
-  }
 
   // Apply local model token caps for any restored local model selections.
   if (typeof applyAllLocalModelTokenCaps === 'function') applyAllLocalModelTokenCaps();
@@ -514,7 +388,7 @@ function getGridReprLegend(repr) {
 const GRID_REPR_LABELS = { lp16: '64×64 lexical', numeric: '64×64 numeric', rgb: '64×64 rgb-agent' };
 function getGridReprLabel(repr) { return GRID_REPR_LABELS[repr] || GRID_REPR_LABELS.lp16; }
 
-// ── [Section extracted to scaffolding-rlm.js] ───────────────────────────
+// ── [rlm/three-system/agent-spawn/world-model harnesses removed from UI] ─
 
 async function callLLM(messages, model, { maxTokens = 16384, thinkingLevel = 'off', onChunk = null } = {}) {
   const MAX_RETRIES = 10;
@@ -774,11 +648,7 @@ async function _callLLMInner(messages, model, { maxTokens = 16384, thinkingLevel
 callLLM._lastUsage = null;
 callLLM._lastTruncated = false;
 
-// ── [Section extracted to scaffolding-rlm.js continued] ────────────────
-
-// ── [Section extracted to scaffolding-three-system.js] ─────────────────
-
-// ── [Section extracted to scaffolding-agent-spawn.js] ──────────────────
+// ── [scaffolding-linear.js] ─────────────────────────────────────────────
 
 // ── [Section extracted to scaffolding-linear.js] ────────────────────────
 
