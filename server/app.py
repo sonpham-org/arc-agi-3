@@ -1,5 +1,5 @@
-# Author: Claude Sonnet 4.6
-# Date: 2026-03-25 12:35
+# Author: Claude Sonnet 4.6 + Claude Opus 4.6
+# Date: 2026-03-25 16:50
 # PURPOSE: Flask server for ARC-AGI-3 web player (Observatory). Responsibilities: static file
 #   serving, session persistence (save/resume/branch via SQLite), game step proxying, model
 #   registry API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy),
@@ -100,6 +100,11 @@ Compress(app)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY",
                                  os.environ.get("GOOGLE_CLIENT_SECRET", "arc-dev-fallback-key"))
 _STATIC_VERSION = str(int(time.time()))  # cache-bust static files on each deploy
+
+
+def _is_https() -> bool:
+    """Return True if the request is served over HTTPS (including behind Railway's proxy)."""
+    return request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
 app.logger.setLevel(logging.INFO)
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -139,6 +144,7 @@ from db import (
     create_magic_link, verify_magic_link, count_recent_magic_links,
     find_or_create_user, create_auth_token, delete_auth_token, claim_sessions,
     _db_insert_session, _db_update_session, _db_insert_action,
+    _compress_grid, _decompress_grid,
     AUTH_TOKEN_TTL, DB_PATH,
 )
 
@@ -224,7 +230,7 @@ def turnstile_verify():
     resp = make_response(jsonify({"status": "ok"}))
     resp.set_cookie("ts_verified", session_hash,
                      max_age=TURNSTILE_TOKEN_TTL, httponly=True,
-                     samesite="Lax", secure=request.is_secure)
+                     samesite="Lax", secure=_is_https())
     return resp
 
 
@@ -310,7 +316,7 @@ def auth_verify():
     resp.status_code = 302
     resp.set_cookie("arc_auth", token,
                      max_age=auth_info["ttl"], httponly=True,
-                     samesite="Lax", secure=request.is_secure)
+                     samesite="Lax", secure=_is_https())
     return resp
 
 
@@ -394,10 +400,9 @@ def auth_google_callback():
     
     # Set cookie and redirect
     resp = make_response("", 302, {"Location": "/?logged_in=1"})
-    # Note: secure=False behind proxy (Railway terminates SSL), but SameSite=Lax is sufficient
     resp.set_cookie("arc_auth", auth_info["token"],
                      max_age=auth_info["ttl"], httponly=True,
-                     samesite="Lax", secure=False)
+                     samesite="Lax", secure=_is_https())
     return resp
 
 
@@ -675,6 +680,21 @@ def anthropic_proxy():
         return jsonify({"error": "This proxy is for OAuth tokens (sk-ant-oat*) only"}), 400
     if not body.get("model"):
         return jsonify({"error": "model is required"}), 400
+
+    # OAuth tokens require this system preamble to route Sonnet through the correct
+    # quota bucket. Without it, Sonnet returns 400 invalid_request_error.
+    _OAUTH_SYSTEM_BLOCK = {
+        "type": "text",
+        "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+    }
+    existing = body.get("system")
+    if not existing:
+        body["system"] = [_OAUTH_SYSTEM_BLOCK]
+    elif isinstance(existing, list):
+        body["system"] = [_OAUTH_SYSTEM_BLOCK] + existing
+    else:  # plain string
+        body["system"] = [_OAUTH_SYSTEM_BLOCK, {"type": "text", "text": existing}]
+
     try:
         resp = _hx.post(
             "https://api.anthropic.com/v1/messages",
@@ -686,11 +706,14 @@ def anthropic_proxy():
                 "User-Agent": "sonpham-arc3/1.2.8 (ARC Prize research; https://three.arcprize.org; https://arc.markbarney.net; https://arc3.sonpham.net; contact mark@markbarney.net)",
             },
             json={**body, "metadata": {"user_id": "arc-prize-research"}},
-            timeout=120.0,
+            timeout=300.0,
         )
         return jsonify(resp.json()), resp.status_code
+    except _hx.ReadTimeout:
+        return jsonify({"error": "Anthropic took too long to respond — try again", "retryable": True}), 504
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e), "retryable": True}), 502
 
 
 @app.route("/api/llm/cf-proxy", methods=["POST"])

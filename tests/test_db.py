@@ -265,10 +265,14 @@ class TestDbContextManager(unittest.TestCase):
 class TestInitDb(unittest.TestCase):
     """Test _init_db initialization."""
 
+    @patch('db._vacuum_if_bloated')
+    @patch('db._backup_db')
+    @patch('db._check_and_recover_db')
     @patch('db._migrate_schema')
     @patch('db.sqlite3.connect')
     @patch('db.DB_PATH')
-    def test_init_db_creates_tables(self, mock_path, mock_connect, mock_migrate):
+    def test_init_db_creates_tables(self, mock_path, mock_connect, mock_migrate,
+                                    mock_check, mock_backup, mock_vacuum):
         """_init_db creates schema if not exists."""
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
@@ -281,10 +285,14 @@ class TestInitDb(unittest.TestCase):
         # Should call executescript with CREATE TABLE statements
         mock_conn.executescript.assert_called()
 
+    @patch('db._vacuum_if_bloated')
+    @patch('db._backup_db')
+    @patch('db._check_and_recover_db')
     @patch('db._migrate_schema')
     @patch('db.sqlite3.connect')
     @patch('db.DB_PATH')
-    def test_init_db_calls_migrate_schema(self, mock_path, mock_connect, mock_migrate):
+    def test_init_db_calls_migrate_schema(self, mock_path, mock_connect, mock_migrate,
+                                          mock_check, mock_backup, mock_vacuum):
         """_init_db runs schema migration."""
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn

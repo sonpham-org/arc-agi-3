@@ -197,7 +197,7 @@ def claude_auth_status() -> tuple[dict, str]:
     """Check whether an Anthropic API key is configured (env or session). Returns (response_dict, error_msg)."""
     return {
         "authenticated": bool(llm_providers.claude_api_key),
-        "source": "env" if os.environ.get("ANTHROPIC_API_KEY") else "session",
+        "source": "env" if (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_TOKEN")) else "session",
     }, ""
 
 

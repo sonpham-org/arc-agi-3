@@ -43,7 +43,11 @@ def get_models(args: dict) -> dict:
             available = False
         else:
             env_key = info.get("env_key", "")
-            available = bool(not env_key or os.environ.get(env_key))
+            # Anthropic models accept either ANTHROPIC_API_KEY or CLAUDE_CODE_TOKEN
+            if env_key == "ANTHROPIC_API_KEY":
+                available = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_TOKEN"))
+            else:
+                available = bool(not env_key or os.environ.get(env_key))
         models.append({
             "name": key,
             "api_model": info.get("api_model", key),

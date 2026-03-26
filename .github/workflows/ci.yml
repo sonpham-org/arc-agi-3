@@ -1,3 +1,8 @@
+# Railway deployment note:
+# Pushes to 'master' → auto-deploy to production (arc3.sonpham.net)
+# Pushes to 'staging' → auto-deploy to staging environment
+# CI must pass before Railway deploys (branch protection — verify this is enabled)
+
 name: CI
 
 on:
@@ -12,13 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
 
       - name: Run tests
-        run: pytest tests/ -v --ignore=tests/test_gemini_live.py
+        run: python -m pytest tests/ -v

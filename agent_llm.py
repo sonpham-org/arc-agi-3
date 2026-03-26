@@ -1,5 +1,5 @@
-# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-# Date: 2026-03-12 12:52
+# Author: Mark Barney + Cascade (Claude Opus 4.6 thinking) + Claude Sonnet 4.6 + Claude Opus 4.6
+# Date: 2026-03-25 16:30
 # PURPOSE: LLM provider calls and retry logic for ARC-AGI-3. Handles communication
 #   with Gemini, Anthropic, Cloudflare, OpenAI-compatible endpoints, Ollama, Groq,
 #   Mistral, HuggingFace. Provides retry with exponential backoff and cost tracking.
@@ -63,13 +63,24 @@ def _call_openai_compatible(url: str, api_key: str, model: str, messages: list,
 def _call_anthropic(model: str, messages: list, system: str,
                     temperature: float, max_tokens: int) -> dict:
     """Call Anthropic API (Claude). Supports both API keys and OAuth tokens."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_TOKEN") or ""
     is_oauth = api_key.startswith("sk-ant-oat")
     auth_headers = (
         {"Authorization": f"Bearer {api_key}", "anthropic-beta": "oauth-2025-04-20"}
         if is_oauth
         else {"x-api-key": api_key}
     )
+
+    # OAuth tokens require this system preamble to route Sonnet through the correct
+    # quota bucket. Without it, Sonnet returns 400 invalid_request_error.
+    if is_oauth:
+        system_payload = [
+            {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+            {"type": "text", "text": system},
+        ]
+    else:
+        system_payload = system
+
     resp = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -80,7 +91,7 @@ def _call_anthropic(model: str, messages: list, system: str,
         },
         json={
             "model": model,
-            "system": system,
+            "system": system_payload,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,

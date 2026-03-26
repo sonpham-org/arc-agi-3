@@ -1,5 +1,5 @@
-# Author: Cascade, using Claude Opus 4.6 Thinking
-# Date: 2026-03-10 21:08
+# Author: Cascade, using Claude Opus 4.6 Thinking + Claude Sonnet 4.6
+# Date: 2026-03-25 15:30
 # PURPOSE: Model registry and capability constants for ARC-AGI-3. Contains:
 #   - MODEL_REGISTRY: all cloud/hosted provider models with capabilities, pricing, context windows
 #   - LMSTUDIO_CAPABILITIES: known LM Studio model overrides (reasoning, image) keyed on api_model ID
@@ -384,6 +384,16 @@ MODEL_REGISTRY: dict[str, dict] = {
         "capabilities": {"image": False, "reasoning": False, "tools": False},
         "pricing": [0.0, 0.0, 0.0],
     },
+}
+
+# LM Studio capability overrides — keyed on api_model ID as returned by /v1/models.
+# Used by server.py dynamic discovery to annotate whatever models the user has loaded.
+# Add entries here when a model's reasoning/image capabilities are confirmed.
+LMSTUDIO_CAPABILITIES: dict[str, dict] = {
+    "zai-org/glm-4.7-flash":   {"reasoning": True,  "image": False},
+    "zai-org/glm-4.6v-flash":  {"reasoning": True,  "image": True},
+    "qwen/qwen3.5-35b-a3b":    {"reasoning": True,  "image": True},
+    "qwen/qwen3.5-9b":         {"reasoning": True,  "image": False},
 }
 
 # LM Studio capability overrides — keyed on api_model ID as returned by /v1/models.
