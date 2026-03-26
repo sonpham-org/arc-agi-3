@@ -164,25 +164,32 @@ class TestProviderThrottling(unittest.TestCase):
                           f"Provider '{provider}' missing from PROVIDER_MIN_DELAY")
 
     def test_throttle_respects_min_delay(self):
-        """Throttle should enforce minimum delay between calls."""
+        """Throttle should record timestamps that enforce minimum delay."""
+        from llm_providers import _provider_last_call, _throttle_lock
+
         # Use a provider with known delay
         provider = "anthropic"
         min_delay = PROVIDER_MIN_DELAY[provider]
 
-        # First call should not wait
-        start = time.time()
-        _throttle_provider(provider)
-        first_duration = time.time() - start
-        self.assertLess(first_duration, min_delay,
-                        "First call should not wait")
+        # Clear any prior state for this provider
+        with _throttle_lock:
+            _provider_last_call.pop(provider, None)
 
-        # Second call should wait (approximately min_delay)
-        start = time.time()
+        # First call should record a timestamp
         _throttle_provider(provider)
-        second_duration = time.time() - start
-        # Allow 0.1s tolerance
-        self.assertGreater(second_duration, min_delay - 0.2,
-                           "Second call should enforce delay")
+        with _throttle_lock:
+            first_ts = _provider_last_call.get(provider)
+        self.assertIsNotNone(first_ts,
+                             "First call should record a timestamp")
+
+        # Second call should update the timestamp such that
+        # the gap between recorded timestamps >= min_delay
+        _throttle_provider(provider)
+        with _throttle_lock:
+            second_ts = _provider_last_call.get(provider)
+        self.assertIsNotNone(second_ts)
+        self.assertGreaterEqual(second_ts - first_ts, min_delay,
+                                "Recorded timestamps must be >= min_delay apart")
 
     def test_ollama_no_throttle(self):
         """Ollama should have 0 delay (local model)."""

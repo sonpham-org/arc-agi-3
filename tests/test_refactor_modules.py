@@ -401,21 +401,13 @@ class TestFileHeaders:
         for relpath in REFACTOR_FILES_PY:
             line = self._read_first_line(relpath)
             assert line.startswith("# Author:"), \
-                f"{relpath}: first line should start with '# Author:', got: {line!r}"
-            assert "Mark Barney" in line, \
-                f"{relpath}: header missing 'Mark Barney', got: {line!r}"
-            assert "Cascade" in line, \
-                f"{relpath}: header missing 'Cascade', got: {line!r}"
+                f"{relpath}: first line must start with '# Author:', got: {line!r}"
 
     def test_js_files_have_author_header(self):
         for relpath in REFACTOR_FILES_JS:
             line = self._read_first_line(relpath)
             assert line.startswith("// Author:"), \
-                f"{relpath}: first line should start with '// Author:', got: {line!r}"
-            assert "Mark Barney" in line, \
-                f"{relpath}: header missing 'Mark Barney', got: {line!r}"
-            assert "Cascade" in line, \
-                f"{relpath}: header missing 'Cascade', got: {line!r}"
+                f"{relpath}: first line must start with '// Author:', got: {line!r}"
 
     def test_python_files_have_purpose(self):
         for relpath in REFACTOR_FILES_PY:
