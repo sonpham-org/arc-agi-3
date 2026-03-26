@@ -1,7 +1,8 @@
 # Author: Claude Sonnet 4.6
 # Date: 2026-03-25 14:45
-# PURPOSE: LLM provider routing for ARC-AGI-3. Reads ANTHROPIC_API_KEY or CLAUDE_CODE_TOKEN
-#   (whichever is set) so both standard keys and Claude Code OAuth tokens work server-side.
+# PURPOSE: LLM provider routing for ARC-AGI-3. Reads ANTHROPIC_API_KEY for Anthropic models —
+#   both standard API keys (sk-ant-api*) and Claude Code OAuth tokens (sk-ant-oat*) are accepted
+#   via this single variable. Token type is detected by prefix in llm_providers_anthropic.py.
 # SRP/DRY check: Pass — single routing module; per-provider logic stays in llm_providers_*.py
 """LLM provider routing and shared utilities for ARC-AGI-3.
 
@@ -33,7 +34,7 @@ LOCAL_MODEL_TIMEOUT = float(os.environ.get("LOCAL_MODEL_TIMEOUT", "600.0"))
 import llm_providers_anthropic
 import llm_providers_openai
 import llm_providers_google
-llm_providers_anthropic.claude_api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_TOKEN") or None
+llm_providers_anthropic.claude_api_key = os.environ.get("ANTHROPIC_API_KEY") or None
 llm_providers_openai.openai_api_key = os.environ.get("OPENAI_API_KEY") or None
 
 # Re-export globals for backward compatibility

@@ -63,7 +63,7 @@ def _call_openai_compatible(url: str, api_key: str, model: str, messages: list,
 def _call_anthropic(model: str, messages: list, system: str,
                     temperature: float, max_tokens: int) -> dict:
     """Call Anthropic API (Claude). Supports both API keys and OAuth tokens."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_TOKEN") or ""
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or ""
     is_oauth = api_key.startswith("sk-ant-oat")
     auth_headers = (
         {"Authorization": f"Bearer {api_key}", "anthropic-beta": "oauth-2025-04-20"}
