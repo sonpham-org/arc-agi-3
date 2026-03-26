@@ -436,25 +436,36 @@ def list_games():
     # Among same-length IDs (Foundation games with multiple hash versions), prefer the
     # one with the newer date_downloaded in metadata.json — not alphabetical hash order.
     def _is_newer_env(candidate, existing):
+        # 1. A local copy always beats an API-only entry (no local_dir)
+        c_local = candidate.local_dir is not None
+        e_local = existing.local_dir is not None
+        if c_local != e_local:
+            return c_local
+        # 2. Shorter game_id wins (bare "lp85" beats "lp85-305b61c3")
         if len(candidate.game_id) < len(existing.game_id):
             return True
         if len(candidate.game_id) > len(existing.game_id):
             return False
+        # 3. Among same-length IDs, prefer newer date_downloaded
         c_date = _env_date(candidate.local_dir)
         e_date = _env_date(existing.local_dir)
         if c_date != e_date:
             return c_date > e_date
         if candidate.game_id != existing.game_id:
             return candidate.game_id > existing.game_id
-        # Guard: None local_dir sorts last (never beats a real path)
         return (candidate.local_dir or "") > (existing.local_dir or "")
 
     seen = {}
     for e in envs:
         short = e.game_id.split("-")[0]
         prefix = short[:2]
-        # Observatory games share a 2-letter directory; group by prefix, keep highest version
-        if len(short) == 4 and short[2:].isdigit() and Path(f"environment_files/{prefix}").is_dir():
+        # Foundation games have their own directory (e.g. environment_files/ar25/).
+        # Observatory games share a 2-letter directory (e.g. environment_files/ar/).
+        # Check for a game-specific directory first so Foundation games like ar25
+        # aren't accidentally grouped with Observatory ar01/ar02 under key "ar".
+        if Path(f"environment_files/{short}").is_dir():
+            key = short
+        elif len(short) == 4 and short[2:].isdigit() and Path(f"environment_files/{prefix}").is_dir():
             key = prefix
         else:
             key = short

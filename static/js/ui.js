@@ -127,8 +127,9 @@ function _renderGames(el, games, onClick) {
   const sortByTitle = (a, b) => ((a.title || a.game_id).localeCompare(b.title || b.game_id));
   const foundation = games.filter(g => _isFoundationGame(g)).sort(sortByTitle);
   const observatory = games.filter(g => !_isFoundationGame(g)).sort(sortByTitle);
-  _renderGameGroup(el, 'ARC Prize Foundation', foundation, onClick);
+  // Observatory first (our custom games), Foundation below
   _renderGameGroup(el, 'ARC Observatory', observatory, onClick);
+  _renderGameGroup(el, 'ARC Prize Foundation', foundation, onClick);
 }
 
 async function loadGames() {
