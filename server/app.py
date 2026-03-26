@@ -144,6 +144,7 @@ from db import (
     create_magic_link, verify_magic_link, count_recent_magic_links,
     find_or_create_user, create_auth_token, delete_auth_token, claim_sessions,
     _db_insert_session, _db_update_session, _db_insert_action,
+    _compress_grid, _decompress_grid,
     AUTH_TOKEN_TTL, DB_PATH,
 )
 

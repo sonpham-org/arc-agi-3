@@ -169,14 +169,28 @@ All tests use `app.test_client()` with DB mocked. No live API calls.
 
 ## Acceptance Criteria
 
-- [ ] `pytest tests/ -v` runs without `--ignore` flags and passes completely
-- [ ] CI workflow passes on Python 3.12
-- [ ] `arc-agi==0.9.6` pinned and installs cleanly
-- [ ] `TestFileHeaders` passes against any file regardless of author name
-- [ ] Flask smoke test passes with mocked DB
-- [ ] Route tests cover all 8 route groups listed above
-- [ ] No live API calls in any test
-- [ ] PR description includes note to Son Pham about `CLAUDE_CODE_TOKEN` in Railway (separate from this PR's scope but worth including as a reminder)
+- [x] `pytest tests/ -v` runs without `--ignore` flags and passes completely — **360 passed, 35 skipped, 0 failed**
+- [x] CI workflow passes on Python 3.12
+- [x] `arc-agi==0.9.6` pinned and installs cleanly
+- [x] `TestFileHeaders` passes against any file regardless of author name
+- [x] Flask smoke test passes (14 tests in `test_app_boots.py`)
+- [x] Route tests cover all 8 route groups (23 tests in `test_routes.py`)
+- [x] No live API calls in any test
+- [ ] PR description includes note to Son Pham about `CLAUDE_CODE_TOKEN` in Railway
+
+---
+
+## Execution Notes (added during implementation)
+
+**Plan inaccuracies corrected:**
+1. **Deliverable 4 root cause was wrong.** Plan said `os.path.getsize` receives a MagicMock. Actual root cause: `_init_db()` calls `_check_and_recover_db()`, `_backup_db()`, and `_vacuum_if_bloated()` — none of which were mocked. Fix: patch all three functions (they are separate concerns from table creation).
+2. **Deliverable 3 missed a pre-existing failure.** Plan said "SRP/DRY tests need no changes" but `static/js/utils/tokens.js` was missing its `SRP/DRY check:` header line, causing `test_js_files_have_srp_dry` to fail. Fixed by adding the missing header line.
+
+**Extra bugs surfaced and fixed:**
+- `server/app.py` was missing `_compress_grid` and `_decompress_grid` imports from `db`. The `/api/step` route crashed with `NameError`. Added to the import block.
+
+**Next investigation (see CHANGELOG [1.14.2]):**
+- Token usage estimation may not display during Claude OAuth (BYOK) sessions. `tokens.js` is correctly bundled, but the end-to-end data flow needs tracing.
 
 ---
 
@@ -184,5 +198,4 @@ All tests use `app.test_client()` with DB mocked. No live API calls.
 
 - The `conftest.py` fixture `arcade` instantiates `arc_agi.Arcade()` — this works on Python 3.12+ with `arc-agi==0.9.6`
 - `test_gemini_live.py` can be preserved locally if needed; just don't commit it back
-- The DB mock issue in `test_db.py` comes from `db.py:143` — `_vacuum_if_bloated()` calls `os.path.getsize(DB_PATH)` and divides by `1024*1024`. The mock needs `os.path.getsize` patched to return an integer.
 - Route tests: check `server/state.py` for how global state (game_sessions, etc.) is initialised — tests may need to reset it between runs to avoid bleed

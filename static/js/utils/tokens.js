@@ -5,6 +5,7 @@
 //   Pricing comes from modelsData (live from /api/models) — no hardcoded prices.
 //   Used by llm.js, scaffolding.js, and session.js for usage tracking and cost display.
 //   Extracted from llm.js and scaffolding.js in Phase 3. Must load BEFORE those files.
+// SRP/DRY check: Pass — token utilities only; pricing data comes from server
 // ═══════════════════════════════════════════════════════════════════════════
 // TOKENS UTILITY
 // Load order: must be loaded before llm.js, scaffolding.js, session.js
