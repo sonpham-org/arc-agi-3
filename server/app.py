@@ -95,6 +95,10 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 # Gzip/Brotli compression for all responses >500 bytes
 from flask_compress import Compress
 Compress(app)
+
+# Session streaming: WebSocket ingest + SSE broadcast
+from server.stream_ws import init_stream_ws
+init_stream_ws(app)
 # Stable secret key — needed for Flask session (Google OAuth CSRF state).
 # Derive from GOOGLE_CLIENT_SECRET or env var so all gunicorn workers share the same key.
 app.secret_key = os.environ.get("FLASK_SECRET_KEY",
@@ -1090,6 +1094,134 @@ def browse_sessions():
         sessions = _list_file_sessions()
         return jsonify({"sessions": sessions})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SESSION STREAMING — register, live list, upload
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/sessions/stream/register", methods=["POST"])
+def stream_register():
+    """Register a new streaming session. Returns session_id, token, ws_url, view_url.
+
+    POST body (JSON):
+        game_id:  str  — required
+        harness:  str  — optional harness name
+        agents:   list — optional list of {id, model, role}
+        user_id:  str  — optional
+    """
+    import uuid
+    from server.stream_ws import _validate_stream_token  # noqa: F401 — ensure module loaded
+
+    payload = request.get_json(force=True) or {}
+    game_id = payload.get("game_id")
+    if not game_id:
+        return jsonify({"error": "game_id is required"}), 400
+
+    session_id = str(uuid.uuid4())
+    stream_token = secrets.token_hex(32)
+    now = time.time()
+    expires_at = now + 4 * 3600  # 4 hours
+
+    agents = payload.get("agents", [])
+    harness = payload.get("harness", "")
+    user_id = payload.get("user_id")
+    model = agents[0].get("model", "") if agents else ""
+    scaffolding_json = json.dumps({"harness": harness, "agents": agents})
+
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO sessions (id, game_id, mode, created_at, player_type, model, scaffolding_json, user_id) "
+                "VALUES (?, ?, 'stream', ?, 'agent', ?, ?, ?)",
+                (session_id, game_id, now, model, scaffolding_json, user_id),
+            )
+            conn.execute(
+                "INSERT INTO stream_tokens (session_id, token, created_at, expires_at, active) "
+                "VALUES (?, ?, ?, ?, 1)",
+                (session_id, stream_token, now, expires_at),
+            )
+    except Exception as e:
+        app.logger.warning("stream_register DB error: %s", e)
+        return jsonify({"error": "Failed to create session"}), 500
+
+    proto = "wss" if _is_https() else "ws"
+    host = request.host
+    ws_url = f"{proto}://{host}/ws/stream/{session_id}?token={stream_token}"
+    view_url = f"{'https' if _is_https() else 'http'}://{host}/#obs?session={session_id}"
+
+    return jsonify({
+        "session_id": session_id,
+        "stream_token": stream_token,
+        "ws_url": ws_url,
+        "view_url": view_url,
+    })
+
+
+@app.route("/api/sessions/live")
+def list_live_sessions():
+    """List currently-streaming (live) sessions."""
+    from server.stream_ws import get_viewer_count, get_live_session_ids
+    try:
+        live_ids = get_live_session_ids()
+        if not live_ids:
+            return jsonify({"sessions": []})
+
+        with _db() as conn:
+            placeholders = ",".join("?" * len(live_ids))
+            rows = conn.execute(
+                f"SELECT id, game_id, model, created_at, steps, levels, total_cost "
+                f"FROM sessions WHERE id IN ({placeholders}) OR mode = 'stream_live' "
+                f"ORDER BY created_at DESC",
+                live_ids,
+            ).fetchall()
+
+        sessions = []
+        for r in rows:
+            d = dict(r)
+            d["viewer_count"] = get_viewer_count(d["id"])
+            d["elapsed_s"] = round(time.time() - (d.get("created_at") or 0), 1)
+            sessions.append(d)
+
+        return jsonify({"sessions": sessions})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sessions/upload", methods=["POST"])
+def upload_session():
+    """Upload a completed session as a .arc3log (NDJSON) file.
+
+    Accepts either:
+      - multipart/form-data with a 'file' field containing the .arc3log file
+      - raw application/x-ndjson body
+
+    Query params:
+      force=true  — overwrite if session already exists
+    """
+    from server.stream_ws import process_upload
+
+    force = request.args.get("force", "").lower() == "true"
+    ct = request.content_type or ""
+
+    try:
+        if "multipart/form-data" in ct:
+            f = request.files.get("file")
+            if not f:
+                return jsonify({"error": "No file in multipart upload (field name: 'file')"}), 400
+            content = f.read().decode("utf-8", errors="replace")
+        else:
+            content = request.get_data(as_text=True)
+
+        lines = content.splitlines()
+        result = process_upload(lines, force=force)
+        return jsonify(result)
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        app.logger.warning("upload_session error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

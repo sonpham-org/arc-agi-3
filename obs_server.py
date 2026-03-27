@@ -1,3 +1,10 @@
+# Author: Claude Sonnet 4.6
+# Date: 27-Mar-2026
+# PURPOSE: Standalone observability server for batch_runner.py. Lightweight Flask app with
+#   obs-related endpoints. Does NOT import server.py. Added ?live=true SSE tail to
+#   get_session_obs_events for real-time Observatory streaming.
+# SRP/DRY check: Pass — SSE viewer registration delegates to stream_ws module; obs_server
+#   only handles the HTTP/SSE layer.
 """Standalone observability server for batch_runner.py.
 
 Lightweight Flask app with only obs-related endpoints.
@@ -5,6 +12,7 @@ Does NOT import server.py.
 """
 
 import json
+import queue
 import sqlite3
 import socket
 import threading
@@ -144,6 +152,7 @@ def list_sessions_for_obs():
 
 @app.route("/api/sessions/<session_id>/obs-events")
 def get_session_obs_events(session_id):
+    live = request.args.get("live") == "true"
     try:
         conn = _get_db()
         calls = conn.execute(
@@ -226,7 +235,39 @@ def get_session_obs_events(session_id):
             ev["elapsed_s"] = round(ts - t0, 2)
             events.append(ev)
 
-        return jsonify({"events": events})
+        if not live:
+            return jsonify({"events": events})
+
+        # ── Live mode: SSE stream ─────────────────────────────────────────
+        # Import here to avoid hard dependency when stream_ws is unavailable
+        try:
+            from server.stream_ws import register_viewer, unregister_viewer
+        except ImportError:
+            # stream_ws not available in standalone obs_server context — fall back to static
+            return jsonify({"events": events})
+
+        def generate():
+            # 1. Send existing events as initial payload
+            yield f"data: {json.dumps({'events': events, 'live': True})}\n\n"
+            # 2. Register a viewer queue
+            q = register_viewer(session_id)
+            try:
+                while True:
+                    try:
+                        event = q.get(timeout=30)
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+                        continue
+                    if event is None:  # sentinel — session ended
+                        yield f"data: {json.dumps({'event': 'stream_end'})}\n\n"
+                        break
+                    yield f"data: {json.dumps(event)}\n\n"
+            finally:
+                unregister_viewer(session_id, q)
+
+        return Response(generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     except Exception as e:
         app.logger.warning(f"get_session_obs_events failed: {e}")
         return jsonify({"error": str(e)}), 500

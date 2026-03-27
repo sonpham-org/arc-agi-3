@@ -391,6 +391,15 @@ def _init_db():
             PRIMARY KEY (batch_id, game_id)
         );
 
+        -- Stream tokens (live session ingestion via WebSocket)
+        CREATE TABLE IF NOT EXISTS stream_tokens (
+            session_id TEXT PRIMARY KEY,
+            token TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            active INTEGER DEFAULT 1
+        );
+
         -- Leaderboard index
         CREATE INDEX IF NOT EXISTS idx_sessions_leaderboard
             ON sessions(player_type, steps, levels DESC);

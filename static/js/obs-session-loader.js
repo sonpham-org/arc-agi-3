@@ -1,9 +1,11 @@
-// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking)
-// Date: 2026-03-12
+// Author: Mark Barney + Cascade (Claude Opus 4.6 thinking) + Claude Sonnet 4.6
+// Date: 27-Mar-2026
 // PURPOSE: Session browser, fetch, load, and replay for Observatory page.
 //   Allows users to browse saved sessions, filter by game/model/result, load
 //   historical session data, display replay metadata, and return to live mode.
+//   Added: live mode via EventSource SSE when URL has ?live=true or session is stream_live.
 // Depends on: obs-page.js (allEvents, state, resetState, renderNewEvents, renderTimeline, renderGameGrid, etc.)
+// SRP/DRY check: Pass — live mode handled here; swimlane rendering delegated to renderNewEvents.
 
 // ── Session Browser ──
 
@@ -172,3 +174,143 @@ function returnToLive() {
   document.getElementById('connStatus').style.color = '';
   poll();
 }
+
+// ── Live Session Streaming via EventSource (SSE) ─────────────────────────
+
+let _liveEventSource = null;
+
+/**
+ * Load a session and subscribe to its live SSE stream.
+ * Called when URL has &live=true or when a live session card is clicked.
+ */
+async function loadLiveSession(sessionId, gameId) {
+  // Close any existing live stream
+  closeLiveStream();
+
+  // Close browser panel
+  const overlay = document.getElementById('sessionOverlay');
+  if (overlay) overlay.classList.remove('visible');
+  const browseBtn = document.getElementById('browseBtn');
+  if (browseBtn) browseBtn.classList.remove('active');
+
+  // Stop poll timer
+  if (typeof pollTimer !== 'undefined' && pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  replayMode = true;
+
+  resetState();
+  setConn(false);
+  const connStatus = document.getElementById('connStatus');
+  if (connStatus) {
+    connStatus.textContent = 'LIVE';
+    connStatus.className = 'conn';
+    connStatus.style.color = '#dc2626';
+  }
+  const replayBadge = document.getElementById('replayBadge');
+  if (replayBadge) replayBadge.textContent = `[${gameId || sessionId.slice(0, 8)}] 🔴`;
+
+  // Show live indicator
+  _setLiveIndicator(true);
+
+  const url = `/api/sessions/${sessionId}/obs-events?live=true`;
+  _liveEventSource = new EventSource(url);
+
+  let initialized = false;
+
+  _liveEventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+
+      if (!initialized) {
+        // First message contains existing events + live flag
+        initialized = true;
+        const existingEvents = data.events || [];
+        if (existingEvents.length > 0) {
+          existingEvents.forEach(ev => { if (typeof normalizeEvent === 'function') normalizeEvent(ev); });
+          allEvents = existingEvents;
+          renderNewEvents(allEvents);
+          if (typeof renderTimeline === 'function') renderTimeline();
+          const firstGrid = allEvents.find(ev => ev.grid && ev.grid.length > 0);
+          if (firstGrid && typeof renderGameGrid === 'function') {
+            currentGrid = firstGrid.grid;
+            renderGameGrid(firstGrid.grid);
+          }
+        }
+        return;
+      }
+
+      // Subsequent messages are individual events
+      if (data.event === 'stream_end') {
+        // Session ended — transition to replay mode
+        _setLiveIndicator(false);
+        if (connStatus) {
+          connStatus.textContent = 'REPLAY';
+          connStatus.style.color = '#3b82f6';
+        }
+        if (replayBadge) replayBadge.textContent = `[${gameId || sessionId.slice(0, 8)}]`;
+        closeLiveStream();
+        return;
+      }
+
+      // Live event — append to swimlane
+      if (typeof normalizeEvent === 'function') normalizeEvent(data);
+      allEvents.push(data);
+      if (typeof renderNewEvents === 'function') renderNewEvents([data]);
+      if (typeof renderTimeline === 'function') renderTimeline();
+      if (data.grid && data.grid.length > 0 && typeof renderGameGrid === 'function') {
+        currentGrid = data.grid;
+        renderGameGrid(data.grid);
+      }
+      // Update counters
+      if (typeof trackEventTokens === 'function') trackEventTokens(data);
+
+    } catch (err) {
+      console.warn('Live SSE parse error:', err);
+    }
+  };
+
+  _liveEventSource.onerror = (err) => {
+    console.warn('Live SSE error:', err);
+    _setLiveIndicator(false);
+    if (connStatus) connStatus.style.color = '#f59e0b';
+    // Don't close — EventSource auto-reconnects
+  };
+}
+
+function closeLiveStream() {
+  if (_liveEventSource) {
+    _liveEventSource.close();
+    _liveEventSource = null;
+  }
+  _setLiveIndicator(false);
+}
+
+function _setLiveIndicator(active) {
+  const badge = document.getElementById('liveBadge');
+  if (badge) {
+    badge.style.display = active ? 'inline-block' : 'none';
+    badge.textContent = '🔴 LIVE';
+  }
+}
+
+// Check URL params on load — if ?session=X&live=true, auto-load in live mode
+(function _checkUrlLiveParam() {
+  const params = new URLSearchParams(window.location.search);
+  // Also check hash params (#obs?session=X&live=true)
+  const hash = window.location.hash.replace(/^#[^?]*\??/, '');
+  const hashParams = new URLSearchParams(hash);
+
+  const sessionId = params.get('session') || hashParams.get('session');
+  const isLive = params.get('live') === 'true' || hashParams.get('live') === 'true';
+
+  if (sessionId && isLive) {
+    // Delay to let page initialize
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => loadLiveSession(sessionId, null));
+    } else {
+      setTimeout(() => loadLiveSession(sessionId, null), 300);
+    }
+  }
+})();

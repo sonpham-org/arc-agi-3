@@ -5,6 +5,35 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.15.0] — feat: Session Streaming API
+*Author: Claude Sonnet 4.6 (Bubba subagent) | 27-Mar-2026*
+
+### Added
+- **`server/stream_ws.py`** — WebSocket ingest handler (flask-sock) for live session streaming.
+  External harnesses connect to `/ws/stream/<session_id>?token=<token>`, send JSONL events,
+  and the handler persists them to existing DB tables (`llm_calls`, `session_actions`,
+  `tool_executions`) while broadcasting to SSE viewers in real-time.
+- **`POST /api/sessions/stream/register`** — registers a new streaming session, returns
+  `session_id`, `stream_token`, `ws_url`, and `view_url`.
+- **`GET /api/sessions/live`** — lists currently-streaming sessions with viewer counts.
+- **`POST /api/sessions/upload`** — post-hoc JSONL upload (`.arc3log` files). Accepts
+  `multipart/form-data` or raw `application/x-ndjson`. Use `?force=true` to overwrite.
+- **`stream_tokens` table** added to DB schema — stores per-session tokens with 4-hour TTL.
+- **`?live=true` SSE tail** on `GET /api/sessions/<id>/obs-events` — streams live events
+  to Observatory viewers via Server-Sent Events.
+- **`flask-sock>=0.7.0`** added to `requirements.txt`.
+- **Frontend `session-views-grid.js`** — live badge (🔴 LIVE) on streaming sessions in Browse
+  Sessions → AI Sessions. Live sessions sorted to the top. Click opens Observatory in live mode.
+- **Frontend `obs-session-loader.js`** — `loadLiveSession()` function subscribes to SSE stream.
+  On `stream_end`, transitions to normal replay mode. URL param `?live=true` auto-triggers.
+
+### Notes
+- Gunicorn with `--threads 8` (existing Procfile) supports ~6 concurrent streaming sessions.
+- Railway supports WebSocket natively — no Procfile changes required.
+- Harness should send keepalive events every 4 min (Railway 5-min WS idle timeout).
+
+---
+
 ## [1.14.2] — next: investigate token usage tracking
 *Author: TBD | TBD*
 

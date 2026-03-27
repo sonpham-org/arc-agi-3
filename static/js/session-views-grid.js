@@ -1,9 +1,10 @@
 // Author: Claude Sonnet 4.6
-// Date: 2026-03-25 13:00
+// Date: 27-Mar-2026
 // PURPOSE: Browse sessions view — renders Human / AI / My sessions as tables
 //   with columns: Timestamp, Game (with version), Levels, Steps, Time, actions.
 //   Depends on fetchJSON/gameShortName/formatDuration (ui.js), currentUser (state.js),
 //   getLocalSessions (session-storage.js), resumeSession (session-views-history.js).
+//   Added: live session badge (mode=stream_live), sort live to top, link to Observatory live.
 // SRP/DRY check: Pass — single module for browse-grid rendering, reuses ui.js helpers.
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -116,11 +117,13 @@ function _buildSessionTr(s, isLocal) {
   // Duration
   const durationStr = (s.duration_seconds || s.duration) ? formatDuration(s.duration_seconds || s.duration) : '\u2014';
 
-  // Live tag
-  const isLive = s.live_mode === 1 || s.live_mode === true;
+  // Live tag — true if live_mode flag set OR session is actively streaming
+  const isLive = s.live_mode === 1 || s.live_mode === true || s.mode === 'stream_live';
 
-  // Action buttons
-  const replayBtn = `<button class="btn browse-btn" onclick="event.stopPropagation(); window.open('/share?id=${s.id}','_blank');" title="Open shareable replay">&#9654;</button>`;
+  // Action buttons — live sessions link to Observatory in live mode
+  const replayBtn = isLive
+    ? `<button class="btn browse-btn browse-live-btn" onclick="event.stopPropagation(); window.open('/#obs?session=${s.id}&live=true','_blank');" title="Watch live in Observatory">&#128250;</button>`
+    : `<button class="btn browse-btn" onclick="event.stopPropagation(); window.open('/share?id=${s.id}','_blank');" title="Open shareable replay">&#9654;</button>`;
   const resumeBtn = result === 'NOT_FINISHED'
     ? `<button class="btn btn-primary browse-btn" onclick="event.stopPropagation(); browseResume('${s.id}');" title="Resume playing">&#9198;</button>`
     : '';
@@ -131,7 +134,7 @@ function _buildSessionTr(s, isLocal) {
 
   tr.innerHTML = `
     <td class="browse-td-time">${dateStr}</td>
-    <td class="browse-td-game"><span class="s-game">${gameCode}</span><span class="browse-ver">${verDisplay}</span>${isLive ? ' <span class="live-tag" style="font-size:8px;padding:0 3px;">LIVE</span>' : ''}</td>
+    <td class="browse-td-game"><span class="s-game">${gameCode}</span><span class="browse-ver">${verDisplay}</span>${isLive ? ' <span class="live-tag" style="font-size:8px;padding:1px 4px;background:#dc2626;color:#fff;border-radius:3px;font-weight:700;letter-spacing:0.5px;">&#128994; LIVE</span>' : ''}</td>
     <td class="browse-td-result"><span class="s-result ${resultClass}">${resultLabel}</span></td>
     <td class="browse-td-levels">${levels}</td>
     <td class="browse-td-steps">${steps}</td>
@@ -186,9 +189,26 @@ async function loadBrowseAI() {
   const countEl = document.getElementById('browseAICount');
   el.innerHTML = '<div class="browse-empty">Loading...</div>';
   try {
-    const data = await fetchJSON('/api/sessions?player_type=agent');
-    let sessions = (data.sessions || []).filter(s => (s.steps || 0) >= 5);
+    // Fetch regular sessions and live sessions in parallel
+    const [agentData, liveData] = await Promise.allSettled([
+      fetchJSON('/api/sessions?player_type=agent'),
+      fetchJSON('/api/sessions/live'),
+    ]);
+
+    let sessions = ((agentData.status === 'fulfilled' ? agentData.value.sessions : null) || [])
+      .filter(s => (s.steps || 0) >= 5);
     if (MODE === 'prod') sessions = sessions.filter(s => s.game_id !== 'fd01-00000001');
+
+    // Merge live sessions (may not be in main list yet)
+    const liveSessions = (liveData.status === 'fulfilled' ? liveData.value.sessions : null) || [];
+    const liveIds = new Set(liveSessions.map(s => s.id));
+    // Remove any live sessions already in main list (avoid duplicates)
+    const nonLiveSessions = sessions.filter(s => !liveIds.has(s.id));
+    // Mark live sessions
+    for (const s of liveSessions) s.mode = 'stream_live';
+    // Live sessions to the top, then regular
+    sessions = [...liveSessions, ...nonLiveSessions];
+
     sessions = sessions.filter(_matchesGameFilter);
     _renderSessionColumn(el, countEl, sessions,
       _browseGameFilter ? 'No AI sessions for this game.' : 'No AI sessions with 5+ steps yet.');

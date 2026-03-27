@@ -1,5 +1,6 @@
 flask>=3.1
 flask-compress>=1.17
+flask-sock>=0.7.0
 python-dotenv>=1.0
 httpx>=0.28
 arc-agi==0.9.6
