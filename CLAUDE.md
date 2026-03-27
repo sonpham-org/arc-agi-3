@@ -90,6 +90,69 @@ If `CHANGELOG.md` does not exist, create it starting at `[1.0.0]` as the baselin
 - Time estimates
 - Premature celebration or declaring something fixed before it is tested
 
+## Session Streaming API
+
+External harnesses stream game sessions to the platform in real-time via WebSocket. Live sessions appear in **Browse Sessions → AI Sessions** with a live badge. Full spec: [`docs/SESSION-LOG-API.md`](docs/SESSION-LOG-API.md).
+
+### Architecture
+
+```
+Local Harness ──WS──▶ Server ──SSE──▶ Browser Viewers
+```
+
+1. Harness calls `POST /api/sessions/stream/register` → gets `session_id`, `stream_token`, `ws_url`
+2. Harness opens `wss://arc3.sonpham.net/ws/stream/{session_id}?token={stream_token}`
+3. Harness sends JSONL events (one JSON object per WS message) as they happen
+4. Server validates, persists to DB, broadcasts to SSE viewers
+5. `session_end` event closes the WS and marks the session as a normal replay
+
+### Event format
+
+Every event has this envelope:
+```json
+{"v": 1, "t": "ISO-8601-UTC", "elapsed_s": 42.3, "session_id": "...", "game_id": "ls20", "event": "<type>"}
+```
+
+**Required events** (minimum for swimlane visualization):
+- `session_start` — harness name, agent list, scaffolding config
+- `llm_call` — `agent_id`, `model`, `input_tokens`, `output_tokens`, `cost`, `duration_ms`, `response`. Optional `coordinates_mentioned: [{col, row, label}]` for coordinate hover→highlight.
+- `act` — `action`, `action_id`, `step_num`, `grid` (full 64×64 2D int array after action), `level`, `result` (ok/level_complete/game_win/game_over)
+- `session_end` — `result` (WIN/LOSS/TIMEOUT/ERROR), `total_steps`, `total_cost`
+
+**Optional events** (enrich the replay):
+- `memory_write` — `file`, `content` (full file at time of write)
+- `tool_call` — `tool`, `code`, `output`, `error`, `duration_ms`
+- `agent_message` — `from_agent`, `to_agent`, `content`
+
+### DB mapping
+
+| Event | Table | Key fields |
+|-------|-------|-----------|
+| `session_start` | `sessions` | `id`, `game_id`, `mode`, `model`, `scaffolding_json` |
+| `llm_call` | `llm_calls` | `agent_type`=agent_id, `input_json`, `output_json`, tokens, cost |
+| `act` | `session_actions` | `action`, `row`, `col`, `states_json`=[{grid}] |
+| `tool_call` | `tool_executions` | `tool_name`, `code`, `output`, `error` |
+| `session_end` | `sessions` | Update `result`, `total_cost`, `steps`, `levels`, `duration_seconds` |
+
+### Server endpoints to implement
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/sessions/stream/register` | Create session, return stream_token + ws_url + view_url |
+| `WS` | `/ws/stream/{session_id}` | Ingest events, persist, broadcast to SSE |
+| `GET` | `/api/sessions/live` | List active streaming sessions |
+| `GET` | `/api/sessions/{id}/obs-events?live=true` | SSE: replay catchup + live tail |
+| `POST` | `/api/sessions/upload` | Bulk JSONL ingest for post-hoc uploads |
+
+### Key implementation notes
+
+- Live sessions must appear in the existing `list-for-obs` / session browse queries with a `"live": true` flag
+- The swimlane (`obs-swimlane.js`) already renders from the event stream — live mode just keeps the SSE open
+- `grid` on `act` events is mandatory — it drives the game view panel and scrubber
+- `call_id` on `act` links the action to its deciding `llm_call` — enables decision→action lines in swimlane
+- Multi-agent harnesses use distinct `agent_id` values — one swimlane row per agent
+- Offline fallback: if WS drops, harness logs to local `.arc3log` file and uploads via `/api/sessions/upload` when done
+
 ## Database
 
 See [`.claude/database_structure.md`](.claude/database_structure.md) for the full schema. Single SQLite DB on Railway Volume, no external DB services.

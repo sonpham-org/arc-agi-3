@@ -194,6 +194,67 @@ Full model list: see `models.py` `MODEL_REGISTRY` or run `python agent.py --list
 
 ---
 
+## Session Streaming API
+
+External harnesses can stream game sessions to `arc3.sonpham.net` in real-time. Live sessions appear in **Browse Sessions → AI Sessions** with a 🔴 Live badge.
+
+### Quick start
+
+```python
+import requests, websockets, json, asyncio
+
+# 1. Register a session
+resp = requests.post("https://arc3.sonpham.net/api/sessions/stream/register", json={
+    "game_id": "ls20",
+    "harness": "my-harness",
+    "agents": [{"id": "main", "model": "gemini-2.5-flash", "role": "executor"}]
+})
+data = resp.json()
+ws_url = data["ws_url"]          # wss://arc3.sonpham.net/ws/stream/{id}?token=...
+view_url = data["view_url"]      # share this link — anyone can watch live
+
+# 2. Stream events over WebSocket
+async def run():
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"v":1, "event":"session_start", "game_id":"ls20", ...}))
+        # After each LLM call:
+        await ws.send(json.dumps({"v":1, "event":"llm_call", "agent_id":"main", ...}))
+        # After each game action (grid state is required):
+        await ws.send(json.dumps({"v":1, "event":"act", "action":"UP", "grid":[[...]], ...}))
+        # When done:
+        await ws.send(json.dumps({"v":1, "event":"session_end", "result":"WIN", ...}))
+
+asyncio.run(run())
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/sessions/stream/register` | Register a new live session. Returns `session_id`, `stream_token`, `ws_url`, `view_url`. |
+| `WS` | `/ws/stream/{session_id}?token={stream_token}` | Push events as JSON messages. One event per message. |
+| `GET` | `/api/sessions/live` | List all currently streaming sessions (game, model, steps, viewers). |
+| `GET` | `/api/sessions/{id}/obs-events?live=true` | SSE stream for viewers — replays history then tails live events. |
+| `POST` | `/api/sessions/upload` | Upload a completed `.arc3log` (JSONL) file for post-hoc replay. |
+
+### Event types
+
+All events share an envelope: `{"v": 1, "t": "<ISO-8601>", "elapsed_s": <float>, "session_id": "...", "game_id": "...", "event": "<type>"}`.
+
+| Event | Required fields | Purpose |
+|-------|----------------|---------|
+| `session_start` | `harness`, `agents[]` | Harness metadata — emitted once at start |
+| `llm_call` | `agent_id`, `model`, `response` | One per LLM API call. Optional: `coordinates_mentioned[]` for hover highlight |
+| `act` | `action`, `grid[][]`, `step_num` | One per game action. `grid` = full 64×64 state after action |
+| `memory_write` | `file`, `content` | Full memory file content at time of write |
+| `tool_call` | `tool`, `code`, `output` | REPL / tool executions |
+| `agent_message` | `from_agent`, `to_agent`, `content` | Inter-agent communication |
+| `session_end` | `result`, `total_steps`, `total_cost` | Final summary — emitted once at end |
+
+Full specification with examples: [`docs/SESSION-LOG-API.md`](docs/SESSION-LOG-API.md)
+
+---
+
 ## Deployment
 
 - **Railway**: auto-deploys from `master` branch
