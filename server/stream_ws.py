@@ -221,12 +221,15 @@ def _handle_session_end(session_id: str, event: dict) -> None:
         kwargs["result"] = str(event["result"])
     if event.get("total_cost") is not None:
         kwargs["total_cost"] = float(event["total_cost"])
-    if event.get("steps") is not None:
-        kwargs["steps"] = int(event["steps"])
-    if event.get("levels") is not None:
-        kwargs["levels"] = int(event["levels"])
-    if event.get("duration_seconds") is not None:
-        kwargs["duration_seconds"] = float(event["duration_seconds"])
+    steps = event.get("total_steps") or event.get("steps")
+    if steps is not None:
+        kwargs["steps"] = int(steps)
+    levels = event.get("levels_completed") or event.get("levels")
+    if levels is not None:
+        kwargs["levels"] = int(levels)
+    duration = event.get("duration_seconds") or (event.get("elapsed_s"))
+    if duration is not None:
+        kwargs["duration_seconds"] = float(duration)
     _db_update_session(session_id, **kwargs)
     # Deactivate the stream token
     try:

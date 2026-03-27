@@ -144,7 +144,7 @@ from server.services import auth_service, game_service, session_service, social_
 
 # Database layer imports (kept for routes that call db directly for now)
 from db import (
-    _init_db, _get_db, db_conn,
+    _init_db, _get_db, _db, db_conn,
     create_magic_link, verify_magic_link, count_recent_magic_links,
     find_or_create_user, create_auth_token, delete_auth_token, claim_sessions,
     _db_insert_session, _db_update_session, _db_insert_action,
