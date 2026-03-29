@@ -44,3 +44,9 @@ agentops.log
 
 # Agent runner output
 output/
+
+# Agent memory — runtime session log (templates like MEMORY.md stay tracked)
+memory/sessions.json
+
+# ARC SDK game cache (auto-downloaded by arc_agi on first run)
+environment_files/

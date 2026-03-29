@@ -5,6 +5,39 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.16.0] — feat: Instinct Survey + agent_llm bugfix
+*Author: Cascade (Claude Opus 4.6 thinking) | 29-Mar-2026*
+
+### Added
+- **`survey/run_survey.py`** — Orchestrator that runs the existing agent across all ARC-AGI-3 games
+  using `batch_runner.py`, then classifies behavior and generates reports. Supports `--dry-run`,
+  `--report-only`, `--skip-postgres`, and single-game testing via `--games`.
+- **`survey/classify.py`** — Instinct classification logic. Assigns each game one of 7 categories
+  (partial_solver, hypothesis_driven, systematic_explorer, directional_mover, action5_spammer,
+  random_clicker, frozen) based on action distribution, hypothesis language detection, and change
+  awareness in LLM reasoning text. Priority-ordered tiebreaker.
+- **`survey/report_generator.py`** — Reads survey SQLite DB, classifies all sessions, produces
+  `docs/reports/instinct-survey.json` (full per-game data) and `docs/reports/instinct-survey.md`
+  (human-readable summary with game rankings, instinct distribution, failure patterns).
+- **`survey/postgres_writer.py`** — Creates `arc3_survey_results` and `arc3_survey_summaries`
+  tables in Railway Postgres, upserts per-game classification data and aggregate summary.
+- **`config_survey.yaml`** — Survey-specific config: Sonnet 4.6 OAuth, 30 steps, no memory
+  injection, no post-game reflection, single-action planning horizon.
+
+### Fixed
+- **`agent_llm.py` — `call_model_with_metadata()` was calling `call_model()` which returns a
+  string, then calling `.get()` on it as if it were a dict.** Extracted provider routing into
+  `_route_to_provider()` (returns full dict), used by both `call_model()` (text-only) and
+  `call_model_with_metadata()` (full metadata). This bug caused all LLM calls via
+  `call_model_with_metadata` to fail silently and fall back to random actions.
+- **`_computeColorHistogram is not defined` crash in production.** Three scaffolding JS files
+  (`scaffolding-three-system.js`, `scaffolding-rlm.js`, `scaffolding-world-model.js`) were
+  missing from the bundle build. `scaffolding-agent-spawn.js` calls `_computeColorHistogram()`
+  defined in `scaffolding-three-system.js`, crashing Agent Spawn mode. Added all three to the
+  bundle in correct load order. Also fixed macOS `mktemp` incompatibility in build script.
+
+---
+
 ## [1.15.0] — feat: Session Streaming API
 *Author: Claude Sonnet 4.6 (Bubba subagent) | 27-Mar-2026*
 

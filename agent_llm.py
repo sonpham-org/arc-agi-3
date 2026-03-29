@@ -1,5 +1,5 @@
 # Author: Mark Barney + Cascade (Claude Opus 4.6 thinking) + Claude Sonnet 4.6 + Claude Opus 4.6
-# Date: 2026-03-25 16:30
+# Date: 2026-03-29 13:15
 # PURPOSE: LLM provider calls and retry logic for ARC-AGI-3. Handles communication
 #   with Gemini, Anthropic, Cloudflare, OpenAI-compatible endpoints, Ollama, Groq,
 #   Mistral, HuggingFace. Provides retry with exponential backoff and cost tracking.
@@ -272,17 +272,13 @@ def _call_cloudflare(model: str, messages: list, temperature: float, max_tokens:
     return _call_openai_compatible(url, api_key, model, messages, temperature, max_tokens)
 
 
-def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
-               tools_enabled: bool = False, session_id: str = "",
-               grid=None, prev_grid=None, thinking_budget: int = 0) -> str:
-    """Route to the right provider. Returns just the text response (string).
+def _route_to_provider(model_key: str, prompt: str, cfg: dict, role: str = "executor",
+                       tools_enabled: bool = False, session_id: str = "",
+                       grid=None, prev_grid=None, thinking_budget: int = 0) -> dict:
+    """Route to the right provider. Returns the full result dict with text + token counts.
 
-    For metadata (tokens, timing, errors), use call_model_with_metadata() instead.
-
-    Optional kwargs for Gemini tool calling:
-        tools_enabled: enable run_python tool
-        session_id: sandbox session ID
-        grid / prev_grid: current and previous game grids (list-of-lists)
+    Internal helper — callers should use call_model() for text-only or
+    call_model_with_metadata() for full metadata.
     """
     info = MODELS.get(model_key)
     if info is None:
@@ -324,8 +320,26 @@ def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
         # Groq / Mistral / HuggingFace (OpenAI-compatible)
         api_key = os.environ.get(info["env_key"], "")
         result = _call_openai_compatible(info["url"], api_key, api_model, messages, temp, max_tok)
-    
-    # Extract and return just the text
+
+    return result if result else {"text": ""}
+
+
+def call_model(model_key: str, prompt: str, cfg: dict, role: str = "executor",
+               tools_enabled: bool = False, session_id: str = "",
+               grid=None, prev_grid=None, thinking_budget: int = 0) -> str:
+    """Route to the right provider. Returns just the text response (string).
+
+    For metadata (tokens, timing, errors), use call_model_with_metadata() instead.
+
+    Optional kwargs for Gemini tool calling:
+        tools_enabled: enable run_python tool
+        session_id: sandbox session ID
+        grid / prev_grid: current and previous game grids (list-of-lists)
+    """
+    result = _route_to_provider(model_key, prompt, cfg, role,
+                                tools_enabled=tools_enabled, session_id=session_id,
+                                grid=grid, prev_grid=prev_grid,
+                                thinking_budget=thinking_budget)
     return result.get("text", "") if result else ""
 
 
@@ -342,17 +356,17 @@ def call_model_with_metadata(model_key: str, prompt: str, cfg: dict, role: str =
     t0 = time.time()
     for attempt in range(retries + 1):
         try:
-            result = call_model(model_key, prompt, cfg, role,
-                                tools_enabled=tools_enabled, session_id=session_id,
-                                grid=grid, prev_grid=prev_grid,
-                                thinking_budget=thinking_budget)
+            result = _route_to_provider(model_key, prompt, cfg, role,
+                                        tools_enabled=tools_enabled, session_id=session_id,
+                                        grid=grid, prev_grid=prev_grid,
+                                        thinking_budget=thinking_budget)
             duration_ms = int((time.time() - t0) * 1000)
             in_tok = result.get("input_tokens", 0)
             out_tok = result.get("output_tokens", 0)
             think_tok = result.get("thinking_tokens", 0)
             cost = compute_cost(model_key, in_tok, out_tok, think_tok)
             return LLMResult(
-                text=result["text"],
+                text=result.get("text", ""),
                 input_tokens=in_tok,
                 output_tokens=out_tok,
                 thinking_tokens=think_tok,

@@ -30,7 +30,10 @@ JS_FILES=(
   "$STATIC/js/llm.js"
   "$STATIC/js/scaffolding.js"
   "$STATIC/js/scaffolding-linear.js"
+  "$STATIC/js/scaffolding-rlm.js"
+  "$STATIC/js/scaffolding-three-system.js"
   "$STATIC/js/scaffolding-agent-spawn.js"
+  "$STATIC/js/scaffolding-world-model.js"
   "$STATIC/js/scaffolding-rgb.js"
   "$STATIC/js/session-storage.js"
   "$STATIC/js/session-replay.js"
@@ -58,7 +61,7 @@ JS_FILES=(
 )
 
 echo "=== Building JS bundle ==="
-BUNDLE_TMP=$(mktemp --suffix=.js)
+BUNDLE_TMP=$(mktemp /tmp/bundle_XXXXXX.js)
 for f in "${JS_FILES[@]}"; do
   cat "$f" >> "$BUNDLE_TMP"
   echo ";" >> "$BUNDLE_TMP"

@@ -1,9 +1,0 @@
-{
-    "game_id": "fr01",
-    "title": "Feeding Frenzy",
-    "default_fps": 30,
-    "baseline_actions": [1, 2, 3, 4],
-    "tags": ["action", "arcade"],
-    "local_dir": "environment_files/fr/00000001",
-    "date_downloaded": "2026-03-07"
-}

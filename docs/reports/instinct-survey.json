@@ -1,0 +1,44 @@
+{
+  "summary": {
+    "total_games": 1,
+    "total_steps": 5,
+    "total_cost_usd": 0,
+    "instinct_distribution": {
+      "hypothesis_driven": 1
+    },
+    "avg_change_awareness_ratio": 0.2,
+    "games_with_levels": 0,
+    "games_with_hypotheses": 1,
+    "timestamp": "2026-03-29T17:13:50.923655",
+    "db_path": "/Users/macmini/Documents/GitHub/arc-agi-3/data/survey_20260329_131307.db"
+  },
+  "games": [
+    {
+      "game_id": "cn04-65d47d14",
+      "model": "claude-sonnet-4-6",
+      "session_id": "batch-batch-20-cn04-65d47d14-0-d5424664",
+      "result": "NOT_FINISHED",
+      "steps_taken": 5,
+      "levels_completed": 0,
+      "total_cost_usd": 0,
+      "action_distribution": {
+        "ACTION6": 5
+      },
+      "first_impression": "{\"observation\": \"I see a 64x64 grid with color 10 (LightBlue) as background. There are two distinct structures: 1) Upper-left area (rows 14-28): A white (0) bordered region with red (8) elements inside at rows 17-19 and 23-25. 2) Lower-right area (rows 29-49): A green (14) bordered region with red (",
+      "strategy_phases": [
+        {
+          "steps": "0-4",
+          "label": "hypothesis_testing",
+          "summary": "Clicked on grid positions (5 steps)"
+        }
+      ],
+      "change_awareness": {
+        "references_changes": 1,
+        "total_steps": 5,
+        "ratio": 0.2
+      },
+      "hypothesis_count": 3,
+      "instinct_class": "hypothesis_driven"
+    }
+  ]
+}
