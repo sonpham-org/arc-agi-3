@@ -30,6 +30,11 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
   `_route_to_provider()` (returns full dict), used by both `call_model()` (text-only) and
   `call_model_with_metadata()` (full metadata). This bug caused all LLM calls via
   `call_model_with_metadata` to fail silently and fall back to random actions.
+- **`_computeColorHistogram is not defined` crash in production.** Three scaffolding JS files
+  (`scaffolding-three-system.js`, `scaffolding-rlm.js`, `scaffolding-world-model.js`) were
+  missing from the bundle build. `scaffolding-agent-spawn.js` calls `_computeColorHistogram()`
+  defined in `scaffolding-three-system.js`, crashing Agent Spawn mode. Added all three to the
+  bundle in correct load order. Also fixed macOS `mktemp` incompatibility in build script.
 
 ---
 
