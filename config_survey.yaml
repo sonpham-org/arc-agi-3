@@ -1,0 +1,34 @@
+# ARC-AGI-3 Instinct Survey Configuration
+# ───────────────────────────────────────────────────────────────────────────
+# Overrides for the baseline instinct survey: Sonnet 4.6 via OAuth, 30 steps,
+# sequential execution, no memory pollution between games.
+
+context:
+  full_grid: true
+  change_map: true
+  color_histogram: false
+  region_map: false
+  history_length: 0        # show all history (agent needs to see what it did)
+  reasoning_trace: false
+  max_context_tokens: 100000
+  memory_injection: false  # no cross-game memory — we want raw instincts
+  memory_injection_max_chars: 0
+
+reasoning:
+  executor_model: "claude-sonnet-4-6"
+  condenser_model: null
+  reflector_model: null
+  temperature: 0.3
+  max_tokens: 2048
+  planning_horizon: 1      # single action per step — easier to classify
+
+memory:
+  hard_memory_file: "memory/MEMORY.md"
+  session_log_file: "memory/sessions.json"
+  allow_inline_memory_writes: false   # no memory writes — raw instincts only
+  reflect_after_game: false           # no post-game reflection
+  condense_every: 0
+  condense_threshold: 0
+
+scaffolding:
+  mode: "single"
