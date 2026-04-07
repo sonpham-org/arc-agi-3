@@ -1,8 +1,10 @@
-# Author: Claude Sonnet 4.6
-# Date: 2026-03-25 12:30
+# Author: Claude Opus 4.6
+# Date: 2026-04-06 23:10
 # PURPOSE: Shared helper functions for Flask blueprints. Provides mode detection,
 #   feature flags, arcade instance management, game version resolution, frame-to-grid
-#   conversion, env state serialization, prompt loading, and auth caching.
+#   conversion, env state serialization, prompt loading, auth caching, and on-demand
+#   game download via ensure_game_local() (used by list_games and game_source to
+#   bootstrap empty environment_files/ on cold start).
 # SRP/DRY check: Pass — utility functions only; no business logic here.
 """Shared helper functions for Flask blueprints.
 
@@ -10,7 +12,9 @@ This module contains utility functions needed by multiple blueprints.
 """
 
 import json
+import logging
 import os
+import threading
 import time
 import subprocess
 from pathlib import Path
@@ -22,6 +26,8 @@ from flask import request
 from server.state import arcade_instance, DEV_SECRET, FEATURES, HIDDEN_GAMES
 from constants import ACTION_NAMES
 from db import verify_auth_token
+
+_log = logging.getLogger(__name__)
 
 
 def get_mode() -> str:
@@ -60,6 +66,91 @@ def get_arcade():
     if arcade_instance is None:
         arcade_instance = arc_agi.Arcade()
     return arcade_instance
+
+
+# Per-game locks so concurrent requests for the same game don't double-download.
+# Outer lock guards the dict itself.
+_download_locks_dict_lock = threading.Lock()
+_download_locks: dict[str, threading.Lock] = {}
+
+
+def _get_download_lock(bare_id: str) -> threading.Lock:
+    with _download_locks_dict_lock:
+        lock = _download_locks.get(bare_id)
+        if lock is None:
+            lock = threading.Lock()
+            _download_locks[bare_id] = lock
+        return lock
+
+
+def ensure_game_local(game_id: str):
+    """Download a game into environment_files/ if it isn't already there.
+
+    Returns the matching `EnvironmentInfo` (with `local_dir` populated) on
+    success, or `None` if the download failed (e.g. unknown game id, network
+    error). Idempotent and safe under concurrency: a per-game lock prevents
+    two requests from racing the same download.
+
+    The bug: after commit 779ddae gitignored `environment_files/`, fresh
+    deploys (Railway included) start with no local game sources. Every
+    `EnvironmentInfo` returned by `Arcade.get_environments()` has
+    `local_dir=None`, so `list_games()` filters them all out and the
+    Play-as-Human sidebar is empty. This helper materializes a game on
+    demand using the existing `arc_agi.Arcade.make()` download path.
+    """
+    bare_id = game_id.split("-")[0]
+    arc = get_arcade()
+
+    # Fast path: already local — find the freshest local copy.
+    def _find_local() -> Optional[arc_agi.EnvironmentInfo]:
+        envs = arc.get_environments()
+        candidates = [e for e in envs
+                      if (e.game_id == game_id or e.game_id.split("-")[0] == bare_id)
+                      and e.local_dir is not None]
+        if not candidates:
+            return None
+        return max(candidates,
+                   key=lambda e: (_env_date(e.local_dir), e.local_dir or ""))
+
+    existing = _find_local()
+    if existing is not None:
+        return existing
+
+    # Slow path: download under per-game lock.
+    lock = _get_download_lock(bare_id)
+    with lock:
+        # Re-check inside the lock — another thread may have downloaded while
+        # we were waiting.
+        existing = _find_local()
+        if existing is not None:
+            return existing
+
+        try:
+            wrapper = arc.make(bare_id)
+        except Exception as exc:
+            _log.warning("ensure_game_local: arc.make(%s) raised: %s", bare_id, exc)
+            return None
+        if wrapper is None:
+            _log.warning("ensure_game_local: arc.make(%s) returned None", bare_id)
+            return None
+
+        # arc.make() downloads the files but does not refresh the cached
+        # EnvironmentInfo objects' local_dir. Force a rescan so the next
+        # get_environments() call sees the freshly-downloaded directory.
+        try:
+            arc._scan_for_environments()
+        except Exception as exc:
+            _log.warning("ensure_game_local: rescan after %s download failed: %s",
+                         bare_id, exc)
+
+        result = _find_local()
+        if result is None:
+            _log.warning("ensure_game_local: %s downloaded but rescan found no local entry",
+                         bare_id)
+        else:
+            _log.info("ensure_game_local: bootstrapped %s -> %s",
+                      bare_id, result.local_dir)
+        return result
 
 
 def _env_date(local_dir: str | None) -> str:

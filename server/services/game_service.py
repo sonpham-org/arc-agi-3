@@ -1,8 +1,10 @@
 """Game service layer — Game initialization and step validation.
 # Author: Claude Opus 4.6
-# Date: 2026-03-15 00:00
+# Date: 2026-04-06 23:15
 # PURPOSE: Game service — start, step, reset, undo game operations.
-#   Validators imported from shared validators module.
+#   Validators imported from shared validators module. start() handles the
+#   arc.make()=None case (unknown id / failed download) explicitly so the
+#   /api/start route returns JSON 400 instead of crashing.
 # SRP/DRY check: Pass — validators in validators.py, DB ops in db_sessions.py
 
 Validation and orchestration for game operations.
@@ -54,7 +56,12 @@ def start(data: dict, get_arcade_fn=None, env_state_dict_fn=None,
         env = arc.make(bare_id)
     except Exception as e:
         return {"error": str(e)}, 400
-    
+    if env is None:
+        # arc.make() returns None (does not raise) when the game id is unknown
+        # or the download failed. Return JSON 400 instead of letting the
+        # subsequent attribute access crash with a 500.
+        return {"error": f"Game '{bare_id}' is not available"}, 400
+
     # Generate session ID from env
     session_id = env._guid if hasattr(env, "_guid") else str(id(env))
     state = env_state_dict_fn(env)

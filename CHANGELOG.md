@@ -5,6 +5,59 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.16.1] — fix: Play-as-Human empty game list (prod + fresh clone)
+*Author: Claude Opus 4.6 | 2026-04-06*
+
+### Fixed
+- **Play-as-Human sidebar was empty on every fresh deploy, including
+  arc3.sonpham.net.** `GET /api/games` returned `[]`, so no game card could
+  be clicked and the d-pad/canvas/keyboard handlers never got reached. Two
+  commits combined to produce this:
+    1. `779ddae` (`chore: gitignore environment_files/`) removed game
+       sources from git, so fresh deploys (Railway included) start with no
+       local files. `arc_agi.Arcade.get_environments()` then returns every
+       env with `local_dir=None`.
+    2. `f3ed3ed` (`fix: hide unplayable Foundation games`) added
+       `if e.local_dir is not None` to `list_games()` to keep undownloaded
+       Foundation games out of the sidebar. Combined with (1), that filter
+       drops *every* game.
+  - **`server/helpers.py`** — new `ensure_game_local(game_id)` helper.
+    Wraps `arc_agi.Arcade.make()` (which downloads into
+    `environment_files/<id>/<version>/`) with a per-game `threading.Lock` so
+    concurrent requests for the same game don't double-download. Calls
+    `arc._scan_for_environments()` after the download so the cached
+    `EnvironmentInfo` objects pick up the new `local_dir`. Returns `None`
+    on failure (unknown id, network error) — never raises.
+  - **`server/app.py:list_games()`** — bootstrap-on-empty branch. When
+    every dedup'd env is remote-only (the cold-start case), call
+    `ensure_game_local` on each, then re-dedup from the freshly populated
+    cache. Fires once per process; in normal mixed-state operation
+    (`f3ed3ed`'s intended case) the branch is skipped and remote-only
+    Foundation games stay hidden.
+  - **`server/app.py:_dedup_environments()`** — extracted the existing
+    dedup loop into a private helper so `list_games` can call it twice
+    (before and after bootstrap) without copy-paste.
+  - **`server/app.py:game_source()`** — when the matched env has
+    `local_dir=None`, call `ensure_game_local` to download on demand
+    instead of going straight to 404.
+  - **`server/services/game_service.py:start()`** — handle `arc.make()`
+    returning `None` (it does *not* raise on unknown id; it logs and
+    returns `None`). Without this, `/api/start` for an unknown game would
+    crash with `AttributeError` on `env._guid` and 500. Now returns JSON
+    400 `{"error": "Game '<id>' is not available"}`.
+
+### Verified
+Cold-start smoke test against the local server with `environment_files/`
+deleted:
+- `GET /api/games` → bootstraps and returns full populated list (~25 games).
+- `GET /api/games` (second hit) → 14 ms, no re-download.
+- `POST /api/start {"game_id":"ls20"}` → JSON `session_id` + initial grid.
+- `POST /api/step {"session_id":..., "action":1}` → updated grid + change_map.
+- `POST /api/start {"game_id":"zz99"}` → JSON 400 (not 500 HTML).
+- `GET  /api/games/zz99/source` → JSON 404 (not 500 HTML).
+
+---
+
 ## [1.16.0] — feat: Instinct Survey + agent_llm bugfix
 *Author: Cascade (Claude Opus 4.6 thinking) | 29-Mar-2026*
 

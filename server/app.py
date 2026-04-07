@@ -1,11 +1,13 @@
-# Author: Claude Sonnet 4.6 + Claude Opus 4.6
-# Date: 2026-03-25 16:50
+# Author: Claude Opus 4.6
+# Date: 2026-04-06 23:10
 # PURPOSE: Flask server for ARC-AGI-3 web player (Observatory). Responsibilities: static file
 #   serving, session persistence (save/resume/branch via SQLite), game step proxying, model
 #   registry API (/api/llm/models), Cloudflare Workers AI proxy (/api/llm/cf-proxy),
 #   observatory, share/replay, admin, and auth endpoints. All LLM orchestration runs CLIENT-SIDE.
 #   Phase 2 refactor extracted bot_protection.py, grid_analysis.py, prompt_builder.py,
 #   session_manager.py, and constants.py — server.py imports from those modules.
+#   list_games() bootstraps environment_files/ on cold start via ensure_game_local()
+#   (helpers.py) so a fresh deploy with no local games still serves a populated sidebar.
 # SRP/DRY check: Pass — model registry in models.py, grid analysis in grid_analysis.py,
 #   prompts in prompt_builder.py, sessions in session_manager.py, bot protection in
 #   bot_protection.py, DB ops in db.py; server.py is the Flask glue layer only
@@ -136,7 +138,7 @@ _server_port_prod = 5001
 from server.helpers import (
     get_mode, feature_enabled, get_enabled_features, get_arcade, get_game_version,
     _env_date, frame_to_grid, env_state_dict, _load_prompts, FEATURES, HIDDEN_GAMES,
-    get_current_user
+    get_current_user, ensure_game_local,
 )
 
 # Service layer imports (Phase 14 refactor)
@@ -430,16 +432,18 @@ def auth_claim_sessions():
     return jsonify({"status": "ok", "claimed": claimed})
 
 
-@app.route("/api/games")
-@bot_protection
-@turnstile_required
-def list_games():
-    arc = get_arcade()
-    envs = arc.get_environments()
-    # Deduplicate: prefer short IDs (ls20) over old hash IDs (ls20-cb3b57cc),
-    # and for observatory games (2-letter dir), keep only the latest version (ac02 > ac01).
-    # Among same-length IDs (Foundation games with multiple hash versions), prefer the
-    # one with the newer date_downloaded in metadata.json — not alphabetical hash order.
+def _dedup_environments(envs):
+    """Deduplicate a list of EnvironmentInfo objects.
+
+    Prefer short IDs (ls20) over old hash IDs (ls20-cb3b57cc), and for
+    observatory games (2-letter dir), keep only the latest version
+    (ac02 > ac01). Among same-length IDs (Foundation games with multiple
+    hash versions), prefer the one with the newer date_downloaded in
+    metadata.json — not alphabetical hash order.
+
+    Returns a dict keyed by short game id (or 2-letter prefix for Observatory
+    games), value = the chosen EnvironmentInfo.
+    """
     def _is_newer_env(candidate, existing):
         # 1. A local copy always beats an API-only entry (no local_dir)
         c_local = candidate.local_dir is not None
@@ -476,6 +480,29 @@ def list_games():
             key = short
         if key not in seen or _is_newer_env(e, seen[key]):
             seen[key] = e
+    return seen
+
+
+@app.route("/api/games")
+@bot_protection
+@turnstile_required
+def list_games():
+    arc = get_arcade()
+    seen = _dedup_environments(arc.get_environments())
+
+    # Cold start: if every dedup'd env is remote-only (no local_dir), the
+    # filter below would return [] and the Play-as-Human sidebar would be
+    # empty. This happens on every fresh deploy after commit 779ddae
+    # (gitignored environment_files/) — Railway included. Bootstrap by
+    # downloading each candidate via ensure_game_local(), then re-dedup from
+    # the freshly-populated cache. Only fires when ALL envs are remote-only,
+    # so the legitimate "some-Foundation-games-aren't-downloaded" case
+    # introduced by f3ed3ed is unaffected.
+    if seen and all(e.local_dir is None for e in seen.values()):
+        for e in list(seen.values()):
+            ensure_game_local(e.game_id)
+        seen = _dedup_environments(arc.get_environments())
+
     # Exclude games with no local source — they exist in the ARC Prize API but
     # aren't downloaded yet and will fail with a 500 if a user tries to play them.
     games = [
@@ -503,6 +530,9 @@ def game_source(game_id):
     matching_local = [e for e in matching if e.local_dir is not None]
     candidates = matching_local or matching
     env_info = max(candidates, key=lambda e: (_env_date(e.local_dir), e.local_dir or "")) if candidates else None
+    # Download on demand if the game exists in the API but isn't local yet.
+    if env_info is not None and env_info.local_dir is None:
+        env_info = ensure_game_local(env_info.game_id) or env_info
     if env_info is None or env_info.local_dir is None:
         return jsonify({"error": f"Game {game_id} not available locally"}), 404
     local_dir = Path(env_info.local_dir)
