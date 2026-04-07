@@ -1,0 +1,9 @@
+{
+  "game_id": "mr01",
+  "title": "Medieval War RT",
+  "default_fps": 10,
+  "baseline_actions": [],
+  "tags": ["live"],
+  "local_dir": "mr",
+  "date_downloaded": "2026-03-16"
+}

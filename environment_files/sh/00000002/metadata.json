@@ -1,0 +1,9 @@
+{
+    "game_id": "sh01",
+    "title": "Stealth Hunter",
+    "default_fps": 6,
+    "baseline_actions": [7, 12, 18, 20, 15, 16, 25, 35],
+    "tags": ["stealth", "strategy", "puzzle"],
+    "local_dir": "environment_files/sh/00000002",
+    "date_downloaded": "2026-03-11T00:00:00.000000+00:00"
+}

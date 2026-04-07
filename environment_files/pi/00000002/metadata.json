@@ -1,0 +1,9 @@
+{
+    "game_id": "pi01",
+    "title": "Pirate Ship",
+    "default_fps": 10,
+    "baseline_actions": [1, 2, 3, 4],
+    "tags": ["live"],
+    "local_dir": "environment_files/pi/00000002",
+    "date_downloaded": "2026-03-08"
+}

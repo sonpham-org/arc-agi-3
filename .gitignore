@@ -48,5 +48,31 @@ output/
 # Agent memory — runtime session log (templates like MEMORY.md stay tracked)
 memory/sessions.json
 
-# ARC SDK game cache (auto-downloaded by arc_agi on first run)
-environment_files/
+# Foundation games are auto-downloaded by arc_agi on first run (cached on
+# disk under environment_files/<id>/<version>/). Observatory games are our
+# OWN custom games — they only exist in this repo and MUST stay tracked,
+# otherwise the sidebar loses them after every fresh deploy.
+# Ignore everything under environment_files/, then re-include the
+# Observatory game directories explicitly.
+environment_files/*
+!environment_files/ab/
+!environment_files/ac/
+!environment_files/ar/
+!environment_files/cr/
+!environment_files/fd/
+!environment_files/fr/
+!environment_files/fy/
+!environment_files/gh/
+!environment_files/lb/
+!environment_files/mr/
+!environment_files/mw/
+!environment_files/pc/
+!environment_files/pi/
+!environment_files/pt/
+!environment_files/px/
+!environment_files/sh/
+!environment_files/sn/
+!environment_files/td/
+!environment_files/ts/
+!environment_files/ws03/
+!environment_files/ws04/

@@ -1,0 +1,8 @@
+{
+  "game_id": "ab01",
+  "title": "Angry Birds",
+  "default_fps": 20,
+  "baseline_actions": [],
+  "tags": ["physics", "arcade", "casual"],
+  "date_downloaded": "2026-03-02T00:00:00.000000+00:00"
+}

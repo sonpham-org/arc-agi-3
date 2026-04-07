@@ -1,0 +1,9 @@
+{
+  "game_id": "sn02",
+  "title": "Sneeze",
+  "default_fps": 8,
+  "baseline_actions": [15, 20, 25, 30, 35, 40, 50],
+  "tags": ["simulation", "strategy", "infection"],
+  "local_dir": "environment_files/sn/00000002",
+  "date_downloaded": "2026-03-09"
+}
