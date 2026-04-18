@@ -1,0 +1,20 @@
+{
+  "game_id": "ar25-e3c63847",
+  "title": "AR25",
+  "default_fps": 6,
+  "tags": [
+    "keyboard_click"
+  ],
+  "baseline_actions": [
+    17,
+    22,
+    103,
+    29,
+    29,
+    159,
+    152,
+    66
+  ],
+  "local_dir": "environment_files/ar25/e3c63847",
+  "date_downloaded": "2026-03-25T17:43:29.056193+00:00"
+}
