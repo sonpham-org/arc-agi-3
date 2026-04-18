@@ -34,7 +34,7 @@ FEATURES = {
     "pyodide_game":  {"staging": True,   "prod": True},
 }
 
-HIDDEN_GAMES = ["ab", "ar", "fd", "fy", "gh", "mr", "mw", "pc", "pt", "sh", "td", "ts"]
+HIDDEN_GAMES = ["ab", "ar", "fd", "fy", "gh", "mr", "mw", "pc", "pt", "sh", "td", "ts", "ws"]
 
 DEV_SECRET = None  # Set from env at startup
 
