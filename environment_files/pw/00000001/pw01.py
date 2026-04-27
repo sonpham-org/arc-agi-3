@@ -337,10 +337,14 @@ class Pw01(ARCBaseGame):
         self.lives = LIVES_PER_LEVEL
         self.spills = []  # transient spill markers: list[(x, y, ttl)] for HUD flash
 
+        # available_actions includes 7 so the live-mode idle tick uses
+        # ACTION7 (release) instead of falling back to ACTION6 (click) —
+        # otherwise the kettle would keep tilting up even when the player
+        # is not pressing the mouse. See static/js/human.js:_humanLiveIdleAction.
         super().__init__(
             'pw', levels,
             Camera(0, 0, GW, GH, C_BLACK, C_BLACK, [self.display]),
-            False, len(levels), [6],
+            False, len(levels), [6, 7],
         )
 
     # ── Level setup ─────────────────────────────────────────────────────────

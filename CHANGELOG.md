@@ -5,6 +5,23 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.18.1] — fix: pw01 idle tick was firing ACTION6 instead of ACTION7
+*Author: Claude Opus 4.7 (1M context) | 2026-04-26*
+
+### Fixed
+- **`environment_files/pw/00000001/pw01.py`** + **`metadata.json`** —
+  `available_actions` (and `baseline_actions`) now include both `6` and
+  `7`. Previously they were `[6]`-only, which tripped the live-mode
+  rule in `static/js/human.js:118` — that file picks the idle action as
+  `7` only when it's listed in the available actions, otherwise falls
+  back to `6`. Result: the kettle was tilting up on every idle tick, so
+  water poured continuously the moment the session started. Listing `7`
+  makes the idle tick correctly send `ACTION7`, which my `step()` reads
+  as "no click" and decays tilt by 1°. v1 is edited in place — no v2
+  bump because no sessions had been recorded against it yet.
+
+---
+
 ## [1.18.0] — feat: pw01 Pouring Water game (live-mode water-physics sim)
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 
