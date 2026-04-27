@@ -65,6 +65,7 @@ environment_files/*
 !environment_files/gh/
 !environment_files/lb/
 !environment_files/mr/
+!environment_files/mt/
 !environment_files/mw/
 !environment_files/pc/
 !environment_files/pi/

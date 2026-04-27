@@ -1,0 +1,9 @@
+{
+    "game_id": "mt01",
+    "title": "Mortar",
+    "default_fps": 10,
+    "baseline_actions": [1, 2, 3, 4, 5, 7],
+    "tags": [],
+    "local_dir": "environment_files/mt/00000001",
+    "date_downloaded": "2026-04-26"
+}

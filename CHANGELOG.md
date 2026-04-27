@@ -5,6 +5,54 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.19.0] — feat: mt01 Mortar (walk-mount-fire with hidden trajectory + companion feedback)
+*Author: Claude Opus 4.7 (1M context) | 2026-04-26*
+
+### Added
+- **`environment_files/mt/00000001/mt01.py`** — new discrete-input
+  game where the player walks a 3×3 sprite to a mortar emplacement
+  (ACTION1–4), mounts it with `Z` (ACTION5), dials in an angle and
+  force, and fires a shell at a target. The shell's flight path is
+  intentionally **not rendered** — only the impact crater is shown.
+  A 3×3 companion sprite next to the mortar carries a 5×5 speech
+  bubble that displays comparative feedback after each shot:
+  green ▲ (CLOSER), red ▼ (FURTHER), yellow ‒ (SAME), white • (FIRE,
+  first shot, no comparison), or yellow ★ (HIT). Distance is measured
+  in grid columns: hit window is `|impact_x − target_x| ≤ 1` AND
+  `|impact_y − target_y| ≤ 2`, so the player has to triangulate by
+  ear over multiple shots.
+- **Walking + mortar dual-mode controls** — in walk mode ACTION3/4 step
+  the player one cell left/right (terrain-aware: can climb at most 1
+  cell, can't pass through the mortar base). ACTION5 next to the
+  mortar transitions to mortar mode; ACTION7 (`X`) returns to walking.
+  In mortar mode ACTION1/2 = angle ±5° (clamped 20°–80°), ACTION3/4 =
+  force ∓1 (clamped 3–12), ACTION5 = FIRE.
+- **Deterministic ballistics** — fixed-step Euler integration with
+  `gravity = 0.35`. No RNG, no wind, no variance — same angle/force
+  always lands at the same `(x, y)`. Trajectory is computed inside one
+  game step so the player never sees the in-flight shell.
+- **3 levels** — *Open Field* (flat target at x=43), *Over the Hill*
+  (8-cell hill at x=26..32 forces a higher arc; target x=48 just
+  beyond), *Beyond the Mountain* (18-cell mountain at x=22..38
+  completely occludes the target at x=59 — pure feedback-driven
+  guessing). Per-level ammo = 8.
+- **`environment_files/mt/00000001/metadata.json`** — registers `mt01`
+  with `tags: []`, `baseline_actions: [1,2,3,4,5,7]` (no live mode,
+  no mouse), `default_fps: 10`.
+- **`docs/26-Apr-2026-mortar-game-plan.md`** — design plan.
+
+### Verified
+- **Smoke test** — scripted action sequence wins all 3 levels and ends
+  in `GameState.WIN`.
+- **Playwright browser run** — full walk → mount → adjust → fire flow
+  exercised in Chromium against a local Flask + Pyodide build, ending
+  with the in-game "YOU WIN!" overlay on level 3 (87 steps total).
+  Speech-bubble HIT star renders correctly on the winning shot.
+  Screenshots at `/tmp/mt01-before-fire.png`, `/tmp/mt01-after-fire.png`,
+  `/tmp/mt01-after-l3.png`.
+
+---
+
 ## [1.18.1] — fix: pw01 idle tick was firing ACTION6 instead of ACTION7
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 
