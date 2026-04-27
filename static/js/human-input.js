@@ -47,10 +47,10 @@ async function _humanCanvasClick(e) {
     });
   }
 
-  // Animate intermediate frames on human canvas
+  // Animate intermediate frames on human canvas at 30 FPS by default.
   if (data.frames && data.frames.length > 1) {
-    const fps = (currentState && currentState.default_fps) || 5;
-    const delay = Math.max(50, Math.round(1000 / fps));
+    const fps = 30;
+    const delay = Math.max(16, Math.round(1000 / fps));
     for (let i = 0; i < data.frames.length - 1; i++) {
       _humanRenderGrid(data.frames[i]);
       await new Promise(r => setTimeout(r, delay));

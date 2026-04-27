@@ -592,8 +592,10 @@ async function pyodideStep(actionId, actionData) {
   // Animate intermediate physics frames before returning final state
   // Skip when in human mode — human-game.js animates on its own canvas
   if (state.frames && state.frames.length > 1 && !_humanRecording) {
-    const fps = (currentState && currentState.default_fps) || 20;
-    const delay = Math.max(50, Math.round(1000 / fps));
+    // 30 FPS default for in-action physics frames so trajectories,
+    // level transitions, etc. play smoothly instead of choppy.
+    const fps = 30;
+    const delay = Math.max(16, Math.round(1000 / fps));
     for (let i = 0; i < state.frames.length - 1; i++) {
       renderGrid(state.frames[i]);
       await new Promise(r => setTimeout(r, delay));

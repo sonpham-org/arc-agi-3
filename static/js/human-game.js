@@ -47,10 +47,12 @@ async function humanDoAction(actionId, isClick, direct = false) {
     });
   }
 
-  // Animate intermediate frames (e.g. level transitions) on human canvas
+  // Animate intermediate frames (e.g. level transitions, in-flight
+  // shells) on the human canvas at 30 FPS by default so motion reads
+  // as continuous instead of stuttery.
   if (data.frames && data.frames.length > 1) {
-    const fps = (currentState && currentState.default_fps) || 5;
-    const delay = Math.max(50, Math.round(1000 / fps));
+    const fps = 30;
+    const delay = Math.max(16, Math.round(1000 / fps));
     for (let i = 0; i < data.frames.length - 1; i++) {
       _humanRenderGrid(data.frames[i]);
       await new Promise(r => setTimeout(r, delay));
