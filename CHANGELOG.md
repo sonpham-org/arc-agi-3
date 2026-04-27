@@ -5,6 +5,23 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.17.0] — feat: open all games in prod (Observatory → game-explorer pivot)
+*Author: Claude Opus 4.7 | 2026-04-26*
+
+### Changed
+- **`server/state.py`** — `HIDDEN_GAMES` is now an empty list. Previously
+  the two-letter prefixes `["ab", "ar", "fd", "fy", "gh", "mr", "mw", "pc",
+  "pt", "sh", "td", "ts", "ws"]` were stripped from `/api/games` in prod
+  unless `?show_all=1` was passed. The Observatory project is pivoting to
+  a game-explorer role, so every game in `environment_files/` should be
+  reachable from the prod sidebar. The prefix-match filter at
+  `server/app.py:516` is left intact (no semantic change) so future hides
+  only require re-populating the list.
+- Side effect: the `ar25` Foundation game, which had been incidentally
+  hidden by the `"ar"` (Arbitrage Runner) prefix, is now visible too.
+
+---
+
 ## [1.16.1] — fix: Play-as-Human empty game list (prod + fresh clone)
 *Author: Claude Opus 4.6 | 2026-04-06*
 

@@ -1,9 +1,11 @@
-# Author: Claude Sonnet 4.6
-# Date: 2026-03-25 10:00
+# Author: Claude Opus 4.7
+# Date: 2026-04-26 12:00
 # PURPOSE: Shared in-memory state for the Flask application. Declares feature
-#   flags, HIDDEN_GAMES list (games hidden from prod /api/games), auth cache,
-#   arcade instance, and draw/FD environment paths. All mutable shared state
-#   lives here so Flask blueprints can import it without circular dependencies.
+#   flags, HIDDEN_GAMES list (games hidden from prod /api/games — currently
+#   empty: Observatory pivoted to a game-explorer role so all games are public),
+#   auth cache, arcade instance, and draw/FD environment paths. All mutable
+#   shared state lives here so Flask blueprints can import it without circular
+#   dependencies.
 # SRP/DRY check: Pass — single file for shared state; no business logic here
 """Shared in-memory state for the Flask application.
 
@@ -34,7 +36,7 @@ FEATURES = {
     "pyodide_game":  {"staging": True,   "prod": True},
 }
 
-HIDDEN_GAMES = ["ab", "ar", "fd", "fy", "gh", "mr", "mw", "pc", "pt", "sh", "td", "ts", "ws"]
+HIDDEN_GAMES: list[str] = []  # All games public (Observatory → game-explorer pivot, 2026-04-26)
 
 DEV_SECRET = None  # Set from env at startup
 

@@ -1,8 +1,9 @@
-# Author: Claude Opus 4.6
-# Date: 2026-03-15 00:00
+# Author: Claude Opus 4.7
+# Date: 2026-04-26 12:00
 # PURPOSE: Critical user-experience flow tests — game start, step, undo, resume,
 #   game listing. These tests exercise the actual game engine + service layer to
-#   ensure core gameplay works end-to-end after any refactoring.
+#   ensure core gameplay works end-to-end after any refactoring. Game-listing
+#   tests now reflect the empty HIDDEN_GAMES (Observatory → game-explorer pivot).
 # SRP/DRY check: Pass — one test file per concern area
 """Critical flow tests for game start, step, undo, resume, and game listing."""
 
@@ -341,15 +342,18 @@ class TestGameListing(unittest.TestCase):
         self.assertIs(state_hidden, helpers_hidden,
                       "HIDDEN_GAMES in helpers should be the same object as in state")
 
-    def test_hidden_games_contains_expected(self):
-        """HIDDEN_GAMES should contain the expected game prefixes."""
+    def test_hidden_games_empty(self):
+        """HIDDEN_GAMES is empty after the Observatory → game-explorer pivot.
+
+        All games in environment_files/ are intentionally public. If a future
+        change re-hides games, update this test alongside HIDDEN_GAMES.
+        """
         from server.state import HIDDEN_GAMES
-        for prefix in ["ab", "fd", "fy", "mr", "mw", "pt", "sh"]:
-            self.assertIn(prefix, HIDDEN_GAMES,
-                          f"Expected '{prefix}' in HIDDEN_GAMES")
+        self.assertEqual(HIDDEN_GAMES, [],
+                         "HIDDEN_GAMES should be empty; all games are public")
 
     def test_prod_filtering_logic(self):
-        """Games with hidden prefixes should be filtered in prod mode."""
+        """With HIDDEN_GAMES empty, the prefix filter is a no-op in prod."""
         from server.state import HIDDEN_GAMES
         # Simulate filtering logic from app.py
         test_games = [
@@ -360,10 +364,8 @@ class TestGameListing(unittest.TestCase):
         ]
         filtered = [g for g in test_games if g["game_id"][:2] not in HIDDEN_GAMES]
         game_ids = [g["game_id"] for g in filtered]
-        self.assertIn("ls20", game_ids)
-        self.assertIn("ft09", game_ids)
-        self.assertNotIn("ab01", game_ids)
-        self.assertNotIn("fd01", game_ids)
+        self.assertEqual(game_ids, ["ls20", "ab01", "fd01", "ft09"],
+                         "Empty HIDDEN_GAMES should leave the list untouched")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
