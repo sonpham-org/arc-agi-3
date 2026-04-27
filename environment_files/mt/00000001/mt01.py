@@ -1,24 +1,25 @@
 # Author: Claude Opus 4.7 (1M context)
-# Date: 2026-04-26 14:30
-# PURPOSE: Mortar (mt01) — discrete-input game where the player walks to
-#   a mortar, mounts it (ACTION5/Z), dials in an angle and force, and
-#   fires a shell at a target. The shell's trajectory is intentionally
-#   NOT rendered — only the impact crater is shown briefly. A companion
-#   sprite next to the mortar gives feedback ("CLOSER" / "FURTHER" /
-#   "SAME" / "HIT") relative to the previous shot, so the player can
-#   adjust by ear rather than by sight. 3 levels: open field, hill in
-#   the way, full mountain occlusion. Win = impact within 1 cell of
-#   target. Lose = shells exhausted (8 per level). Fully deterministic
-#   ballistics (Euler integration, fixed gravity, no RNG).
+# Date: 2026-04-26 17:30
+# PURPOSE: Mortar (mt01) — discrete-input game where the player walks
+#   to a mortar, mounts it (Z = ACTION5), dials in an angle and force,
+#   and FIRES (X = ACTION7) a shell at a target. The shell flies in a
+#   visible parabolic arc that the player can watch — each integration
+#   tick of the shell is rendered as its own frame, played back at the
+#   game's default_fps. After landing, a 6×6 companion sprite next to
+#   the mortar shows comparative feedback ("CLOSER" / "FURTHER" /
+#   "SAME" / "HIT") in a 10×10 speech bubble. 3 levels: open field,
+#   hill in the way, full mountain occlusion. Win = impact within 1
+#   cell of target. Lose = shells exhausted (8 per level). Fully
+#   deterministic ballistics (Euler integration, fixed gravity, no RNG).
 #   Integration: subclass of arcengine.ARCBaseGame, registered as
 #   game_id "mt01" via metadata.json. Listed automatically by
 #   /api/games once the environment_files/mt/00000001/ directory exists.
-# SRP/DRY check: Pass — searched environment_files/* for any existing
-#   ballistic / hidden-trajectory game; ab01 is the closest reference
-#   (Angry Birds with VISIBLE trajectory) but its mechanics are
-#   click-and-launch, not walk-mount-fire, and it always renders the
-#   flight path. mt01's hidden-trajectory + companion-feedback loop is
-#   unique. Sprite/terrain helpers are intrinsic to this game's layout.
+#   2× sprites compared to the initial draft — every character (player,
+#   companion, mortar base/tube, target flag, speech bubble, impact
+#   crater) is doubled in each dimension for legibility.
+# SRP/DRY check: Pass — no shared sprite or ballistics utility in the
+#   project; ab01's Angry-Birds shooter is the closest analog but
+#   renders trajectories and uses click-and-drag aim, not walk-mount.
 
 import math
 import numpy as np
@@ -47,6 +48,15 @@ C_MAROON = 13
 C_GREEN = 14
 C_PURPLE = 15
 
+# ── Sprite sizes (2× the initial draft) ────────────────────────────────────
+PLAYER_W, PLAYER_H = 6, 6
+COMPANION_W, COMPANION_H = 6, 6
+MORTAR_BASE_W, MORTAR_BASE_H = 10, 4
+MORTAR_TUBE_LEN = 10                  # tube extends this many cells from base top
+TARGET_W, TARGET_H = 6, 12            # 1px pole + 5x6 flag
+BUBBLE_W, BUBBLE_H = 10, 10           # 8x8 interior; 6x6 symbol drawn centered
+SHELL_R = 1                           # shell rendered as a 3x3 cross
+
 # ── Ballistics constants ───────────────────────────────────────────────────
 GRAVITY = 0.35
 MAX_SIM_STEPS = 400  # safety cap on integration loop
@@ -59,43 +69,39 @@ DEFAULT_FORCE = 5
 
 AMMO_PER_LEVEL = 8
 HIT_X_TOL = 1   # |impact_x - target_x| ≤ HIT_X_TOL counts as a hit
-HIT_Y_TOL = 2   # |impact_y - target_y| ≤ HIT_Y_TOL
+HIT_Y_TOL = 2
 
 
-# ── Level data — fully hardcoded, no RNG ───────────────────────────────────
+# ── Level data ─────────────────────────────────────────────────────────────
 # terrain_profile: list of (x_start, x_end, top_y) — cells with y >= top_y
-#   are solid ground in that x-range. The default top_y for any column not
-#   covered by a profile entry is GROUND_Y.
-# mortar_x: x-column of the mortar's centre (5-wide base)
-# companion_x: x-column of the companion's centre (3-wide sprite)
-# player_spawn_x: x-column of the player's left edge at level start
-# target_pos: (target_x, target_y) the impact must land within HIT_*_TOL
+#   are solid ground in that x-range. Default top_y = GROUND_Y elsewhere.
+# Targets re-tuned for the new (taller) muzzle position.
 LEVEL_DATA = [
     {
         'name': 'Open Field',
-        'mortar_x': 10,
-        'companion_x': 16,
-        'player_spawn_x': 28,
+        'mortar_x': 12,
+        'companion_x': 22,
+        'player_spawn_x': 32,
         'target_pos': (43, 56),
-        'terrain_profile': [],   # flat
+        'terrain_profile': [],
     },
     {
         'name': 'Over the Hill',
-        'mortar_x': 8,
-        'companion_x': 14,
-        'player_spawn_x': 22,
-        'target_pos': (48, 56),
-        # Hill bump from x=26..32 going up 8 cells: top_y = 47
-        'terrain_profile': [(26, 32, 47)],
+        'mortar_x': 10,
+        'companion_x': 20,
+        'player_spawn_x': 28,
+        'target_pos': (47, 56),
+        # Hill bump from x=28..34 going up 8 cells: top_y = 47
+        'terrain_profile': [(28, 34, 47)],
     },
     {
         'name': 'Beyond the Mountain',
-        'mortar_x': 8,
-        'companion_x': 14,
-        'player_spawn_x': 18,
-        'target_pos': (59, 56),
-        # Mountain x=22..38 going up to top_y=37
-        'terrain_profile': [(22, 38, 37)],
+        'mortar_x': 10,
+        'companion_x': 20,
+        'player_spawn_x': 28,
+        'target_pos': (56, 56),
+        # Mountain x=24..40 going up to top_y=37
+        'terrain_profile': [(24, 40, 37)],
     },
 ]
 
@@ -119,6 +125,60 @@ def _pset(frame, x, y, color):
         frame[y, x] = color
 
 
+def _draw_pattern(frame, x0, y0, pattern, color):
+    """Draw a 2D bool/int pattern of pixels at (x0,y0). 1/True = pixel set."""
+    for dy, row in enumerate(pattern):
+        for dx, v in enumerate(row):
+            if v:
+                _pset(frame, x0 + dx, y0 + dy, color)
+
+
+# ── 6×6 speech-bubble symbols ──────────────────────────────────────────────
+# Larger than the original 3×3 versions so they're readable when the
+# bubble is just a few centimetres tall on screen.
+
+SYM_CLOSER = [   # green up-arrow
+    [0, 0, 1, 1, 0, 0],
+    [0, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1],
+    [0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 0, 0],
+]
+SYM_FURTHER = [   # red down-arrow
+    [0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 0, 0],
+    [1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 0, 0],
+]
+SYM_SAME = [   # yellow ‖ (two horizontal bars)
+    [0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0],
+]
+SYM_FIRE = [   # white • (filled disc — first shot, no comparison)
+    [0, 0, 1, 1, 0, 0],
+    [0, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 0, 0],
+]
+SYM_HIT = [   # yellow ★
+    [0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 0, 0],
+    [1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 0],
+    [1, 1, 0, 0, 1, 1],
+]
+
+
 # ── Display ────────────────────────────────────────────────────────────────
 
 class MortarDisplay(RenderableUserDisplay):
@@ -132,111 +192,117 @@ class MortarDisplay(RenderableUserDisplay):
         frame[:, :] = C_BLACK
 
         # ── Terrain ─────────────────────────────────────────────────────────
-        # Default flat ground row 55..63
         for x in range(GW):
             top = g.ground_top[x]
             for y in range(top, GH):
-                # Top row of ground = grass tint (lighter), rest dark gray
                 if y == top:
                     frame[y, x] = C_GREEN if top == GROUND_Y else C_DGRAY
                 else:
                     frame[y, x] = C_DGRAY
 
-        # ── Target (red flag) ───────────────────────────────────────────────
+        # ── Target (red flag, 6×12) ─────────────────────────────────────────
         tx, ty = g.target_pos
-        # Pole: 1 column, 6 tall, bottom at ty
-        _draw_rect(frame, tx, ty - 5, 1, 6, C_VDGRAY)
-        # Flag: 3x3 triangle, attached at top of pole
-        _pset(frame, tx + 1, ty - 5, C_RED)
-        _pset(frame, tx + 2, ty - 5, C_RED)
-        _pset(frame, tx + 1, ty - 4, C_RED)
-        _pset(frame, tx + 2, ty - 4, C_RED)
-        _pset(frame, tx + 1, ty - 3, C_RED)
+        # Pole: 1 column, 12 tall, bottom at ty
+        _draw_rect(frame, tx, ty - 11, 1, 12, C_VDGRAY)
+        # Flag: 5×6 triangle attached to the top of the pole, to the right
+        for fy in range(6):
+            for fx in range(5):
+                if fx <= 4 - abs(fy - 2):  # taper toward the right
+                    _pset(frame, tx + 1 + fx, ty - 11 + fy, C_RED)
 
-        # ── Mortar base ─────────────────────────────────────────────────────
+        # ── Mortar base (10×4) ──────────────────────────────────────────────
         mx = g.mortar_x
-        my_base_top = g.ground_top[mx] - 2
-        # Base: 5 wide x 2 tall, dark gray
-        _draw_rect(frame, mx - 2, my_base_top, 5, 2, C_DGRAY)
-        # Wheel pivots (2 black pixels at base bottom-corners)
-        _pset(frame, mx - 2, my_base_top + 1, C_BLACK)
-        _pset(frame, mx + 2, my_base_top + 1, C_BLACK)
+        my_base_top = g.ground_top[mx] - MORTAR_BASE_H
+        # Base: dark gray rectangle
+        _draw_rect(frame, mx - 4, my_base_top, MORTAR_BASE_W, MORTAR_BASE_H, C_DGRAY)
+        # Wheel pivots: 2x2 black squares at base bottom corners
+        _draw_rect(frame, mx - 4, my_base_top + MORTAR_BASE_H - 2, 2, 2, C_BLACK)
+        _draw_rect(frame, mx + 4, my_base_top + MORTAR_BASE_H - 2, 2, 2, C_BLACK)
 
-        # Mortar tube: 1px line from (mx, my_base_top) at angle, length 5
+        # Mortar tube: 2-pixel-wide line from (mx, my_base_top) at angle.
         tube_origin = (mx, my_base_top)
         ang_rad = math.radians(g.angle)
-        for i in range(1, 6):
+        for i in range(1, MORTAR_TUBE_LEN + 1):
             tx_t = tube_origin[0] + i * math.cos(ang_rad)
             ty_t = tube_origin[1] - i * math.sin(ang_rad)
             ix, iy = int(round(tx_t)), int(round(ty_t))
-            color = C_ORANGE if i == 5 else C_VDGRAY
+            color = C_ORANGE if i >= MORTAR_TUBE_LEN - 1 else C_VDGRAY
+            # 2-wide tube — also paint the perpendicular pixel
             _pset(frame, ix, iy, color)
+            _pset(frame, ix, iy + 1, color)
 
-        # ── Companion ───────────────────────────────────────────────────────
+        # ── Companion (6×6) ─────────────────────────────────────────────────
         cx = g.companion_x
-        cy_top = g.ground_top[cx] - 3
-        _draw_rect(frame, cx - 1, cy_top, 3, 3, C_LBLUE)
-        _pset(frame, cx, cy_top, C_WHITE)        # face highlight
+        cy_top = g.ground_top[cx] - COMPANION_H
+        _draw_rect(frame, cx - 2, cy_top, COMPANION_W, COMPANION_H, C_LBLUE)
+        # Eyes: 2 white 1×1 pixels on the upper third
+        _pset(frame, cx - 1, cy_top + 1, C_WHITE)
+        _pset(frame, cx + 2, cy_top + 1, C_WHITE)
+        # Mouth: 2-wide horizontal strip
+        _pset(frame, cx,     cy_top + 3, C_BLACK)
+        _pset(frame, cx + 1, cy_top + 3, C_BLACK)
 
-        # Speech bubble — always rendered to show feedback state. Sits to
-        # the right of and above the companion's head.
-        bx, by = cx + 3, cy_top - 6
-        # 5x5 bubble: white border, black interior
-        _draw_rect(frame, bx, by, 5, 5, C_WHITE)
-        _draw_rect(frame, bx + 1, by + 1, 3, 3, C_BLACK)
-        # Bubble tail (1 pixel) toward companion
-        _pset(frame, bx, by + 5, C_WHITE)
+        # ── Speech bubble (10×10) ──────────────────────────────────────────
+        # Sits to the right of and above the companion's head.
+        bx = cx + 4
+        by = cy_top - BUBBLE_H - 1
+        # Outer border
+        _draw_rect(frame, bx, by, BUBBLE_W, BUBBLE_H, C_WHITE)
+        # Inner cavity (8×8)
+        _draw_rect(frame, bx + 1, by + 1, BUBBLE_W - 2, BUBBLE_H - 2, C_BLACK)
+        # Tail — 2 vertical pixels pointing toward the companion
+        _pset(frame, bx, by + BUBBLE_H, C_WHITE)
+        _pset(frame, bx + 1, by + BUBBLE_H, C_WHITE)
+        _pset(frame, bx, by + BUBBLE_H + 1, C_WHITE)
 
+        # Symbol (6×6) centered in the 8×8 cavity
         fb = g.last_feedback
-        # Symbol drawn in the 3x3 interior at (bx+1, by+1)..(bx+3, by+3)
-        ix0, iy0 = bx + 1, by + 1
+        sym, sym_color = None, None
         if fb == 'CLOSER':
-            # Green up-arrow: top-centre, two side pixels below it, base
-            _pset(frame, ix0 + 1, iy0, C_GREEN)
-            _pset(frame, ix0,     iy0 + 1, C_GREEN)
-            _pset(frame, ix0 + 2, iy0 + 1, C_GREEN)
-            _pset(frame, ix0 + 1, iy0 + 2, C_GREEN)
+            sym, sym_color = SYM_CLOSER, C_GREEN
         elif fb == 'FURTHER':
-            # Red down-arrow
-            _pset(frame, ix0 + 1, iy0, C_RED)
-            _pset(frame, ix0,     iy0 + 1, C_RED)
-            _pset(frame, ix0 + 2, iy0 + 1, C_RED)
-            _pset(frame, ix0 + 1, iy0 + 2, C_RED)
-            # Tail (extra row to show "going down")
-            _pset(frame, ix0 + 1, iy0 + 2, C_RED)
+            sym, sym_color = SYM_FURTHER, C_RED
         elif fb == 'SAME':
-            # Yellow horizontal bar
-            _pset(frame, ix0,     iy0 + 1, C_YELLOW)
-            _pset(frame, ix0 + 1, iy0 + 1, C_YELLOW)
-            _pset(frame, ix0 + 2, iy0 + 1, C_YELLOW)
+            sym, sym_color = SYM_SAME, C_YELLOW
         elif fb == 'FIRE':
-            # White dot — first shot, no comparison yet
-            _pset(frame, ix0 + 1, iy0 + 1, C_WHITE)
+            sym, sym_color = SYM_FIRE, C_WHITE
         elif fb == 'HIT':
-            # Yellow star (diamond plus crosshair)
-            _pset(frame, ix0 + 1, iy0, C_YELLOW)
-            _pset(frame, ix0,     iy0 + 1, C_YELLOW)
-            _pset(frame, ix0 + 1, iy0 + 1, C_YELLOW)
-            _pset(frame, ix0 + 2, iy0 + 1, C_YELLOW)
-            _pset(frame, ix0 + 1, iy0 + 2, C_YELLOW)
-        # else 'NONE' — empty bubble (just shows readiness)
+            sym, sym_color = SYM_HIT, C_YELLOW
+        if sym is not None:
+            _draw_pattern(frame, bx + 2, by + 2, sym, sym_color)
 
-        # ── Player (only in walk mode) ──────────────────────────────────────
+        # ── Player (6×6, only in walk mode) ─────────────────────────────────
         if g.mode == 'walk':
             px = g.player_x
-            py_bot = g.ground_top[px + 1] - 1
-            py_top = py_bot - 2
-            _draw_rect(frame, px, py_top, 3, 3, C_YELLOW)
-            _pset(frame, px + 1, py_top, C_WHITE)   # head highlight
+            # Player rests on top of the ground at its centre column
+            ground_under = int(min(g.ground_top[x] for x in range(px, min(px + PLAYER_W, GW))))
+            py_top = ground_under - PLAYER_H
+            _draw_rect(frame, px, py_top, PLAYER_W, PLAYER_H, C_YELLOW)
+            # Helmet stripe (top 2 rows white) so it reads as a soldier
+            _draw_rect(frame, px, py_top, PLAYER_W, 1, C_WHITE)
+            # Eye dots
+            _pset(frame, px + 1, py_top + 2, C_BLACK)
+            _pset(frame, px + 4, py_top + 2, C_BLACK)
 
-        # ── Impact flash (only after firing, until next fire/level reset) ──
+        # ── Shell in flight ─────────────────────────────────────────────────
+        if g.shell is not None:
+            sx, sy = int(round(g.shell['fx'])), int(round(g.shell['fy']))
+            # Render as a 3-pixel cross + body so it's visible mid-flight
+            for dy, dx in [(-1, 0), (0, -1), (0, 0), (0, 1), (1, 0)]:
+                _pset(frame, sx + dx, sy + dy, C_ORANGE)
+
+        # ── Impact flash (after the shell lands, until next FIRE) ──────────
         if g.impact is not None:
             ix, iy = g.impact
-            # 3x3 orange burst with red centre
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    _pset(frame, ix + dx, iy + dy, C_ORANGE)
-            _pset(frame, ix, iy, C_RED)
+            # 5×5 burst with red core and orange ring
+            for dy in range(-2, 3):
+                for dx in range(-2, 3):
+                    if abs(dx) + abs(dy) <= 2:  # diamond
+                        _pset(frame, ix + dx, iy + dy, C_ORANGE)
+            for dy in range(-1, 2):
+                for dx in range(-1, 2):
+                    _pset(frame, ix + dx, iy + dy, C_RED)
+            _pset(frame, ix, iy, C_YELLOW)
 
         # ── HUD (rows 0..4) ─────────────────────────────────────────────────
         frame[0:HUD_H, :] = C_VDGRAY
@@ -246,7 +312,6 @@ class MortarDisplay(RenderableUserDisplay):
         for i in range(30):
             color = C_BLUE if i < ang_lit else C_BLACK
             _pset(frame, 2 + i, 1, color)
-        # Angle marker: a tiny "A" pixel at left (yellow tag)
         _pset(frame, 0, 1, C_YELLOW)
 
         # Force bar: row 3, x=2..14 — 10 cells, lit count = force-2
@@ -256,15 +321,15 @@ class MortarDisplay(RenderableUserDisplay):
             _pset(frame, 2 + i, 3, color)
         _pset(frame, 0, 3, C_YELLOW)
 
-        # Ammo: row 1, x=40..63 — N pairs of red squares
+        # Ammo: row 1, x=40..63 — small red squares
         for i in range(g.ammo):
             sx = 40 + i * 3
             if sx + 1 < GW:
                 _pset(frame, sx, 1, C_MAROON)
                 _pset(frame, sx + 1, 1, C_MAROON)
 
-        # Mode indicator: row 3, x=58..62
-        # 'W' (walking) = 3x3 yellow, 'M' (mortar) = 3x3 orange
+        # Mode indicator (row 2..4 right side)
+        # 'W' (walk) = yellow 3x3, 'M' (mortar) = orange 3x3
         mode_x = 58
         if g.mode == 'walk':
             _draw_rect(frame, mode_x, 2, 3, 3, C_YELLOW)
@@ -292,6 +357,7 @@ class Mt01(ARCBaseGame):
         self.last_distance = None
         self.last_feedback = 'NONE'
         self.impact = None
+        self.shell = None        # dict {fx,fy,vx,vy} while in flight; None otherwise
         self.ground_top = np.full(GW, GROUND_Y, dtype=np.int32)
 
         super().__init__(
@@ -315,6 +381,7 @@ class Mt01(ARCBaseGame):
         self.last_distance = None
         self.last_feedback = 'NONE'
         self.impact = None
+        self.shell = None
 
         # Build terrain top-row map
         self.ground_top = np.full(GW, GROUND_Y, dtype=np.int32)
@@ -331,72 +398,135 @@ class Mt01(ARCBaseGame):
         return y >= self.ground_top[x]
 
     def _adjacent_to_mortar(self) -> bool:
-        # Player covers x..x+2; mortar base covers mortar_x-2..mortar_x+2
-        plx, prx = self.player_x, self.player_x + 2
-        mlx, mrx = self.mortar_x - 2, self.mortar_x + 2
-        # Adjacent = bounding boxes touching or overlapping by ≤ 1 cell gap
+        # Player (6 wide) covers x..x+5; mortar base (10 wide) covers
+        # mortar_x-4..mortar_x+5
+        plx, prx = self.player_x, self.player_x + PLAYER_W - 1
+        mlx, mrx = self.mortar_x - 4, self.mortar_x + 5
         return prx + 1 >= mlx and plx - 1 <= mrx
 
     # ── Walk-mode movement ──────────────────────────────────────────────────
 
     def _try_walk(self, dx: int):
-        # Move 1 cell horizontally if the destination has standable ground
-        # (within 1 cell of current ground height — otherwise too steep).
         new_x = self.player_x + dx
-        if new_x < 0 or new_x + 2 >= GW:
-            return  # would walk off-screen
-        # Player must be able to stand on every cell it covers
-        cur_ground = int(self.ground_top[self.player_x + 1])
-        new_ground_left = int(self.ground_top[new_x])
-        new_ground_right = int(self.ground_top[new_x + 2])
-        new_ground = min(new_ground_left, new_ground_right)
+        if new_x < 0 or new_x + PLAYER_W - 1 >= GW:
+            return
+        cur_ground = int(min(self.ground_top[x]
+                             for x in range(self.player_x,
+                                            self.player_x + PLAYER_W)))
+        new_ground = int(min(self.ground_top[x]
+                             for x in range(new_x, new_x + PLAYER_W)))
         # Don't allow climbing more than 1 cell up per step
         if new_ground < cur_ground - 1:
             return
-        # Don't walk into the mortar
-        mlx, mrx = self.mortar_x - 2, self.mortar_x + 2
-        if new_x + 2 >= mlx and new_x <= mrx:
+        # Don't walk into the mortar base
+        plx, prx = new_x, new_x + PLAYER_W - 1
+        mlx, mrx = self.mortar_x - 4, self.mortar_x + 5
+        if prx >= mlx and plx <= mrx:
             return
         self.player_x = new_x
 
-    # ── Ballistics ──────────────────────────────────────────────────────────
+    # ── Ballistics — shell launch + per-tick advance ────────────────────────
 
-    def _fire_shell(self):
-        # Muzzle position: top of the mortar base, slightly above
-        muzzle_x = float(self.mortar_x)
-        muzzle_y = float(self.ground_top[self.mortar_x] - 3)
+    def _muzzle_xy(self) -> tuple[float, float]:
+        """Tip of the rotated tube, in world coordinates."""
+        mx = self.mortar_x
+        my_base_top = float(self.ground_top[mx] - MORTAR_BASE_H)
+        ang = math.radians(self.angle)
+        return (mx + MORTAR_TUBE_LEN * math.cos(ang),
+                my_base_top - MORTAR_TUBE_LEN * math.sin(ang))
 
+    def _launch_shell(self):
+        muzzle_x, muzzle_y = self._muzzle_xy()
         ang_rad = math.radians(self.angle)
         vx = self.force * math.cos(ang_rad)
-        vy = -self.force * math.sin(ang_rad)   # screen y increases downward
+        vy = -self.force * math.sin(ang_rad)
+        self.shell = {
+            'fx': muzzle_x,
+            'fy': muzzle_y,
+            'vx': vx,
+            'vy': vy,
+            'steps': 0,
+        }
 
-        x, y = muzzle_x, muzzle_y
-        impact_pos = None
-        for _ in range(MAX_SIM_STEPS):
-            x += vx
-            y += vy
-            vy += GRAVITY
-            ix, iy = int(round(x)), int(round(y))
-            if iy >= GH:
-                # Off-screen below the world: snap to bottom row, keep ix
-                impact_pos = (max(0, min(GW - 1, ix)), GH - 1)
-                break
-            if ix < 0 or ix >= GW:
-                # Off-screen left/right: count as a max-distance miss
-                impact_pos = None
-                break
-            if iy < 0:
-                # Above world (still ascending) — just keep going
-                continue
-            if self._is_ground(ix, iy):
-                impact_pos = (ix, iy)
-                break
+    def _tick_shell(self):
+        """Advance the in-flight shell one Euler tick. Sets self.shell to
+        None when the shell lands or leaves the world; in that case the
+        impact (or None for off-screen) is captured into self.impact and
+        self._pending_impact is set so step() knows to resolve it."""
+        s = self.shell
+        s['fx'] += s['vx']
+        s['fy'] += s['vy']
+        s['vy'] += GRAVITY
+        s['steps'] += 1
+        ix, iy = int(round(s['fx'])), int(round(s['fy']))
 
-        return impact_pos
+        if s['steps'] > MAX_SIM_STEPS:
+            # Defensive cap — count as off-screen miss
+            self.shell = None
+            self.impact = None
+            return
+
+        if iy >= GH:
+            # Off the bottom — clamp to floor and treat as ground hit
+            self.shell = None
+            self.impact = (max(0, min(GW - 1, ix)), GH - 1)
+            return
+        if ix < 0 or ix >= GW:
+            # Off the side
+            self.shell = None
+            self.impact = None
+            return
+        if iy < 0:
+            # Above the world — keep flying
+            return
+        if self._is_ground(ix, iy):
+            self.shell = None
+            self.impact = (ix, iy)
+            return
+        # Otherwise still in the air
+
+    def _resolve_impact(self):
+        """Called once after shell lands. Sets feedback, win/lose."""
+        impact = self.impact
+        if impact is None:
+            dx = 9999
+            hit = False
+        else:
+            dx = abs(impact[0] - self.target_pos[0])
+            hit = (abs(impact[0] - self.target_pos[0]) <= HIT_X_TOL
+                   and abs(impact[1] - self.target_pos[1]) <= HIT_Y_TOL)
+
+        if hit:
+            self.last_feedback = 'HIT'
+        elif self.last_distance is None:
+            self.last_feedback = 'FIRE'
+        elif dx < self.last_distance:
+            self.last_feedback = 'CLOSER'
+        elif dx > self.last_distance:
+            self.last_feedback = 'FURTHER'
+        else:
+            self.last_feedback = 'SAME'
+        self.last_distance = dx
+
+        if hit:
+            self.next_level()
+        elif self.ammo <= 0:
+            self.lose()
 
     # ── Main step ───────────────────────────────────────────────────────────
 
     def step(self):
+        # If a shell is in flight, every step() call advances its physics
+        # by one tick and emits a frame. complete_action() is held back
+        # until the shell lands — the engine renders one frame per step()
+        # iteration and ships them as a thinned animation list.
+        if self.shell is not None:
+            self._tick_shell()
+            if self.shell is None:
+                self._resolve_impact()
+                self.complete_action()
+            return
+
         aid = self.action.id.value
 
         if self.mode == 'walk':
@@ -404,13 +534,10 @@ class Mt01(ARCBaseGame):
                 self._try_walk(-1)
             elif aid == 4:
                 self._try_walk(1)
-            elif aid == 1 or aid == 2:
-                pass   # vertical movement unused in walk mode
-            elif aid == 5:
+            elif aid == 5:   # Z — mount mortar if adjacent
                 if self._adjacent_to_mortar():
                     self.mode = 'mortar'
-            elif aid == 7:
-                pass   # already in walk mode
+            # ACTION1, 2, 7 are ignored in walk mode
             self.complete_action()
             return
 
@@ -423,45 +550,14 @@ class Mt01(ARCBaseGame):
             self.force = max(FORCE_MIN, self.force - 1)
         elif aid == 4:
             self.force = min(FORCE_MAX, self.force + 1)
-        elif aid == 7:
+        elif aid == 5:   # Z — dismount, return to walking
             self.mode = 'walk'
-        elif aid == 5:
-            # FIRE — only if there's ammo left
+        elif aid == 7:   # X — FIRE
             if self.ammo > 0:
                 self.ammo -= 1
-                impact = self._fire_shell()
-                self.impact = impact
-                # Compute distance to target (∞ if shell flew off-screen)
-                if impact is None:
-                    dx = 9999
-                else:
-                    dx = abs(impact[0] - self.target_pos[0])
-
-                # Hit check: x within tol and y within tol (impact must
-                # land near the target's foot, not anywhere on the pole).
-                hit = False
-                if impact is not None:
-                    if (abs(impact[0] - self.target_pos[0]) <= HIT_X_TOL
-                            and abs(impact[1] - self.target_pos[1]) <= HIT_Y_TOL):
-                        hit = True
-
-                # Feedback
-                if hit:
-                    self.last_feedback = 'HIT'
-                elif self.last_distance is None:
-                    self.last_feedback = 'FIRE'
-                elif dx < self.last_distance:
-                    self.last_feedback = 'CLOSER'
-                elif dx > self.last_distance:
-                    self.last_feedback = 'FURTHER'
-                else:
-                    self.last_feedback = 'SAME'
-                self.last_distance = dx
-
-                # Win/lose
-                if hit:
-                    self.next_level()
-                elif self.ammo <= 0:
-                    self.lose()
-
+                self.impact = None       # clear previous impact while shell flies
+                self._launch_shell()     # initialises self.shell; animation begins next step()
+                # Don't complete_action — engine loop will keep calling
+                # step() until the shell lands.
+                return
         self.complete_action()

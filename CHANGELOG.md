@@ -5,6 +5,43 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.21.0] — feat(mt01): 2× sprite scale, Z↔X swap, visible shell trajectory
+*Author: Claude Opus 4.7 (1M context) | 2026-04-26*
+
+### Changed
+- **`environment_files/mt/00000001/mt01.py`** — substantial rework
+  after user feedback on the v1.19.0 push:
+  1. **Action remap.** Z (ACTION5) now toggles mount/dismount. X
+     (ACTION7) is FIRE. The previous binding had Z firing AND X
+     dismounting, which was confusing.
+  2. **Every sprite doubled.** Player 3×3 → 6×6, companion 3×3 → 6×6
+     (with eyes + mouth so it reads as a face), mortar base 5×2 →
+     10×4 (with 2×2 wheels), mortar tube length 5 → 10 (2px wide),
+     target flag 3×6 → 6×12, impact flash 3×3 → diamond+core 5×5.
+  3. **Speech bubble enlarged + clearer icons.** Bubble 5×5 → 10×10
+     with an 8×8 interior, and the feedback symbols are now 6×6
+     pixel patterns (CLOSER ▲, FURTHER ▼, SAME ‖, FIRE •, HIT ★)
+     so they're legible at the rendered size — previously the 3×3
+     icons were a single dot wide and hard to read.
+  4. **Visible shell trajectory.** Firing now starts a `self.shell`
+     state and `step()` advances the shell by one Euler tick per
+     call without completing the action. The arcengine loop emits
+     one frame per `step()` call, so a single FIRE produces ~20–30
+     frames that the frontend plays back as a parabolic flight at
+     the game's `default_fps`. The shell is rendered as an orange
+     5-pixel cross while in flight; on landing the impact crater +
+     companion feedback are shown.
+- Levels re-tuned for the new (taller) muzzle position. Brute-force
+  search confirmed at least one solution per level inside the
+  angle/force grid. Smoke test wins all 3.
+- **Verified** — scripted smoke test reaches `GameState.WIN`;
+  Playwright run drives walk → mount(Z) → dial → fire(X) flow
+  through all 3 levels in Chromium ending at `state=WIN`,
+  `levels_completed=3`, 81 steps. Mid-flight screenshot at
+  `/tmp/mt01v2-mid-flight.png` shows the shell at apex.
+
+---
+
 ## [1.20.0] — pw01 redesign: stop-timing challenge, auto-leveling water, bigger cups
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 
