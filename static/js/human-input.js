@@ -9,6 +9,9 @@ async function _humanCanvasClick(e) {
   if (!_humanAction6Mode || !_humanSessionId) return;
   if (!_humanRecording || _humanPaused || _humanProcessing) return;
   if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
+  // In live mode, the held-mouse handler drives the per-tick ACTION6 — the
+  // discrete click event would double-fire on top of the live tick loop.
+  if (_humanLiveMode) return;
 
   const c = _humanCanvas();
   const rect = c.getBoundingClientRect();
@@ -72,7 +75,38 @@ async function _humanCanvasClick(e) {
 
 function _setupHumanCanvasClick() {
   const c = _humanCanvas();
-  if (c) c.addEventListener('click', _humanCanvasClick);
+  if (!c) return;
+  c.addEventListener('click', _humanCanvasClick);
+
+  // Live-mode held-mouse: while a click-action game is in live mode, holding
+  // the mouse on the canvas should fire ACTION6 every tick (the live tick
+  // loop reads `_humanLiveHeldAction` and dispatches it). On release, fall
+  // back to the idle action so the game world keeps progressing without the
+  // click-effect (e.g. pw01: hold = tilt up, release = tilt decay).
+  c.addEventListener('mousedown', (e) => {
+    if (!_humanLiveMode || !_humanAction6Mode || !_humanSessionId) return;
+    if (!_humanRecording || _humanPaused) return;
+    if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
+    _humanStarted = true;
+    _humanLiveHeldAction = 6;
+  });
+  const release = () => {
+    if (!_humanLiveMode) return;
+    if (_humanLiveHeldAction === 6) _humanLiveHeldAction = _humanLiveIdleAction;
+  };
+  c.addEventListener('mouseup', release);
+  c.addEventListener('mouseleave', release);
+  // Touch support — same hold/release pattern on mobile.
+  c.addEventListener('touchstart', (e) => {
+    if (!_humanLiveMode || !_humanAction6Mode || !_humanSessionId) return;
+    if (!_humanRecording || _humanPaused) return;
+    if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
+    e.preventDefault();
+    _humanStarted = true;
+    _humanLiveHeldAction = 6;
+  }, { passive: false });
+  c.addEventListener('touchend', release);
+  c.addEventListener('touchcancel', release);
 }
 
 // ── Keyboard Handler ────────────────────────────────────────────────────
