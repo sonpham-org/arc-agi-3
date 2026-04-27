@@ -50,20 +50,24 @@ C_PURPLE = 15
 TILT_MAX = 60
 TILT_PER_CLICK = 2     # snappy tilt-up when holding the click
 TILT_PER_RELEASE = 1   # slow decay back when released — pour-feel asymmetry
-SPILL_TILT = 50        # water only flows out past this tilt (ramp is "dry")
+SPILL_TILT = 40        # water starts flowing past this tilt (was 50)
 GRAVITY = 0.30
 HVEL_SLOPE = 0.10      # tilt -> vx multiplier
-HVEL_TILT_OFFSET = 30  # at tilt 50 vx=2.0; at tilt 60 vx=3.0
+HVEL_TILT_OFFSET = 18  # at tilt 40 vx=2.2; at tilt 60 vx=4.2
 
-# Emission rate: pixels emitted per tick, by tilt
+# Emission rate: scales smoothly across 40..60 so pouring isn't all-or-nothing.
 def _emit_rate(tilt: int) -> int:
     if tilt < SPILL_TILT:
         return 0
-    if tilt < 55:
+    if tilt < 45:
         return 1
-    if tilt < 60:
+    if tilt < 50:
         return 2
-    return 3
+    if tilt < 55:
+        return 3
+    if tilt < 60:
+        return 4
+    return 5
 
 # ── Kettle sprite (local coords; pivot = bottom-centre of body) ────────────
 # Layout (ly increasing downward; pivot at (0, 0) on body bottom row).
@@ -124,33 +128,42 @@ KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)
 # obstacles = list of (x0, y0, x1, y1) inclusive rectangles that block water
 LIVES_PER_LEVEL = 5
 
+# Levels are calibrated so water lands inside the cup at every tilt 40-60
+# (no aim challenge). The challenge is timing — stop pouring before the
+# water level overshoots the dotted target line. Kettle pivot, spout
+# trajectory, and cup walls are tuned so a stream from any reasonable
+# tilt arrives inside the rim. Going past the line (overflowing the rim)
+# costs a life per drop.
 LEVEL_DATA = [
+    # L1: half-fill — easy first level. Plenty of margin.
     {
         'name': 'First Pour',
         'kettle_pivot': (18, 24),
-        'cup_left': 38, 'cup_right': 50,
+        'cup_left': 28, 'cup_right': 58,
+        'cup_top': 42, 'cup_bottom': 60,
+        'target_y': 51,
+        'kettle_volume': 320,
+        'obstacles': [],
+    },
+    # L2: leveled at full — fill cup right up to the brim, no overflow.
+    {
+        'name': 'To the Brim',
+        'kettle_pivot': (18, 24),
+        'cup_left': 28, 'cup_right': 58,
         'cup_top': 44, 'cup_bottom': 60,
-        'target_volume': 60,
-        'kettle_volume': 200,
+        'target_y': 45,
+        'kettle_volume': 600,
         'obstacles': [],
     },
+    # L3: precision target — 75% fill. Tight stop window.
     {
-        'name': 'Long Reach',
-        'kettle_pivot': (16, 22),
-        'cup_left': 44, 'cup_right': 54,
-        'cup_top': 50, 'cup_bottom': 60,
-        'target_volume': 45,
-        'kettle_volume': 220,
+        'name': 'Precision',
+        'kettle_pivot': (18, 24),
+        'cup_left': 28, 'cup_right': 58,
+        'cup_top': 42, 'cup_bottom': 60,
+        'target_y': 47,
+        'kettle_volume': 480,
         'obstacles': [],
-    },
-    {
-        'name': 'Around the Wall',
-        'kettle_pivot': (10, 12),
-        'cup_left': 42, 'cup_right': 52,
-        'cup_top': 50, 'cup_bottom': 60,
-        'target_volume': 45,
-        'kettle_volume': 280,
-        'obstacles': [(28, 32, 30, 50)],
     },
 ]
 
@@ -371,19 +384,15 @@ class Pw01(ARCBaseGame):
         self.cup_right = d['cup_right']
         self.cup_top = d['cup_top']
         self.cup_bottom = d['cup_bottom']
-        self.target_volume = d['target_volume']
+        self.cup_target_y = d['target_y']
+        # target_volume drives the HUD progress bar (not the win check).
+        inner_w = max(1, self.cup_right - self.cup_left - 1)
+        fill_rows = max(1, self.cup_bottom - self.cup_target_y)
+        self.target_volume = inner_w * fill_rows
         self.cup_volume = 0
         self.obstacles = list(d['obstacles'])
         self.lives = LIVES_PER_LEVEL
         self.spills = []
-
-        # Target line: water needs to reach this y-row inside the cup.
-        # Place the line at the height where target_volume worth of water
-        # would sit (assuming a flat surface across the inner width).
-        inner_w = max(1, self.cup_right - self.cup_left - 1)
-        rows_needed = max(1, math.ceil(self.target_volume / inner_w))
-        # rows_needed counts inclusive interior rows from cup_bottom-1 upward.
-        self.cup_target_y = self.cup_bottom - rows_needed
 
     # ── Solid-cell test ─────────────────────────────────────────────────────
 
@@ -466,11 +475,22 @@ class Pw01(ARCBaseGame):
                 if 0 <= ix < GW and PLAY_TOP <= iy < GH and not self._is_solid(ix, iy):
                     in_cup = (self.cup_left < ix < self.cup_right
                               and self.cup_top <= iy < self.cup_bottom)
+                    between_walls = (self.cup_left < ix < self.cup_right
+                                     and iy < self.cup_top)
                     if in_cup:
                         self.water.add((ix, iy))
+                    elif between_walls:
+                        # Cup is full and the drop tried to land above the
+                        # rim. Physically it cascades over the side and is
+                        # lost; we just discard it. No life cost — the
+                        # failure mode for overpouring is detected at
+                        # settle-time below (highest_y stuck at the rim
+                        # without the player stopping in time).
+                        pass
                     else:
-                        # Spill — drop landed outside the cup. Lose a life
-                        # and flash a brief marker on the HUD.
+                        # Drop landed outside the cup walls entirely (off-aim
+                        # — shouldn't happen with current level layouts but
+                        # kept as a safety net).
                         self.lives -= 1
                         self.spills.append((ix, iy, 6))
                 # Else: particle falls off the world (lost)
@@ -485,6 +505,66 @@ class Pw01(ARCBaseGame):
     def _step_water_ca(self):
         if not self.water:
             return
+        # 4 falling-sand passes for general gravity / diagonal slip behaviour…
+        for _ in range(4):
+            self._step_water_ca_once()
+        # …followed by an active surface-leveling pass inside the cup. CA
+        # alone is slow and prone to zigzag oscillations at this scale, so
+        # we explicitly transfer water from tall columns to adjacent short
+        # ones until heights are within 1 pixel everywhere. This makes the
+        # cup surface flatten nearly instantly (the way real water would).
+        for _ in range(20):
+            if not self._level_cup_surface_once():
+                break
+
+    def _level_cup_surface_once(self) -> bool:
+        # Compute the topmost water row per column inside the cup interior.
+        # Returns True if any water moved (= surface still not flat).
+        heights = {}
+        for x in range(self.cup_left + 1, self.cup_right):
+            top = None
+            for y in range(self.cup_top, self.cup_bottom):
+                if (x, y) in self.water:
+                    top = y
+                    break
+            heights[x] = top if top is not None else self.cup_bottom
+
+        def transfer(src_x: int, dst_x: int, src_h: int, dst_h: int) -> bool:
+            # Move one water cell from `src_x` (taller, top at src_h) to
+            # `dst_x` (shorter, top at dst_h). Refuses to put water above
+            # the rim or below the floor.
+            new_dst_h = dst_h - 1
+            if new_dst_h < self.cup_top:
+                return False  # destination column already at rim — no room
+            new_src_h = src_h + 1
+            if new_src_h > self.cup_bottom:
+                return False  # nothing to take (shouldn't happen)
+            if (dst_x, new_dst_h) in self.water:
+                return False  # safety — slot already occupied
+            self.water.discard((src_x, src_h))
+            self.water.add((dst_x, new_dst_h))
+            heights[src_x] = new_src_h
+            heights[dst_x] = new_dst_h
+            return True
+
+        moved = False
+        # Left-to-right sweep
+        for x in range(self.cup_left + 1, self.cup_right - 1):
+            h1, h2 = heights[x], heights[x + 1]
+            if h2 - h1 >= 2 and transfer(x, x + 1, h1, h2):
+                moved = True
+            elif h1 - h2 >= 2 and transfer(x + 1, x, h2, h1):
+                moved = True
+        # Right-to-left sweep — symmetric, no left/right bias
+        for x in range(self.cup_right - 2, self.cup_left, -1):
+            h1, h2 = heights[x], heights[x + 1]
+            if h2 - h1 >= 2 and transfer(x, x + 1, h1, h2):
+                moved = True
+            elif h1 - h2 >= 2 and transfer(x + 1, x, h2, h1):
+                moved = True
+        return moved
+
+    def _step_water_ca_once(self):
         occupied = set(self.water)
         # Bottom-up scan; tie-break by alternating x order per tick parity
         order_left_first = (self.tick % 2 == 0)
@@ -498,13 +578,14 @@ class Pw01(ARCBaseGame):
                 candidates += [(x - 1, y + 1), (x + 1, y + 1)]
             else:
                 candidates += [(x + 1, y + 1), (x - 1, y + 1)]
-            # 3. Sideways spread — only if there's vertical pressure
-            # (water above) so a single-layer puddle doesn't slither forever.
-            if (x, y - 1) in occupied:
-                if order_left_first:
-                    candidates += [(x - 1, y), (x + 1, y)]
-                else:
-                    candidates += [(x + 1, y), (x - 1, y)]
+            # 3. Sideways spread — water in self.water only ever lives
+            # inside the cup interior (spilled drops are removed before they
+            # hit the CA), so unconditional sideways flow naturally
+            # auto-equalises the surface to a flat level.
+            if order_left_first:
+                candidates += [(x - 1, y), (x + 1, y)]
+            else:
+                candidates += [(x + 1, y), (x - 1, y)]
             for (nx, ny) in candidates:
                 if not (0 <= nx < GW and PLAY_TOP <= ny < GH):
                     continue
@@ -549,31 +630,53 @@ class Pw01(ARCBaseGame):
         self.cup_volume = n
 
     def _check_end(self):
-        if self.cup_volume >= self.target_volume:
-            self.next_level()
-            return True
         # Spilling water over the floor immediately loses lives — when out
         # of lives, the run ends.
         if self.lives <= 0:
             self.lose()
             return True
-        # Or: kettle empty and no water in flight, with the cup still short
-        # of the target — also a loss (out of water).
-        if self.kettle_water <= 0 and not self.particles:
-            if self._water_settled_stable():
+
+        settled = not self.particles and self._water_settled_stable()
+
+        # Highest water point inside cup interior (lowest y in screen coords).
+        highest_y = None
+        for (x, y) in self.water:
+            if (self.cup_left < x < self.cup_right
+                    and self.cup_top <= y < self.cup_bottom):
+                if highest_y is None or y < highest_y:
+                    highest_y = y
+
+        if settled:
+            tolerance = 1  # ±1 row CA-jitter slack on either side of the line
+            if highest_y is not None:
+                if (self.cup_target_y - tolerance
+                        <= highest_y
+                        <= self.cup_target_y + tolerance):
+                    # Settled water surface is at the dotted line — win.
+                    self.next_level()
+                    return True
+                if highest_y < self.cup_target_y - tolerance:
+                    # Surface above target = overpour — fail.
+                    self.lose()
+                    return True
+            if self.kettle_water <= 0:
+                # Below target and no water left to pour — underpour fail.
                 self.lose()
                 return True
         return False
 
     def _water_settled_stable(self) -> bool:
-        # Water is "stable" if every pixel has solid (or other water) below.
+        # Stable when every pixel has solid (or water) directly below it
+        # and cannot slip diagonally lower. The active surface-leveling
+        # pass keeps the horizontal surface within 1 row everywhere, so
+        # we don't need a sideways-flow check here — the win/lose
+        # tolerance (±1 around target_y) already absorbs the residual
+        # zigzag.
         for (x, y) in self.water:
             if y + 1 >= GH:
                 continue
             if not (self._is_solid(x, y + 1) or (x, y + 1) in self.water):
                 return False
-            # Also stable horizontally if both diagonals below are blocked or
-            # the pixel can't slip sideways into a lower position.
             for sx in (-1, 1):
                 nx, ny = x + sx, y + 1
                 if (0 <= nx < GW and 0 <= ny < GH

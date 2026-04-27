@@ -5,6 +5,35 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.20.0] — pw01 redesign: stop-timing challenge, auto-leveling water, bigger cups
+*Author: Claude Opus 4.7 (1M context) | 2026-04-26*
+
+### Changed
+- **Pour rate scales smoothly with tilt.** `SPILL_TILT` 50 → 40 so water
+  starts flowing earlier; emit-rate ramps 1 → 5 across 40-60° instead
+  of jumping. Pouring feels analog now.
+- **Bigger cups, guaranteed-aim levels.** All 3 levels share the same
+  kettle pivot and big cup so water always lands inside the cup walls
+  regardless of tilt — the game tests *stop-timing*, not aim. L1 = half
+  fill (easy), L2 = "To the Brim" (target line at the rim), L3 =
+  "Precision" (75% fill).
+- **Auto-equalising water surface.** Falling-sand CA alone produces
+  zigzag piles and 1-2-row surface lumps that can't keep up with a
+  tight stream. After each CA pass, an active surface-level pass
+  compares adjacent column heights and transfers one cell from the
+  taller to the shorter whenever the delta ≥ 2. Settled surfaces are
+  now flat within 1 row everywhere.
+- **Win condition: settled water + highest row at the dotted target line
+  (±1).** Overpour (highest above target) = fail.
+
+### Fixed
+- Leveling pass now clamps so it can't add water above the rim or
+  below the cup floor, which previously inflated the in-cup count.
+- Particles trying to land above the rim (cup full) are now silently
+  discarded — no life cost — matching how a physical cup behaves.
+
+---
+
 ## [1.19.0] — feat: mt01 Mortar (walk-mount-fire with hidden trajectory + companion feedback)
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 
