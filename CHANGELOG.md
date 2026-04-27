@@ -5,6 +5,28 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.22.0] — pw01: live-mode FPS uses metadata default; overpour auto-resets, RESET costs a life
+*Author: Claude Opus 4.7 (1M context) | 2026-04-26*
+
+### Changed
+- **Live-mode FPS reads each game's `default_fps` metadata** (clamped
+  to 2-30) instead of always using the global 10. pw01 (with
+  `default_fps: 30`) now starts at 30 FPS in live mode by default.
+  Other live games keep their native cadence. Verified with Playwright
+  end-to-end: `_humanStepCount` advances ~30 steps/sec after the live
+  countdown.
+- **pw01 overpour auto-resets the level.** When the settled water
+  surface is above the dotted line, the game drains the cup, refills
+  the kettle, and lets the player try again. Each auto-reset spends
+  one of 5 lives. Lives carry across same-level resets but refill on
+  level advance.
+- **Underpour is intentionally *not* auto-reset.** If the kettle runs
+  dry with the cup still below the line, the state stays NOT_FINISHED
+  — the agent has to learn to issue a RESET (action 0). That manual
+  reset also costs a life, so spamming it isn't free.
+
+---
+
 ## [1.21.0] — feat(mt01): 2× sprite scale, Z↔X swap, visible shell trajectory
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 

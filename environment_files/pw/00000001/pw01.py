@@ -358,6 +358,7 @@ class Pw01(ARCBaseGame):
         self.obstacles = []
         self.lives = LIVES_PER_LEVEL
         self.spills = []  # transient spill markers: list[(x, y, ttl)] for HUD flash
+        self._last_level_index = -1  # used to detect new-level vs. same-level reset
 
         # available_actions includes 7 so the live-mode idle tick uses
         # ACTION7 (release) instead of falling back to ACTION6 (click) —
@@ -391,7 +392,12 @@ class Pw01(ARCBaseGame):
         self.target_volume = inner_w * fill_rows
         self.cup_volume = 0
         self.obstacles = list(d['obstacles'])
-        self.lives = LIVES_PER_LEVEL
+        # Only refill lives when starting a *new* level — same-level resets
+        # (manual RESET / auto-reset on overpour) preserve the running
+        # lives budget so the AI's retries aren't free.
+        if self.level_index != self._last_level_index:
+            self.lives = LIVES_PER_LEVEL
+            self._last_level_index = self.level_index
         self.spills = []
 
     # ── Solid-cell test ─────────────────────────────────────────────────────
@@ -630,15 +636,14 @@ class Pw01(ARCBaseGame):
         self.cup_volume = n
 
     def _check_end(self):
-        # Spilling water over the floor immediately loses lives — when out
-        # of lives, the run ends.
         if self.lives <= 0:
             self.lose()
             return True
 
         settled = not self.particles and self._water_settled_stable()
+        if not settled:
+            return False
 
-        # Highest water point inside cup interior (lowest y in screen coords).
         highest_y = None
         for (x, y) in self.water:
             if (self.cup_left < x < self.cup_right
@@ -646,24 +651,45 @@ class Pw01(ARCBaseGame):
                 if highest_y is None or y < highest_y:
                     highest_y = y
 
-        if settled:
-            tolerance = 1  # ±1 row CA-jitter slack on either side of the line
-            if highest_y is not None:
-                if (self.cup_target_y - tolerance
-                        <= highest_y
-                        <= self.cup_target_y + tolerance):
-                    # Settled water surface is at the dotted line — win.
-                    self.next_level()
-                    return True
-                if highest_y < self.cup_target_y - tolerance:
-                    # Surface above target = overpour — fail.
-                    self.lose()
-                    return True
-            if self.kettle_water <= 0:
-                # Below target and no water left to pour — underpour fail.
-                self.lose()
+        tolerance = 1
+        if highest_y is not None:
+            if (self.cup_target_y - tolerance
+                    <= highest_y
+                    <= self.cup_target_y + tolerance):
+                self.next_level()
                 return True
+            if highest_y < self.cup_target_y - tolerance:
+                # Overpour — water surface above the dotted line. Auto-reset
+                # the level (drain cup, refill kettle) and spend a life.
+                self._reset_attempt()
+                return False
+        # Underpour (kettle empty + settled + still below target) is *not*
+        # auto-reset on purpose — the AI/player has to learn to call the
+        # RESET action (handle_reset below) themselves to start over.
         return False
+
+    def _reset_attempt(self):
+        """Spend a life and reset the pour state for another attempt."""
+        self.lives -= 1
+        if self.lives <= 0:
+            self.lose()
+            return
+        self.water = set()
+        self.particles = []
+        self.tilt = 0
+        self.spills = []
+        self.kettle_water = self.kettle_volume_initial
+        self.cup_volume = 0
+
+    def handle_reset(self) -> None:
+        # Manual RESET (ACTION 0) costs a life — same budget as auto-reset.
+        # Without this, an AI could spam RESET to fish for free attempts.
+        if self._action_count > 0 and self._state.name != 'WIN':
+            self.lives -= 1
+            if self.lives <= 0:
+                self.lose()
+                return
+        super().handle_reset()
 
     def _water_settled_stable(self) -> bool:
         # Stable when every pixel has solid (or water) directly below it

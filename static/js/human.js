@@ -121,7 +121,13 @@ async function _humanSelectGame(gameId) {
   // Check if game supports live mode
   const gameMeta = _humanGames.find(g => g.game_id === gameId || g.game_id.split('-')[0] === gameId.split('-')[0]);
   _humanGameHasLive = (gameMeta?.tags || []).includes('live');
-  _humanLiveFps = 10; // default 10 FPS
+  // Default live FPS to the game's metadata default_fps (clamped 2-30) so
+  // physics-driven games like pw01 that need fine-grained ticks get 30 FPS
+  // out of the box, while slower games stay at their native cadence.
+  const metaFps = parseInt(gameMeta?.default_fps);
+  _humanLiveFps = (Number.isFinite(metaFps) && metaFps > 0)
+    ? Math.min(30, Math.max(2, metaFps))
+    : 10;
   const liveBtn = document.getElementById('humanStartLiveBtn');
   const liveFpsWrap = document.getElementById('humanLiveFpsWrap');
   if (liveBtn) liveBtn.style.display = _humanGameHasLive ? '' : 'none';
