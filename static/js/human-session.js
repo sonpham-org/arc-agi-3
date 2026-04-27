@@ -137,6 +137,13 @@ function humanTogglePause() {
 
 async function humanStartSession() {
   if (!_humanGameId || _humanRecording) return;
+  // Live-tagged games (pw01, fr01, pi01, ts01) only make sense with the
+  // tick loop running — without it the world doesn't advance between
+  // clicks, so e.g. holding the mouse can't accumulate. Auto-route to
+  // live mode so the user doesn't have to know about Shift+Enter.
+  if (_humanGameHasLive) {
+    return humanStartLiveSession();
+  }
   // Reset level to clean state before recording
   try {
     let state;
