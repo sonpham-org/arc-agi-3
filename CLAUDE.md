@@ -60,6 +60,35 @@ If `CHANGELOG.md` does not exist, create it starting at `[1.0.0]` as the baselin
 3. **Implement** — small focused changes; build on existing patterns
 4. **Verify** — test with real services; no mocks or stubs in production code
 
+## Required: UI changes must be verified in a real browser
+
+Any change that touches frontend behaviour (HTML, JS, CSS, templates,
+canvas event wiring, mouse/keyboard handlers, Pyodide game runtime,
+session UI, observatory) **must be tested locally in Chromium before
+asking the user to verify it.** Do not push and ask the user to "try it
+now" without first reproducing the user-facing flow yourself. Smoke
+tests at the Python level are not sufficient — they don't exercise the
+DOM, the live tick loop, or browser-only state like `_humanLiveMode`.
+
+How to test:
+1. Start Flask locally (e.g. `FLASK_APP=server/app.py python -m flask
+   run --host=127.0.0.1 --port=5556`).
+2. Drive the page with Playwright (`from playwright.sync_api import
+   sync_playwright`) — `playwright` is installed system-wide. For UI
+   changes, headless is fine; use `headless=False` if you need to watch.
+3. Reproduce the exact gesture the user would perform — `page.mouse.down()`
+   then `time.sleep(...)` then `page.mouse.up()` for a hold; `page.click`
+   for a discrete click; `page.keyboard.press` for keys.
+4. Read the relevant client-side state via `page.evaluate(...)`
+   (`_humanLiveHeldAction`, `_humanLiveMode`, `_humanRecording`,
+   `_humanState.state`) to confirm the change took effect.
+5. Only after that round-trip works should you push and ask the user
+   to confirm.
+
+If the test fails, fix it before pushing. If you cannot test (e.g. the
+change requires a real LLM provider key the local env doesn't have),
+state explicitly which paths were verified and which weren't.
+
 ## Code Quality Rules
 
 - **Naming**: meaningful names everywhere; no single-letter variables outside tight loops
