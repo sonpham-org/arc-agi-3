@@ -5,6 +5,45 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.18.0] — feat: pw01 Pouring Water game (live-mode water-physics sim)
+*Author: Claude Opus 4.7 (1M context) | 2026-04-26*
+
+### Added
+- **`environment_files/pw/00000001/pw01.py`** — new live-mode game where
+  the player tilts a kettle (0–60°) to pour water into a cup. Tilt rises
+  +2° per click-tick (`ACTION6`) and decays −1° per idle-tick (`ACTION7`)
+  for an asymmetric "snap up, settle down" pour feel. Water below the
+  spill threshold (50°) stays in the kettle; past 50° water flows out
+  with horizontal velocity that scales with tilt.
+- **Hybrid water sim** — in-flight droplets carry float `(x, y, vx, vy)`
+  with gravity, marching pixel-by-pixel to avoid tunneling through cup
+  walls; once they hit a surface they snap into a deterministic
+  single-buffered falling-sand cellular automaton (down → diagonal-slip
+  → sideways spread) with a vertical-pressure rule that prevents single
+  layers of water from slithering across the whole floor. No RNG, no
+  external libs — fully deterministic on identical action sequences.
+- **3 levels** — *First Pour* (straight pour), *Long Reach* (cup further,
+  needs higher tilt), *Around the Wall* (water must arc over an
+  obstacle wall to hit the cup).
+- **Spill = lose-a-life mechanic** — any droplet that settles outside
+  the cup interior (i.e. on the table / floor) costs 1 of 5 lives per
+  level. Running the kettle dry without filling the cup also loses.
+- **`environment_files/pw/00000001/metadata.json`** — registers `pw01`
+  with `tags: ["live", "simulation", "physics"]` and
+  `baseline_actions: [6]` (click-only).
+- **`.gitignore`** — added `!environment_files/pw/` so the new
+  Observatory game stays tracked and survives fresh clones (same
+  treatment as every other Observatory game).
+
+### Why
+- Observatory needed a physics-driven game distinct from the existing
+  arcade / puzzle / strategy titles — the user requested a "real water
+  simulation" pour game with pixel-level fluid behaviour, and the
+  falling-sand CA is the proven idiom for deterministic 64×64 water on
+  a turn-based engine (used by Powder Game, Sandspiel, Noita).
+
+---
+
 ## [1.17.0] — feat: open all games in prod (Observatory → game-explorer pivot)
 *Author: Claude Opus 4.7 | 2026-04-26*
 
