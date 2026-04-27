@@ -66,28 +66,36 @@ def _emit_rate(tilt: int) -> int:
     return 3
 
 # ── Kettle sprite (local coords; pivot = bottom-centre of body) ────────────
-# Layout (ly increasing downward; pivot at (0, 0) on body bottom row):
+# Layout (ly increasing downward; pivot at (0, 0) on body bottom row).
+# Spout-tip kept at (5, -1) so the water trajectory stays the same as the
+# original; the body, handle, and interior are scaled up around it.
 #
-#   ly\lx | -3 -2 -1  0  1  2  3
-#      -5 |  .  H  H  H  H  .  .   <- handle top
-#      -4 |  .  H  .  .  H  .  .
-#      -3 |  H  B  B  B  B  B  B   <- body top + handle attach
-#      -2 |  B  B  B  B  B  B  B   <- body upper (S spout tail at lx 4-5)
-#      -1 |  B  B  B  B  B  B  B   <- body lower (S spout tip at lx 5)
-#       0 |  .  B  B  B  B  B  B   <- body bottom (pivot row)
-#
-# Spout tip = (5, -1). Water emits from one pixel below+right of spout tip.
+#   ly\lx | -4 -3 -2 -1  0  1  2  3  4  5
+#      -7 |  .  .  H  H  H  H  H  .  .  .   <- handle top arch
+#      -6 |  .  H  .  .  .  .  .  H  .  .   <- handle slope
+#      -5 |  .  H  .  .  .  .  .  H  .  .   <- handle slope
+#      -4 |  .  B  B  B  B  B  B  B  .  .   <- body top (tapered)
+#      -3 |  B  B  B  B  B  B  B  B  B  .   <- body
+#      -2 |  B  B  B  B  B  B  B  B  S  S   <- body + spout tail
+#      -1 |  B  B  B  B  B  B  B  B  S  S   <- body + spout tip (5,-1)
+#       0 |  .  B  B  B  B  B  B  B  .  .   <- body bottom (pivot row)
 
 KETTLE_BODY = [
-    (-3, -3), (-2, -3), (-1, -3), (0, -3), (1, -3), (2, -3), (3, -3),
-    (-3, -2), (-2, -2), (-1, -2), (0, -2), (1, -2), (2, -2), (3, -2),
-    (-3, -1), (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1), (3, -1),
-    (-2,  0), (-1,  0), (0,  0), (1,  0), (2,  0), (3,  0),
+    # ly=-4 (tapered top): lx -3..3
+    (-3, -4), (-2, -4), (-1, -4), (0, -4), (1, -4), (2, -4), (3, -4),
+    # ly=-3..-1: lx -4..4 (full belly)
+    (-4, -3), (-3, -3), (-2, -3), (-1, -3), (0, -3), (1, -3), (2, -3), (3, -3), (4, -3),
+    (-4, -2), (-3, -2), (-2, -2), (-1, -2), (0, -2), (1, -2), (2, -2), (3, -2), (4, -2),
+    (-4, -1), (-3, -1), (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1), (3, -1), (4, -1),
+    # ly=0 (tapered bottom): lx -3..3
+    (-3,  0), (-2,  0), (-1,  0), (0,  0), (1,  0), (2,  0), (3,  0),
 ]
 KETTLE_HANDLE = [
-    (-2, -5), (-1, -5), (0, -5), (1, -5),
-    (-2, -4), (1, -4),
-    (-3, -3),
+    # Top arch
+    (-2, -7), (-1, -7), (0, -7), (1, -7), (2, -7),
+    # Side slopes — connect down to body top corners (lx -3, lx 3 at ly -4)
+    (-3, -6), (3, -6),
+    (-3, -5), (3, -5),
 ]
 KETTLE_SPOUT = [
     (4, -2), (5, -2),
@@ -96,13 +104,14 @@ KETTLE_SPOUT = [
 KETTLE_SPOUT_TIP = (5, -1)
 
 # Body interior cells (used for "kettle water" rendering inside the body).
+# The 7×3 inner block — leaves a 1-cell wall on every side.
 KETTLE_INTERIOR = [
-    (-2, -2), (-1, -2), (0, -2), (1, -2), (2, -2),
-    (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1),
-    (-1,  0), (0,  0), (1,  0),
+    (-3, -3), (-2, -3), (-1, -3), (0, -3), (1, -3), (2, -3), (3, -3),
+    (-3, -2), (-2, -2), (-1, -2), (0, -2), (1, -2), (2, -2), (3, -2),
+    (-3, -1), (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1), (3, -1),
 ]
-KETTLE_INTERIOR_TOP_LY = -2  # the "rim" interior y (relative to pivot)
-KETTLE_INTERIOR_BOT_LY = 0
+KETTLE_INTERIOR_TOP_LY = -3
+KETTLE_INTERIOR_BOT_LY = -1
 KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)
 
 
