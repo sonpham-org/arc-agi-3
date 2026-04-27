@@ -76,3 +76,30 @@ environment_files/*
 !environment_files/ts/
 !environment_files/ws03/
 !environment_files/ws04/
+# ARC Prize Foundation public games (restored from 779ddae^;
+# auto-download was unreliable on Railway, so we keep them tracked).
+!environment_files/ar25/
+!environment_files/bp35/
+!environment_files/cd82/
+!environment_files/cn04/
+!environment_files/dc22/
+!environment_files/ft09/
+!environment_files/g50t/
+!environment_files/ka59/
+!environment_files/lf52/
+!environment_files/lp85/
+!environment_files/ls20/
+!environment_files/m0r0/
+!environment_files/r11l/
+!environment_files/re86/
+!environment_files/s5i5/
+!environment_files/sb26/
+!environment_files/sc25/
+!environment_files/sk48/
+!environment_files/sp80/
+!environment_files/su15/
+!environment_files/tn36/
+!environment_files/tr87/
+!environment_files/tu93/
+!environment_files/vc33/
+!environment_files/wa30/
