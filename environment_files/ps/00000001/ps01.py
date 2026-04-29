@@ -54,9 +54,8 @@ C_PURPLE = 15
 TILT_MAX = 60
 TILT_PER_CLICK = 2
 TILT_PER_RELEASE = 1
-SPILL_TILT = 40
 GRAVITY = 0.30
-HVEL_SLOPE = 0.10
+HVEL_SLOPE = 0.04   # gentler horizontal carry; spill water falls mostly straight down
 HVEL_TILT_OFFSET = 18
 
 # Mouse follow: snap pivot directly to mouse position each tick (clamped to
@@ -71,72 +70,45 @@ WIN_HOLD_TICKS = 20
 WIN_TOLERANCE = 1
 
 
-def _emit_rate(tilt: int) -> int:
-    if tilt < SPILL_TILT:
-        return 0
-    if tilt < 45:
-        return 1
-    if tilt < 50:
-        return 2
-    if tilt < 55:
-        return 3
-    if tilt < 60:
-        return 4
-    return 5
-
-
 # ── Kettle sprite (local coords; pivot = bottom-centre of body) ────────────
-# Big kettle: 11-wide × 7-tall body with a 9×5 = 45-cell interior. Starts
-# half-full so the water has empty cells to slosh into when tipped.
+# Open-top rectangle (a "bucket"): walls on left, right, and floor. The top
+# is fully open, so water physically spills over the rim when the bucket is
+# tipped far enough that the water surface reaches the rim height. There is
+# no separate spout opening or SPILL_TILT threshold — pouring is purely the
+# consequence of water particles overflowing the rim.
 #
-#   ly\lx | -5 -4 -3 -2 -1  0  1  2  3  4  5  6  7
-#      -9 |  .  .  H  H  H  H  H  H  H  .  .  .  .   <- handle top arch
-#      -8 |  .  H  .  .  .  .  .  .  .  H  .  .  .   <- handle slope
-#      -7 |  .  H  .  .  .  .  .  .  .  H  .  .  .
-#      -6 |  .  .  B  B  B  B  B  B  B  .  .  .  .   <- body top tapered
-#      -5 |  B  B  B  B  B  B  B  B  B  B  B  .  .   <- body
-#      -4 |  B  B  B  B  B  B  B  B  B  B  B  .  .
-#      -3 |  B  B  B  B  B  B  B  B  B  B  B  S  S   <- body + spout tail
-#      -2 |  B  B  B  B  B  B  B  B  B  B  B  S  S   <- body + spout tip (7,-2)
-#      -1 |  B  B  B  B  B  B  B  B  B  B  B  .  .
-#       0 |  .  .  B  B  B  B  B  B  B  .  .  .  .   <- body bottom tapered
+#   ly\lx | -5 -4 -3 -2 -1  0  1  2  3  4  5
+#      -5 |  W  .  .  .  .  .  .  .  .  .  W   <- rim corners, open top
+#      -4 |  W  i  i  i  i  i  i  i  i  i  W
+#      -3 |  W  i  i  i  i  i  i  i  i  i  W
+#      -2 |  W  i  i  i  i  i  i  i  i  i  W
+#      -1 |  W  i  i  i  i  i  i  i  i  i  W
+#       0 |  W  W  W  W  W  W  W  W  W  W  W   <- floor
 
+# Walls + floor (everything that's a solid kettle pixel):
 KETTLE_BODY = [
-    # ly=-6 (top tapered): lx -3..3
-    (-3, -6), (-2, -6), (-1, -6), (0, -6), (1, -6), (2, -6), (3, -6),
-    # ly=-5..-1 (full belly): lx -5..5
-    *[(lx, -5) for lx in range(-5, 6)],
-    *[(lx, -4) for lx in range(-5, 6)],
-    *[(lx, -3) for lx in range(-5, 6)],
-    *[(lx, -2) for lx in range(-5, 6)],
-    *[(lx, -1) for lx in range(-5, 6)],
-    # ly=0 (bottom tapered): lx -3..3
-    (-3,  0), (-2,  0), (-1,  0), (0,  0), (1,  0), (2,  0), (3,  0),
+    # Left wall
+    *[(-5, ly) for ly in range(-5, 1)],
+    # Right wall
+    *[(5, ly) for ly in range(-5, 1)],
+    # Floor
+    *[(lx, 0) for lx in range(-4, 5)],
 ]
-KETTLE_HANDLE = [
-    # Top arch
-    (-3, -9), (-2, -9), (-1, -9), (0, -9), (1, -9), (2, -9), (3, -9),
-    # Side slopes
-    (-4, -8), (4, -8),
-    (-4, -7), (4, -7),
-]
-KETTLE_SPOUT = [
-    (6, -3), (7, -3),
-    (6, -2), (7, -2),
-]
-KETTLE_SPOUT_TIP = (7, -2)
-
-# Interior: 9 wide × 5 tall = 45 cells (lx -4..4, ly -5..-1).
+# Interior cells where water can live: 9 wide × 5 tall = 45 cells.
 KETTLE_INTERIOR = [
     (lx, ly)
-    for ly in range(-5, 0)
+    for ly in range(-4, 0)
     for lx in range(-4, 5)
 ]
-KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)  # 45
+# 1 extra row at ly=-5 across lx -4..4 is the "rim row" — particles that
+# would settle into this row are above the rim's lowest world-y point and
+# spill out as in-flight droplets (handled in _step_kettle_water).
+KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)  # 36
 INTERIOR_SET = set(KETTLE_INTERIOR)
-# Spout-feeder cells: rightmost interior column (lx=4) at the spout's height.
-# Water that reaches these cells is what physically pours out of the spout.
-SPOUT_FEEDER_CELLS = [(4, -3), (4, -2)]
+# The two rim corners — used to compute the spill threshold (= world-y of
+# whichever corner is lower in world space at the current tilt).
+RIM_LEFT = (-5, -5)
+RIM_RIGHT = (5, -5)
 
 
 # ── Level data — single level (per design: focus on getting L1 right) ─────
@@ -229,20 +201,6 @@ class PourDisplay(RenderableUserDisplay):
             if 0 <= ix < GW and 0 <= iy < GH:
                 body_world[(ix, iy)] = C_BLUE
 
-        # Spout (overlaid after body so spout colour wins)
-        for (lx, ly) in KETTLE_SPOUT:
-            wx, wy = _rotate(lx, ly, tilt)
-            ix, iy = int(round(px + wx)), int(round(py + wy))
-            if 0 <= ix < GW and 0 <= iy < GH:
-                body_world[(ix, iy)] = C_DGRAY
-
-        # Handle (open loop)
-        for (lx, ly) in KETTLE_HANDLE:
-            wx, wy = _rotate(lx, ly, tilt)
-            ix, iy = int(round(px + wx)), int(round(py + wy))
-            if 0 <= ix < GW and 0 <= iy < GH:
-                body_world[(ix, iy)] = C_GRAY
-
         for (ix, iy), col in body_world.items():
             if iy >= PLAY_TOP:
                 frame[iy, ix] = col
@@ -264,14 +222,12 @@ class PourDisplay(RenderableUserDisplay):
         # ── HUD ────────────────────────────────────────────────────────────
         frame[0:HUD_H, :] = C_VDGRAY
 
-        # Tilt bar (row 1)
+        # Tilt bar (row 1) — orange when the kettle is currently overflowing.
         bar_y = 1
+        is_pouring = g.tick > 0 and len(g.particles) > 0 and g._just_overflowed
         for x in range(60):
             if x < g.tilt:
-                if g.tilt >= SPILL_TILT:
-                    frame[bar_y, 2 + x] = C_ORANGE
-                else:
-                    frame[bar_y, 2 + x] = C_GRAY
+                frame[bar_y, 2 + x] = C_ORANGE if is_pouring else C_GRAY
             else:
                 frame[bar_y, 2 + x] = C_BLACK
 
@@ -318,6 +274,8 @@ class Ps01(ARCBaseGame):
         self.obstacles = []
         self.spills = []
         self.stable_ticks = 0  # consecutive ticks the surface has been on target
+        self._just_overflowed = False  # True on ticks the kettle spilled
+        self._kettle_reservoir = 0
 
         super().__init__(
             'ps', levels,
@@ -421,20 +379,84 @@ class Ps01(ARCBaseGame):
         particles_sorted = sorted(self.kettle_particles, key=lambda p: -world_y(p))
         occupied = set(particles_sorted)
         new_set = set(particles_sorted)
+
+        # Identify the rim corner that's currently lowest in world space (the
+        # lip the water will spill over). At tilt 0 both rim corners are at
+        # the same height — no spill direction. At tilt > 0 the right corner
+        # is lower, so spillage happens over the right rim.
+        _, lwy = _rotate(RIM_LEFT[0], RIM_LEFT[1], self.tilt)
+        _, rwy = _rotate(RIM_RIGHT[0], RIM_RIGHT[1], self.tilt)
+        # Use the corner with greater world-y (= lower in world) as spill rim.
+        if rwy > lwy:
+            spill_rim_lx, spill_rim_ly = RIM_RIGHT
+            spill_rim_wy = rwy
+        else:
+            spill_rim_lx, spill_rim_ly = RIM_LEFT
+            spill_rim_wy = lwy
+
+        spill_world_pos = None  # set when a particle actually spills this tick
+        spill_count = 0
+
         for (lx, ly) in particles_sorted:
+            moved = False
             for (dx, dy) in candidates_dirs:
                 nx, nly = lx + dx, ly + dy
                 if (nx, nly) not in interior:
                     continue
                 if (nx, nly) in occupied:
                     continue
-                # Move
                 occupied.discard((lx, ly))
                 occupied.add((nx, nly))
                 new_set.discard((lx, ly))
                 new_set.add((nx, nly))
+                moved = True
                 break
+            if moved:
+                continue
+            # Particle is stuck. Check if it's "above" the spill rim — i.e.,
+            # higher in world (smaller world-y) than the lower rim corner.
+            # If so, it overflows: remove from kettle, spawn an in-flight
+            # droplet at the rim's world position.
+            _, pwy = _rotate(lx, ly, self.tilt)
+            if pwy < spill_rim_wy - 0.5:
+                occupied.discard((lx, ly))
+                new_set.discard((lx, ly))
+                spill_count += 1
+                spill_world_pos = (
+                    self.kettle_pivot[0] + _rotate(spill_rim_lx, spill_rim_ly, self.tilt)[0],
+                    self.kettle_pivot[1] + _rotate(spill_rim_lx, spill_rim_ly, self.tilt)[1],
+                )
+
         self.kettle_particles = list(new_set)
+
+        # Spawn in-flight droplets for spilled particles. Initial velocity
+        # carries the water in the spill direction — i.e., perpendicular to
+        # the rotated rim, pointing outward from the kettle.
+        if spill_count > 0 and spill_world_pos is not None:
+            sx, sy = spill_world_pos
+            t = math.radians(self.tilt)
+            # Outward direction from the right rim is +cos(tilt) in x,
+            # +sin(tilt) in y (world). Scale by a spill-speed factor.
+            dir_sign = 1 if (spill_rim_lx > 0) else -1
+            spill_speed = max(0.6, abs(self.tilt - HVEL_TILT_OFFSET) * HVEL_SLOPE)
+            vx = dir_sign * spill_speed * math.cos(t)
+            vy = max(0.2, spill_speed * math.sin(t))
+            for _ in range(spill_count):
+                self.particles.append({
+                    'fx': sx, 'fy': sy + 0.5, 'vx': vx, 'vy': vy,
+                })
+            # Refill from the hidden back-reservoir at the top-left interior
+            # corner so the visible water level decays gradually.
+            for _ in range(spill_count):
+                if self._kettle_reservoir <= 0:
+                    break
+                refill_cell = (-4, -4)
+                if refill_cell not in self.kettle_particles:
+                    self.kettle_particles.append(refill_cell)
+                    self._kettle_reservoir -= 1
+            self._just_overflowed = True
+        else:
+            self._just_overflowed = False
 
     # ── Solid-cell test ─────────────────────────────────────────────────────
 
@@ -452,13 +474,6 @@ class Ps01(ARCBaseGame):
             if x0 <= x <= x1 and y0 <= y <= y1:
                 return True
         return False
-
-    # ── Spout world position ────────────────────────────────────────────────
-
-    def _spout_tip_world(self) -> tuple[float, float]:
-        lx, ly = KETTLE_SPOUT_TIP
-        rx, ry = _rotate(lx, ly, self.tilt)
-        return (self.kettle_pivot[0] + rx, self.kettle_pivot[1] + ry)
 
     # ── Particle physics (in-flight water) ──────────────────────────────────
 
@@ -596,53 +611,6 @@ class Ps01(ARCBaseGame):
                 break
         self.water = occupied
 
-    # ── Pour emission ───────────────────────────────────────────────────────
-
-    def _emit_pour(self):
-        # Emission requires (a) tilt past SPILL_TILT and (b) at least one
-        # simulated water cell touching the spout exit (lx=3, ly in {-1, -2}).
-        # That means the kettle physics actually has to feed the spout — at
-        # tilt 0 with full water, no emission, because the surface sits
-        # below the spout opening. Tip the kettle, the sloshing brings water
-        # to the spout-side wall, and then it pours.
-        rate = _emit_rate(self.tilt)
-        if rate == 0:
-            return
-        if not self.kettle_particles and self._kettle_reservoir <= 0:
-            return
-        sx, sy = self._spout_tip_world()
-        emit_x = sx
-        emit_y = sy + 1.0
-        vx = max(0.0, (self.tilt - HVEL_TILT_OFFSET) * HVEL_SLOPE)
-        vy = 0.4
-        emitted = 0
-        for _ in range(rate):
-            # Find the highest-priority feeder cell that has water and emit
-            # one particle from it. Highest priority = lowest in world frame
-            # (= where water actually piles up at the current tilt).
-            chosen = None
-            best_wy = None
-            for cell in SPOUT_FEEDER_CELLS:
-                if cell in self.kettle_particles:
-                    _, wy = _rotate(cell[0], cell[1], self.tilt)
-                    if best_wy is None or wy > best_wy:
-                        best_wy = wy
-                        chosen = cell
-            if chosen is None:
-                break
-            self.kettle_particles.remove(chosen)
-            self.particles.append({
-                'fx': emit_x, 'fy': emit_y, 'vx': vx, 'vy': vy,
-            })
-            emitted += 1
-            # Refill from the hidden back-reservoir at the top-back interior
-            # cell. With the bigger kettle, top-back is (-4, -5).
-            if self._kettle_reservoir > 0:
-                refill_cell = (-4, -5)
-                if refill_cell not in self.kettle_particles:
-                    self.kettle_particles.append(refill_cell)
-                    self._kettle_reservoir -= 1
-
     # ── Cup volume + win check ──────────────────────────────────────────────
 
     def _recount_cup(self):
@@ -718,7 +686,6 @@ class Ps01(ARCBaseGame):
         self.tick += 1
 
         self._step_kettle_water()
-        self._emit_pour()
         self._step_particles()
         self._step_water_ca()
         self._recount_cup()
