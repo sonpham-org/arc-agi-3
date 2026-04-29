@@ -58,11 +58,11 @@ GRAVITY = 0.30
 HVEL_SLOPE = 0.04   # gentler horizontal carry; spill water falls mostly straight down
 HVEL_TILT_OFFSET = 18
 
-# Mouse follow: snap pivot directly to mouse position each tick (clamped to
-# the safe play area so the bigger kettle never enters the HUD or the cup).
-# Kettle extends from lx=-5..7 and ly=-9..0, so leave room on all sides.
-PIVOT_X_MIN, PIVOT_X_MAX = 12, 28
-PIVOT_Y_MIN, PIVOT_Y_MAX = 14, 30
+# Mouse follow: snap pivot to mouse position when held. Kettle body extends
+# lx=-7..7 (15 wide) and ly=-10..0 (11 tall), so leave room on all sides
+# and keep the right rim out of the cup at all reasonable tilts.
+PIVOT_X_MIN, PIVOT_X_MAX = 14, 28
+PIVOT_Y_MIN, PIVOT_Y_MAX = 16, 32
 
 # Win condition: water level must sit within ±tolerance of target_y for
 # WIN_HOLD_TICKS consecutive ticks.
@@ -71,60 +71,54 @@ WIN_TOLERANCE = 1
 
 
 # ── Kettle sprite (local coords; pivot = bottom-centre of body) ────────────
-# Open-top rectangle (a "bucket"): walls on left, right, and floor. The top
-# is fully open, so water physically spills over the rim when the bucket is
-# tipped far enough that the water surface reaches the rim height. There is
-# no separate spout opening or SPILL_TILT threshold — pouring is purely the
-# consequence of water particles overflowing the rim.
+# Open-top rectangle (a "bucket"). All water in the game lives in this
+# kettle as discrete particles from the start — there is no hidden
+# reservoir, nothing respawns. Once a particle spills over the rim it
+# becomes an in-flight droplet, lands in the cup (or misses), and is gone
+# from the kettle forever. Total water = constant.
 #
-#   ly\lx | -5 -4 -3 -2 -1  0  1  2  3  4  5
-#      -5 |  W  .  .  .  .  .  .  .  .  .  W   <- rim corners, open top
-#      -4 |  W  i  i  i  i  i  i  i  i  i  W
-#      -3 |  W  i  i  i  i  i  i  i  i  i  W
-#      -2 |  W  i  i  i  i  i  i  i  i  i  W
-#      -1 |  W  i  i  i  i  i  i  i  i  i  W
-#       0 |  W  W  W  W  W  W  W  W  W  W  W   <- floor
+# Sized to hold ~100 visible cells comfortably so sloshing has empty cells
+# to slosh into and the player has enough water budget to fill the cup.
+#
+# Body: lx -7..7 (15 wide), ly -11..0 (12 tall outer).
+# Interior: lx -6..6 (13 wide), ly -10..-1 (10 tall) = 130 cells.
 
-# Walls + floor (everything that's a solid kettle pixel):
 KETTLE_BODY = [
     # Left wall
-    *[(-5, ly) for ly in range(-5, 1)],
+    *[(-7, ly) for ly in range(-10, 1)],
     # Right wall
-    *[(5, ly) for ly in range(-5, 1)],
+    *[(7, ly) for ly in range(-10, 1)],
     # Floor
-    *[(lx, 0) for lx in range(-4, 5)],
+    *[(lx, 0) for lx in range(-6, 7)],
 ]
-# Interior cells where water can live: 9 wide × 5 tall = 45 cells.
 KETTLE_INTERIOR = [
     (lx, ly)
-    for ly in range(-4, 0)
-    for lx in range(-4, 5)
+    for ly in range(-10, 0)
+    for lx in range(-6, 7)
 ]
-# 1 extra row at ly=-5 across lx -4..4 is the "rim row" — particles that
-# would settle into this row are above the rim's lowest world-y point and
-# spill out as in-flight droplets (handled in _step_kettle_water).
-KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)  # 36
+KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)  # 130
 INTERIOR_SET = set(KETTLE_INTERIOR)
-# The two rim corners — used to compute the spill threshold (= world-y of
-# whichever corner is lower in world space at the current tilt).
-RIM_LEFT = (-5, -5)
-RIM_RIGHT = (5, -5)
+# Rim corners — used to compute the spill threshold (world-y of whichever
+# corner is lower in world space at the current tilt).
+RIM_LEFT = (-7, -10)
+RIM_RIGHT = (7, -10)
 
 
 # ── Level data — single level (per design: focus on getting L1 right) ─────
 LEVEL_DATA = [
     {
         'name': 'Steady Pour',
-        # Cup doubled in each dimension (was 9×10): 18×20 outer → 17×19 interior.
-        # cup_left..cup_right: 18-wide; cup_top..cup_bottom: 20-tall.
-        'kettle_pivot_init': (16, 18),
+        'kettle_pivot_init': (18, 18),
+        # Cup interior is 16 wide × 19 tall (cup_left=30 cup_right=47 walls,
+        # cup_top=38 cup_bottom=57 = floor row). Filling to row 53 needs
+        # 16 × 4 = 64 cells; with ~30% pour loss the kettle's 100-cell seed
+        # is plenty.
         'cup_left': 30, 'cup_right': 47,
         'cup_top': 38, 'cup_bottom': 57,
-        'target_y': 47,  # roughly mid-cup
-        # Pour volume — needs to fill a 17×11-row band to reach the line.
-        # Cup interior at target = 17 × (57-47) ≈ 170 cells; kettle holds
-        # half of its 45 visible + a hidden back-reservoir for the rest.
-        'kettle_volume': 280,
+        'target_y': 53,
+        # Initial visible water count — every cell rendered in the kettle
+        # is a particle that exists from t=0. No reservoir, no respawning.
+        'kettle_seed': 100,
         'obstacles': [],
     },
 ]
@@ -263,7 +257,6 @@ class Ps01(ARCBaseGame):
         self.water = set()
         self.particles = []
         self.kettle_pivot = (32, 18)
-        self.kettle_volume_initial = 0
         self.kettle_particles = []  # list[(lx, ly)] — water cells in kettle local frame
         self.cup_left = 0
         self.cup_right = 0
@@ -275,7 +268,6 @@ class Ps01(ARCBaseGame):
         self.spills = []
         self.stable_ticks = 0  # consecutive ticks the surface has been on target
         self._just_overflowed = False  # True on ticks the kettle spilled
-        self._kettle_reservoir = 0
 
         super().__init__(
             'ps', levels,
@@ -292,20 +284,13 @@ class Ps01(ARCBaseGame):
         self.water = set()
         self.particles = []
         self.kettle_pivot = d['kettle_pivot_init']
-        self.kettle_volume_initial = d['kettle_volume']
-        # Seed the kettle ~half-full so the water has empty cells to slosh
-        # into as the player tilts. Stack from the bottom of the interior
-        # (local-frame, which == world-frame at tilt=0).
-        self.kettle_particles = []
+        # Seed the kettle with N visible water particles, stacked from the
+        # bottom up. This is ALL the water in the game — once it spills
+        # over the rim, it's gone for good (lands in cup or misses).
+        # Capped by interior capacity so over-seeding can't happen silently.
+        seed_count = min(d['kettle_seed'], KETTLE_INTERIOR_CAPACITY)
         sorted_interior = sorted(KETTLE_INTERIOR, key=lambda p: (-p[1], p[0]))
-        visible_seed = min(d['kettle_volume'], KETTLE_INTERIOR_CAPACITY // 2)
-        for i in range(visible_seed):
-            self.kettle_particles.append(sorted_interior[i])
-        # The rest sits in a hidden back-reservoir that drips into the
-        # kettle (top-back corner) as visible particles leave through the
-        # spout. The visible water level stays around half-full while
-        # there's reservoir left, then drains for real once it's empty.
-        self._kettle_reservoir = max(0, d['kettle_volume'] - visible_seed)
+        self.kettle_particles = list(sorted_interior[:seed_count])
         self.cup_left = d['cup_left']
         self.cup_right = d['cup_right']
         self.cup_top = d['cup_top']
@@ -445,15 +430,6 @@ class Ps01(ARCBaseGame):
                 self.particles.append({
                     'fx': sx, 'fy': sy + 0.5, 'vx': vx, 'vy': vy,
                 })
-            # Refill from the hidden back-reservoir at the top-left interior
-            # corner so the visible water level decays gradually.
-            for _ in range(spill_count):
-                if self._kettle_reservoir <= 0:
-                    break
-                refill_cell = (-4, -4)
-                if refill_cell not in self.kettle_particles:
-                    self.kettle_particles.append(refill_cell)
-                    self._kettle_reservoir -= 1
             self._just_overflowed = True
         else:
             self._just_overflowed = False
