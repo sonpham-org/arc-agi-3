@@ -1,0 +1,9 @@
+{
+    "game_id": "pw01",
+    "title": "Pouring Water",
+    "default_fps": 30,
+    "baseline_actions": [1, 2, 6, 7],
+    "tags": ["live", "simulation", "physics"],
+    "local_dir": "environment_files/pw/00000003",
+    "date_downloaded": "2026-04-29"
+}

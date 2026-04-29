@@ -5,6 +5,34 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.24.0] — pw01 v3: player thermostat (W / S keys)
+*Author: Claude Opus 4.7 (1M context) | 2026-04-29*
+
+### Added
+- **Player-controlled thermostat.** Integer state in `[-5, +5]`,
+  starts at `0`. Pressing **W** (ACT1) raises it by 1; **S** (ACT2)
+  lowers it by 1. A 5-tick cooldown rate-limits held keys so a
+  short tap moves one step rather than slamming to the cap at
+  30 FPS. Each tick the thermostat value is added as a global
+  delta to every settled water pixel, the kettle bulk
+  temperature, and every ice cell — a stove knob that stacks on
+  top of fire / cold / drift logic.
+- **HUD readout.** A 11-cell strip on row 3 lights up outward from
+  centre — orange right (heat) or light-blue left (cold) — to show
+  the current thermostat value.
+- `available_actions` now `[1, 2, 6, 7]`. W / S were already mapped
+  to ACT1 / ACT2 in `static/js/human-input.js:115`, so no JS
+  changes were needed; the v3 game just opts into receiving them.
+- New version dir `environment_files/pw/00000003/`. Old `00000002/`
+  unchanged.
+
+### Verified
+- Smoke test wins all 6 levels deterministically with the existing
+  click counts (46/80/70/200/190/220) — the test never touches W/S,
+  so `thermostat = 0` and the heat update behaves exactly like v2.
+
+---
+
 ## [1.23.0] — pw01 v2: heat mechanic (evaporate / freeze / smoke) + 3 new levels
 *Author: Claude Opus 4.7 (1M context) | 2026-04-29*
 
