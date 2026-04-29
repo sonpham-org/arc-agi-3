@@ -60,9 +60,10 @@ HVEL_SLOPE = 0.10
 HVEL_TILT_OFFSET = 18
 
 # Mouse follow: snap pivot directly to mouse position each tick (clamped to
-# the safe play area so the kettle never enters the HUD or the cup).
-PIVOT_X_MIN, PIVOT_X_MAX = 10, 54
-PIVOT_Y_MIN, PIVOT_Y_MAX = 10, 32
+# the safe play area so the bigger kettle never enters the HUD or the cup).
+# Kettle extends from lx=-5..7 and ly=-9..0, so leave room on all sides.
+PIVOT_X_MIN, PIVOT_X_MAX = 12, 28
+PIVOT_Y_MIN, PIVOT_Y_MAX = 14, 30
 
 # Win condition: water level must sit within ±tolerance of target_y for
 # WIN_HOLD_TICKS consecutive ticks.
@@ -85,44 +86,73 @@ def _emit_rate(tilt: int) -> int:
 
 
 # ── Kettle sprite (local coords; pivot = bottom-centre of body) ────────────
+# Big kettle: 11-wide × 7-tall body with a 9×5 = 45-cell interior. Starts
+# half-full so the water has empty cells to slosh into when tipped.
+#
+#   ly\lx | -5 -4 -3 -2 -1  0  1  2  3  4  5  6  7
+#      -9 |  .  .  H  H  H  H  H  H  H  .  .  .  .   <- handle top arch
+#      -8 |  .  H  .  .  .  .  .  .  .  H  .  .  .   <- handle slope
+#      -7 |  .  H  .  .  .  .  .  .  .  H  .  .  .
+#      -6 |  .  .  B  B  B  B  B  B  B  .  .  .  .   <- body top tapered
+#      -5 |  B  B  B  B  B  B  B  B  B  B  B  .  .   <- body
+#      -4 |  B  B  B  B  B  B  B  B  B  B  B  .  .
+#      -3 |  B  B  B  B  B  B  B  B  B  B  B  S  S   <- body + spout tail
+#      -2 |  B  B  B  B  B  B  B  B  B  B  B  S  S   <- body + spout tip (7,-2)
+#      -1 |  B  B  B  B  B  B  B  B  B  B  B  .  .
+#       0 |  .  .  B  B  B  B  B  B  B  .  .  .  .   <- body bottom tapered
+
 KETTLE_BODY = [
-    (-3, -4), (-2, -4), (-1, -4), (0, -4), (1, -4), (2, -4), (3, -4),
-    (-4, -3), (-3, -3), (-2, -3), (-1, -3), (0, -3), (1, -3), (2, -3), (3, -3), (4, -3),
-    (-4, -2), (-3, -2), (-2, -2), (-1, -2), (0, -2), (1, -2), (2, -2), (3, -2), (4, -2),
-    (-4, -1), (-3, -1), (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1), (3, -1), (4, -1),
+    # ly=-6 (top tapered): lx -3..3
+    (-3, -6), (-2, -6), (-1, -6), (0, -6), (1, -6), (2, -6), (3, -6),
+    # ly=-5..-1 (full belly): lx -5..5
+    *[(lx, -5) for lx in range(-5, 6)],
+    *[(lx, -4) for lx in range(-5, 6)],
+    *[(lx, -3) for lx in range(-5, 6)],
+    *[(lx, -2) for lx in range(-5, 6)],
+    *[(lx, -1) for lx in range(-5, 6)],
+    # ly=0 (bottom tapered): lx -3..3
     (-3,  0), (-2,  0), (-1,  0), (0,  0), (1,  0), (2,  0), (3,  0),
 ]
 KETTLE_HANDLE = [
-    (-2, -7), (-1, -7), (0, -7), (1, -7), (2, -7),
-    (-3, -6), (3, -6),
-    (-3, -5), (3, -5),
+    # Top arch
+    (-3, -9), (-2, -9), (-1, -9), (0, -9), (1, -9), (2, -9), (3, -9),
+    # Side slopes
+    (-4, -8), (4, -8),
+    (-4, -7), (4, -7),
 ]
 KETTLE_SPOUT = [
-    (4, -2), (5, -2),
-    (4, -1), (5, -1),
+    (6, -3), (7, -3),
+    (6, -2), (7, -2),
 ]
-KETTLE_SPOUT_TIP = (5, -1)
+KETTLE_SPOUT_TIP = (7, -2)
 
+# Interior: 9 wide × 5 tall = 45 cells (lx -4..4, ly -5..-1).
 KETTLE_INTERIOR = [
-    (-3, -3), (-2, -3), (-1, -3), (0, -3), (1, -3), (2, -3), (3, -3),
-    (-3, -2), (-2, -2), (-1, -2), (0, -2), (1, -2), (2, -2), (3, -2),
-    (-3, -1), (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1), (3, -1),
+    (lx, ly)
+    for ly in range(-5, 0)
+    for lx in range(-4, 5)
 ]
-KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)
+KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)  # 45
 INTERIOR_SET = set(KETTLE_INTERIOR)
+# Spout-feeder cells: rightmost interior column (lx=4) at the spout's height.
+# Water that reaches these cells is what physically pours out of the spout.
+SPOUT_FEEDER_CELLS = [(4, -3), (4, -2)]
 
 
 # ── Level data — single level (per design: focus on getting L1 right) ─────
 LEVEL_DATA = [
     {
         'name': 'Steady Pour',
-        # Compact cup: 9 cols × 10 rows outer → 8×9 interior. Smaller than
-        # the previous 12×12 to make precision matter.
-        'kettle_pivot_init': (16, 22),
-        'cup_left': 40, 'cup_right': 48,
-        'cup_top': 48, 'cup_bottom': 57,
-        'target_y': 51,
-        'kettle_volume': 180,
+        # Cup doubled in each dimension (was 9×10): 18×20 outer → 17×19 interior.
+        # cup_left..cup_right: 18-wide; cup_top..cup_bottom: 20-tall.
+        'kettle_pivot_init': (16, 18),
+        'cup_left': 30, 'cup_right': 47,
+        'cup_top': 38, 'cup_bottom': 57,
+        'target_y': 47,  # roughly mid-cup
+        # Pour volume — needs to fill a 17×11-row band to reach the line.
+        # Cup interior at target = 17 × (57-47) ≈ 170 cells; kettle holds
+        # half of its 45 visible + a hidden back-reservoir for the rest.
+        'kettle_volume': 280,
         'obstacles': [],
     },
 ]
@@ -305,21 +335,19 @@ class Ps01(ARCBaseGame):
         self.particles = []
         self.kettle_pivot = d['kettle_pivot_init']
         self.kettle_volume_initial = d['kettle_volume']
-        # Seed kettle_particles by stacking from the bottom of the interior
-        # (local-frame, which == world-frame at tilt=0) up to the requested
-        # volume. Each particle is a discrete water cell that the local-frame
-        # falling-sand sim moves around.
+        # Seed the kettle ~half-full so the water has empty cells to slosh
+        # into as the player tilts. Stack from the bottom of the interior
+        # (local-frame, which == world-frame at tilt=0).
         self.kettle_particles = []
-        # Sort interior cells bottom-up so we fill from the bottom.
         sorted_interior = sorted(KETTLE_INTERIOR, key=lambda p: (-p[1], p[0]))
-        n_seed = min(d['kettle_volume'], KETTLE_INTERIOR_CAPACITY)
-        for i in range(n_seed):
+        visible_seed = min(d['kettle_volume'], KETTLE_INTERIOR_CAPACITY // 2)
+        for i in range(visible_seed):
             self.kettle_particles.append(sorted_interior[i])
-        # Any remaining "volume" beyond visible capacity sits in a hidden
-        # reservoir and re-spawns particles at the top-back of the kettle as
-        # particles eject through the spout. Lets a single pour outlast the
-        # 21-cell visible interior while keeping the surface fully simulated.
-        self._kettle_reservoir = max(0, d['kettle_volume'] - KETTLE_INTERIOR_CAPACITY)
+        # The rest sits in a hidden back-reservoir that drips into the
+        # kettle (top-back corner) as visible particles leave through the
+        # spout. The visible water level stays around half-full while
+        # there's reservoir left, then drains for real once it's empty.
+        self._kettle_reservoir = max(0, d['kettle_volume'] - visible_seed)
         self.cup_left = d['cup_left']
         self.cup_right = d['cup_right']
         self.cup_top = d['cup_top']
@@ -587,10 +615,6 @@ class Ps01(ARCBaseGame):
         emit_y = sy + 1.0
         vx = max(0.0, (self.tilt - HVEL_TILT_OFFSET) * HVEL_SLOPE)
         vy = 0.4
-        # Find spout-feeder cells (interior cells right next to the spout
-        # opening). The kettle interior is 7×3 with the rightmost column at
-        # lx=3; those cells flow into the spout (lx=4..5) when tipped.
-        spout_feeders = [(3, -1), (3, -2)]
         emitted = 0
         for _ in range(rate):
             # Find the highest-priority feeder cell that has water and emit
@@ -598,7 +622,7 @@ class Ps01(ARCBaseGame):
             # (= where water actually piles up at the current tilt).
             chosen = None
             best_wy = None
-            for cell in spout_feeders:
+            for cell in SPOUT_FEEDER_CELLS:
                 if cell in self.kettle_particles:
                     _, wy = _rotate(cell[0], cell[1], self.tilt)
                     if best_wy is None or wy > best_wy:
@@ -612,10 +636,9 @@ class Ps01(ARCBaseGame):
             })
             emitted += 1
             # Refill from the hidden back-reservoir at the top-back interior
-            # cell so the visible water level decays gradually instead of
-            # disappearing in one tilt of the kettle.
+            # cell. With the bigger kettle, top-back is (-4, -5).
             if self._kettle_reservoir > 0:
-                refill_cell = (-3, -3)  # top-back corner
+                refill_cell = (-4, -5)
                 if refill_cell not in self.kettle_particles:
                     self.kettle_particles.append(refill_cell)
                     self._kettle_reservoir -= 1
