@@ -1,10 +1,19 @@
+// Author: Claude Opus 4.7 (1M context)
+// Date: 2026-04-28 12:30
+// PURPOSE: Human Play mode game logic — humanDoAction (one game step),
+//   _humanGameStep (pyodide/server bridge), undo, level transitions, end-game
+//   detection. humanDoAction now accepts an optional actionData arg so callers
+//   (notably _humanLiveTick) can forward arbitrary payloads (e.g. mouse coords)
+//   to the engine on every tick.
+// SRP/DRY check: Pass — game-step plumbing only; rendering, recording, and
+//   level-card UI live in their respective files.
 // ═══════════════════════════════════════════════════════════════════════════
 // HUMAN PLAY MODE — Game Logic (Actions, Steps, Undo, Level Tracking)
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Game Actions ────────────────────────────────────────────────────────────
 
-async function humanDoAction(actionId, isClick, direct = false) {
+async function humanDoAction(actionId, isClick, direct = false, actionData = null) {
   if (!_humanSessionId) return;
   if (!_humanRecording || _humanPaused || _humanProcessing) return;
   if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
@@ -29,7 +38,8 @@ async function humanDoAction(actionId, isClick, direct = false) {
 
   _humanStepCount++;
   const prevGrid = _humanGrid ? JSON.stringify(_humanGrid) : null;
-  const data = await _humanGameStep(actionId, {});
+  const stepData = actionData || {};
+  const data = await _humanGameStep(actionId, stepData);
   if (data.error) { _humanUndoStack.pop(); _humanStepCount--; _humanSetProcessing(false); alert(data.error); return; }
 
   _humanMoveHistory.push({ step: _humanStepCount, action: actionId, state: data.state, levels: data.levels_completed, grid: data.grid });
@@ -37,7 +47,7 @@ async function humanDoAction(actionId, isClick, direct = false) {
     _humanStepsBuffer.push({
       step_num: _humanStepCount,
       action: actionId,
-      data: {},
+      data: stepData,
       grid: data.grid,
       change_map: data.change_map || null,
       llm_response: null,
@@ -66,7 +76,7 @@ async function humanDoAction(actionId, isClick, direct = false) {
   _humanTrackLevelTransition(prevLevels, data.levels_completed || 0);
   _humanRenderGrid(data.grid);
   _humanUpdateTopBar();
-  if (_humanRecording) _humanUpdateRecorder(actionId, {});
+  if (_humanRecording) _humanUpdateRecorder(actionId, stepData);
   _humanUpdateUndoBtn();
   _humanSetProcessing(false);
   _humanCheckEnd();

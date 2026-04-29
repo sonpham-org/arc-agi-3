@@ -1,3 +1,11 @@
+// Author: Claude Opus 4.7 (1M context)
+// Date: 2026-04-28 12:30
+// PURPOSE: Human Play mode input handlers — canvas click/mousedown/mouseup,
+//   touch events, keyboard bindings, and (new) canvas mousemove tracking that
+//   keeps _humanLiveMouseX/_humanLiveMouseY in sync so live-mode games can
+//   receive the cursor position on every tick.
+// SRP/DRY check: Pass — coordinate conversion (canvas px → 64-grid cell) is
+//   inlined here and matches the existing convention in _humanCanvasClick.
 // ═══════════════════════════════════════════════════════════════════════════
 // HUMAN PLAY MODE — Input Handling
 // ═══════════════════════════════════════════════════════════════════════════
@@ -73,10 +81,41 @@ async function _humanCanvasClick(e) {
   _humanCheckEnd();
 }
 
+// Convert a pointer event's clientX/Y to 0..63 grid coordinates relative to
+// the canvas. Returns null if the canvas isn't mounted or has zero size.
+function _humanPointerToGrid(e) {
+  const c = _humanCanvas();
+  if (!c) return null;
+  const rect = c.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const x = Math.floor((e.clientX - rect.left) * 64 / c.clientWidth);
+  const y = Math.floor((e.clientY - rect.top) * 64 / c.clientHeight);
+  return { x: Math.max(0, Math.min(63, x)), y: Math.max(0, Math.min(63, y)) };
+}
+
 function _setupHumanCanvasClick() {
   const c = _humanCanvas();
   if (!c) return;
   c.addEventListener('click', _humanCanvasClick);
+
+  // Live-mode mouse tracking: keep the last cursor cell in 64-grid coords on
+  // _humanLiveMouseX/Y so games like ps01 (kettle-follows-mouse) can read
+  // mouse position from the action data on every tick — including ACTION7
+  // idle ticks where the user isn't clicking.
+  c.addEventListener('mousemove', (e) => {
+    const p = _humanPointerToGrid(e);
+    if (!p) return;
+    _humanLiveMouseX = p.x;
+    _humanLiveMouseY = p.y;
+  });
+  c.addEventListener('touchmove', (e) => {
+    if (!e.touches || !e.touches.length) return;
+    const t = e.touches[0];
+    const p = _humanPointerToGrid({ clientX: t.clientX, clientY: t.clientY });
+    if (!p) return;
+    _humanLiveMouseX = p.x;
+    _humanLiveMouseY = p.y;
+  }, { passive: true });
 
   // Live-mode held-mouse: while a click-action game is in live mode, holding
   // the mouse on the canvas should fire ACTION6 every tick (the live tick
@@ -87,6 +126,8 @@ function _setupHumanCanvasClick() {
     if (!_humanLiveMode || !_humanAction6Mode || !_humanSessionId) return;
     if (!_humanRecording || _humanPaused) return;
     if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
+    const p = _humanPointerToGrid(e);
+    if (p) { _humanLiveMouseX = p.x; _humanLiveMouseY = p.y; }
     _humanStarted = true;
     _humanLiveHeldAction = 6;
   });
@@ -102,6 +143,11 @@ function _setupHumanCanvasClick() {
     if (!_humanRecording || _humanPaused) return;
     if (_humanState.state === 'WIN' || _humanState.state === 'GAME_OVER') return;
     e.preventDefault();
+    if (e.touches && e.touches.length) {
+      const t = e.touches[0];
+      const p = _humanPointerToGrid({ clientX: t.clientX, clientY: t.clientY });
+      if (p) { _humanLiveMouseX = p.x; _humanLiveMouseY = p.y; }
+    }
     _humanStarted = true;
     _humanLiveHeldAction = 6;
   }, { passive: false });

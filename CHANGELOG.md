@@ -5,6 +5,55 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.23.0] — ps01 Pouring Water Son: smaller cup, simulated kettle water, mouse-follow, sustained-stable win
+*Author: Claude Opus 4.7 (1M context) | 2026-04-28*
+
+### Added
+- **New game `ps01` "Pouring Water Son"** — variant of pw01 in
+  `environment_files/ps/00000001/`. Differences vs. pw01:
+  - **Smaller cup** (12 cols × 12 rows outer, 11×11 interior) — precision
+    matters more.
+  - **Simulated kettle water** — the reservoir's render is no longer a
+    fill-meter; instead, N water cells are placed at the world-y minima
+    of the rotated kettle interior, so the surface visibly tilts toward
+    the spout when the kettle tips.
+  - **Container follows the mouse** — the kettle pivot snaps to the
+    cursor position on every live tick (clamped to a safe play area),
+    so the player aims by moving the mouse and tilts by clicking.
+  - **Sustained-stability win condition** — the cup-water surface must
+    sit within ±1 row of the dotted target line for 20 consecutive
+    ticks (`WIN_HOLD_TICKS = 20`); the player must stop pouring AND
+    let the surface flatten AND keep it flat. Replaces pw01's
+    instantaneous "highest_y at target_y once settled" check.
+  - **Single level only** — pw01's "To the Brim" and "Precision" are
+    removed; ps01 ships one well-tuned starting level called
+    "Steady Pour".
+  - HUD progress bar now shows stable-tick fill (yellow → green ramp)
+    instead of volume fill.
+
+### Changed
+- **Live-mode mouse position is forwarded as action data on every tick.**
+  `static/js/human-input.js` adds `mousemove` / `touchmove` listeners on
+  the canvas that update `_humanLiveMouseX/Y` in 64-grid coords;
+  `_humanLiveTick` (in `human-session.js`) and `humanDoAction` (in
+  `human-game.js`) now pass `{x, y}` as action data when available.
+  This is general infrastructure — any live-mode click game can now
+  read mouse position from `self.action.data`. pw01 ignores the data,
+  so its behaviour is unchanged.
+
+### Verified
+- `python -c "...ps01.Ps01()..."` import OK; sustained-tilt-40 pour from
+  pivot (14, 22) lands water in the cup and reaches WIN once
+  `stable_ticks` hits 20 (took ~138 game ticks end-to-end).
+- Mouse-follow updates pivot correctly; clamping keeps the kettle
+  inside (10..54, 10..32) regardless of input.
+- `bash scripts/build_assets.sh` rebuilt `bundle.min.js` (388 KB)
+  without errors.
+- **Not verified in this session**: end-to-end browser flow — the
+  sandbox blocks long-running background processes, so the live UI
+  needs user verification (start gunicorn, open `/human`, select
+  "Pouring Water Son", confirm kettle follows mouse).
+
 ## [1.22.0] — pw01: live-mode FPS uses metadata default; overpour auto-resets, RESET costs a life
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 
