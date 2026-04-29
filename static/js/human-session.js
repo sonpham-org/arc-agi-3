@@ -1,3 +1,13 @@
+// Author: Claude Opus 4.7 (1M context)
+// Date: 2026-04-28 12:30
+// PURPOSE: Human Play mode session lifecycle — start/finish/pause/resume,
+//   live-mode countdown + tick interval, payload upload on session end.
+//   _humanLiveTick now forwards _humanLiveMouseX/Y as action data on every
+//   tick so click-driven games can use cursor position continuously
+//   (ps01 kettle-follows-mouse). Games that don't use mouse data are
+//   unaffected — the engine ignores extra fields.
+// SRP/DRY check: Pass — payload assembly mirrors the existing format, and
+//   tick/FPS logic stays in this file as before.
 // ═══════════════════════════════════════════════════════════════════════════
 // HUMAN PLAY MODE — Session Lifecycle
 // ═══════════════════════════════════════════════════════════════════════════
@@ -228,8 +238,14 @@ function _humanLiveTick() {
     _humanStopLive();
     return;
   }
-  // Fire whatever action is currently held (or ACTION6 no-op if nothing held)
-  humanDoAction(_humanLiveHeldAction, false, true);
+  // Forward the last known mouse cell on every tick (when available) so
+  // games like ps01 can read mouse position from action data — even on
+  // ACTION7 idle ticks where the user isn't clicking. Games that ignore
+  // the data are unaffected.
+  const data = (_humanLiveMouseX !== null && _humanLiveMouseY !== null)
+    ? { x: _humanLiveMouseX, y: _humanLiveMouseY }
+    : null;
+  humanDoAction(_humanLiveHeldAction, false, true, data);
 }
 
 function _humanStopLive() {

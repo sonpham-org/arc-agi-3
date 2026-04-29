@@ -1,0 +1,9 @@
+{
+    "game_id": "ps01",
+    "title": "Pouring Water Son",
+    "default_fps": 30,
+    "baseline_actions": [6, 7],
+    "tags": ["live", "simulation", "physics"],
+    "local_dir": "environment_files/ps/00000001",
+    "date_downloaded": "2026-04-28"
+}

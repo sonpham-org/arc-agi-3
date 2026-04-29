@@ -69,6 +69,7 @@ environment_files/*
 !environment_files/mw/
 !environment_files/pc/
 !environment_files/pi/
+!environment_files/ps/
 !environment_files/pt/
 !environment_files/pw/
 !environment_files/px/

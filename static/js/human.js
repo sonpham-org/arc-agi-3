@@ -1,8 +1,13 @@
-// Author: Claude Sonnet 4.6
-// Date: 2026-03-25 13:00
+// Author: Claude Opus 4.7 (1M context)
+// Date: 2026-04-28 12:30
 // PURPOSE: Human Play mode coordinator. Handles game selection, session lifecycle
 //   (start/pause/resume/stop), canvas input, keyboard bindings, live mode, undo,
 //   and recording. Calls _renderGames (ui.js) for sidebar; all game steps via pyodide or /api/step.
+//   Live-mode mouse position (_humanLiveMouseX/Y) is updated on canvas mousemove
+//   in human-input.js and forwarded as data on every live tick (humanDoAction +
+//   _humanLiveTick), so click-driven games can let the cursor steer something
+//   continuously (e.g. ps01 kettle-follows-mouse). Games that ignore data are
+//   unaffected.
 // SRP/DRY check: Pass — sidebar rendering delegated to _renderGames in ui.js.
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -37,6 +42,8 @@ let _humanLiveFps = 10;        // tick rate for live mode (user-adjustable, defa
 let _humanGameHasLive = false; // true if current game supports live mode
 let _humanLiveIdleAction = 6;  // idle tick action for live mode (7 for ACT7-only games, 6 otherwise)
 let _humanLiveHeldAction = 6;  // currently held action in live mode (reset to idle on key release)
+let _humanLiveMouseX = null;   // last canvas-relative mouse x in 0..63 grid coords (live mode)
+let _humanLiveMouseY = null;   // last canvas-relative mouse y in 0..63 grid coords (live mode)
 
 const _humanCanvas = () => document.getElementById('humanCanvas');
 const _humanCtx = () => _humanCanvas()?.getContext('2d');
