@@ -5,6 +5,51 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.23.0] — pw01 v2: heat mechanic (evaporate / freeze / smoke) + 3 new levels
+*Author: Claude Opus 4.7 (1M context) | 2026-04-29*
+
+### Added
+- **Per-pixel water temperature.** Every water pixel (in-flight droplet,
+  settled water, and the kettle reservoir as a bulk) carries an integer
+  °C value. Levels can place fire-source rectangles (raise neighbour
+  temps by `HEAT_PER_TICK=4` °C/tick) and cold-source rectangles (lower
+  by `COLD_PER_TICK=4`). With no source nearby, water drifts toward the
+  level's `ambient_temp` by `DRIFT_PER_TICK=1` °C/tick.
+- **Phase transitions.** At `>=100°C` water evaporates and emits a
+  smoke puff. At `<=0°C` it freezes into a solid ice cell that itself
+  acts as a cold source (chills neighbours). At `>=50°C` it
+  periodically emits a cosmetic upward-drifting smoke pixel.
+- **Gradual ice melting.** Ice cells carry their own temperature.
+  Adjacent fire raises ice temp; otherwise it drifts toward
+  `ICE_BASELINE = -10°C`. Above `MELT_THRESHOLD = 1°C` the ice
+  converts back to water at that temp — fully reversible cycle.
+- **Three new levels (4, 5, 6).**
+  - **Boiling Cup** — fire strip below the cup floor evaporates
+    settled water; player must out-pour evaporation to hit the line.
+  - **Frozen Reach** — cold strips outside the cup walls freeze the
+    water surface if the pour rate drops; warm kettle (`60°C`) +
+    sustained pour to clear.
+  - **Heat Gauntlet** — fire patch in the air column the spout arc
+    passes through; high tilt = fast droplet transit = less heat
+    absorbed.
+- **Visual cues.** Hot water tints magenta, boiling tints red, fire =
+  red, cold = light-blue, ice = white, smoke = light-gray. HUD
+  unchanged.
+- **Mandatory smoke test** (`environment_files/pw/00000002/smoke_test.py`)
+  wins all 6 levels deterministically; per-level click count is
+  discovered by linear search and the production run uses the
+  discovered numbers.
+- **Version bump:** `environment_files/pw/00000001/` left intact for
+  replay compatibility; new code lives in `environment_files/pw/00000002/`
+  per CLAUDE.md game-versioning rule. Pyodide loader picks the highest
+  version directory automatically.
+
+### Unchanged
+- Levels 1–3 keep the same parameters; their `heat_sources` and
+  `cold_sources` lists are empty so the new code is a no-op there.
+
+---
+
 ## [1.22.0] — pw01: live-mode FPS uses metadata default; overpour auto-resets, RESET costs a life
 *Author: Claude Opus 4.7 (1M context) | 2026-04-26*
 
