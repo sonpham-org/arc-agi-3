@@ -268,6 +268,8 @@ class Ps01(ARCBaseGame):
         self.spills = []
         self.stable_ticks = 0  # consecutive ticks the surface has been on target
         self._just_overflowed = False  # True on ticks the kettle spilled
+        self._phase_x = 0.0    # gravity-x phase accumulator (kettle CA)
+        self._phase_y = 0.0    # gravity-y phase accumulator
 
         super().__init__(
             'ps', levels,
@@ -291,6 +293,8 @@ class Ps01(ARCBaseGame):
         seed_count = min(d['kettle_seed'], KETTLE_INTERIOR_CAPACITY)
         sorted_interior = sorted(KETTLE_INTERIOR, key=lambda p: (-p[1], p[0]))
         self.kettle_particles = list(sorted_interior[:seed_count])
+        self._phase_x = 0.0
+        self._phase_y = 0.0
         self.cup_left = d['cup_left']
         self.cup_right = d['cup_right']
         self.cup_top = d['cup_top']
@@ -323,67 +327,59 @@ class Ps01(ARCBaseGame):
 
     def _step_kettle_water(self):
         """Advance the in-kettle water sim one tick. Operates in the kettle's
-        LOCAL frame (where the interior is a fixed 7×3 box) and uses a
-        gravity vector rotated by -tilt so the sand falls toward whichever
-        wall is currently lowest in world space. Result: water visibly piles
-        up on the spout side as the kettle tips."""
+        LOCAL frame and uses gravity rotated by -tilt. Phase accumulators
+        let horizontal drift happen at a rate proportional to sin(tilt) —
+        so water sloshes visibly even at tilts of 5-15° where a hard
+        threshold would produce no horizontal motion at all. Same particles
+        rearrange every tick; nothing leaves the kettle except via the
+        rim-edge spill rule below."""
         if not self.kettle_particles:
+            self._just_overflowed = False
             return
-        # Local-frame gravity: world-(0,1) rotated by -tilt.
+
         t = math.radians(self.tilt)
         gx_f, gy_f = math.sin(t), math.cos(t)
-        # Discrete primary direction (one of 8 neighbours, picked from the
-        # angle of (gx_f, gy_f)).
-        def _disc(v):
-            if v > 0.3827:   # > sin(22.5°)
-                return 1
-            if v < -0.3827:
-                return -1
-            return 0
-        gdx, gdy = _disc(gx_f), _disc(gy_f)
+
+        # Phase accumulator: each tick add the gravity components to the
+        # phases, then commit a 1-cell move whenever a phase crosses ±1.
+        # Result: vertical falls happen ~every tick (cos~1 at low tilts);
+        # horizontal slips happen every (1/sin(tilt)) ticks.
+        self._phase_x += gx_f
+        self._phase_y += gy_f
+        gdx = 0
+        if self._phase_x >= 1.0:
+            gdx = 1; self._phase_x -= 1.0
+        elif self._phase_x <= -1.0:
+            gdx = -1; self._phase_x += 1.0
+        gdy = 0
+        if self._phase_y >= 1.0:
+            gdy = 1; self._phase_y -= 1.0
+        elif self._phase_y <= -1.0:
+            gdy = -1; self._phase_y += 1.0
         if gdx == 0 and gdy == 0:
-            gdy = 1
-        # Diagonal alternatives perpendicular-ish to gravity, biased toward
-        # the steeper component so water "rolls" off the high side.
-        # Candidate moves in priority order:
-        #   1. straight along gravity
-        #   2. the two diagonals adjacent to the gravity direction
+            # Nothing accumulated yet this tick — water stays put.
+            self._just_overflowed = False
+            return
+
+        # Move candidates in priority: gravity, then the two diagonals
+        # adjacent to gravity (so water can "roll" past stuck neighbours).
         candidates_dirs = [(gdx, gdy)]
         if gdx == 0:
             candidates_dirs += [(-1, gdy), (1, gdy)]
         elif gdy == 0:
             candidates_dirs += [(gdx, -1), (gdx, 1)]
         else:
-            # Pure diagonal — also try the two cardinal components.
             candidates_dirs += [(gdx, 0), (0, gdy)]
 
         interior = INTERIOR_SET
-        # Sort particles bottom-up in world-y so lowest piles up first
+        # Sort bottom-up in world-y so the deepest particle moves first.
         def world_y(p):
-            return p[0] * gx_f + p[1] * gy_f  # = world-y component (= dot with gravity)
+            return p[0] * gx_f + p[1] * gy_f
         particles_sorted = sorted(self.kettle_particles, key=lambda p: -world_y(p))
         occupied = set(particles_sorted)
         new_set = set(particles_sorted)
 
-        # Identify the rim corner that's currently lowest in world space (the
-        # lip the water will spill over). At tilt 0 both rim corners are at
-        # the same height — no spill direction. At tilt > 0 the right corner
-        # is lower, so spillage happens over the right rim.
-        _, lwy = _rotate(RIM_LEFT[0], RIM_LEFT[1], self.tilt)
-        _, rwy = _rotate(RIM_RIGHT[0], RIM_RIGHT[1], self.tilt)
-        # Use the corner with greater world-y (= lower in world) as spill rim.
-        if rwy > lwy:
-            spill_rim_lx, spill_rim_ly = RIM_RIGHT
-            spill_rim_wy = rwy
-        else:
-            spill_rim_lx, spill_rim_ly = RIM_LEFT
-            spill_rim_wy = lwy
-
-        spill_world_pos = None  # set when a particle actually spills this tick
-        spill_count = 0
-
         for (lx, ly) in particles_sorted:
-            moved = False
             for (dx, dy) in candidates_dirs:
                 nx, nly = lx + dx, ly + dy
                 if (nx, nly) not in interior:
@@ -394,42 +390,50 @@ class Ps01(ARCBaseGame):
                 occupied.add((nx, nly))
                 new_set.discard((lx, ly))
                 new_set.add((nx, nly))
-                moved = True
                 break
-            if moved:
-                continue
-            # Particle is stuck. Check if it's "above" the spill rim — i.e.,
-            # higher in world (smaller world-y) than the lower rim corner.
-            # If so, it overflows: remove from kettle, spawn an in-flight
-            # droplet at the rim's world position.
-            _, pwy = _rotate(lx, ly, self.tilt)
-            if pwy < spill_rim_wy - 0.5:
-                occupied.discard((lx, ly))
-                new_set.discard((lx, ly))
-                spill_count += 1
-                spill_world_pos = (
-                    self.kettle_pivot[0] + _rotate(spill_rim_lx, spill_rim_ly, self.tilt)[0],
-                    self.kettle_pivot[1] + _rotate(spill_rim_lx, spill_rim_ly, self.tilt)[1],
-                )
 
         self.kettle_particles = list(new_set)
 
-        # Spawn in-flight droplets for spilled particles. Initial velocity
-        # carries the water in the spill direction — i.e., perpendicular to
-        # the rotated rim, pointing outward from the kettle.
-        if spill_count > 0 and spill_world_pos is not None:
+        # ── Edge-only rim spill ─────────────────────────────────────────
+        # The only way water leaves the kettle is by piling up to the open
+        # top, in the column adjacent to the lower rim, AND being
+        # physically higher than that rim corner in world space.
+        _, lwy = _rotate(RIM_LEFT[0], RIM_LEFT[1], self.tilt)
+        _, rwy = _rotate(RIM_RIGHT[0], RIM_RIGHT[1], self.tilt)
+        if rwy > lwy:
+            spill_rim_lx, spill_rim_ly = RIM_RIGHT
+            spill_rim_wy = rwy
+            edge_lx = spill_rim_lx - 1     # interior column adjacent to right rim
+        else:
+            spill_rim_lx, spill_rim_ly = RIM_LEFT
+            spill_rim_wy = lwy
+            edge_lx = spill_rim_lx + 1     # interior column adjacent to left rim
+
+        edge_cell = (edge_lx, spill_rim_ly)  # top of the spill-side column
+        spill_count = 0
+        if edge_cell in self.kettle_particles:
+            _, pwy = _rotate(edge_cell[0], edge_cell[1], self.tilt)
+            if pwy < spill_rim_wy:
+                # That single cell overflows this tick. The CA on the next
+                # tick will push more water up into the now-empty edge cell,
+                # and so the kettle drains one drop per tick maximum from
+                # this edge — which is roughly how a real bucket pours.
+                self.kettle_particles.remove(edge_cell)
+                spill_count = 1
+
+        if spill_count > 0:
+            spill_world_pos = (
+                self.kettle_pivot[0] + _rotate(spill_rim_lx, spill_rim_ly, self.tilt)[0],
+                self.kettle_pivot[1] + _rotate(spill_rim_lx, spill_rim_ly, self.tilt)[1],
+            )
             sx, sy = spill_world_pos
-            t = math.radians(self.tilt)
-            # Outward direction from the right rim is +cos(tilt) in x,
-            # +sin(tilt) in y (world). Scale by a spill-speed factor.
             dir_sign = 1 if (spill_rim_lx > 0) else -1
             spill_speed = max(0.6, abs(self.tilt - HVEL_TILT_OFFSET) * HVEL_SLOPE)
             vx = dir_sign * spill_speed * math.cos(t)
             vy = max(0.2, spill_speed * math.sin(t))
-            for _ in range(spill_count):
-                self.particles.append({
-                    'fx': sx, 'fy': sy + 0.5, 'vx': vx, 'vy': vy,
-                })
+            self.particles.append({
+                'fx': sx, 'fy': sy + 0.5, 'vx': vx, 'vy': vy,
+            })
             self._just_overflowed = True
         else:
             self._just_overflowed = False
