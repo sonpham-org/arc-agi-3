@@ -109,23 +109,20 @@ KETTLE_INTERIOR = [
     (-3, -1), (-2, -1), (-1, -1), (0, -1), (1, -1), (2, -1), (3, -1),
 ]
 KETTLE_INTERIOR_CAPACITY = len(KETTLE_INTERIOR)
+INTERIOR_SET = set(KETTLE_INTERIOR)
 
 
 # ── Level data — single level (per design: focus on getting L1 right) ─────
 LEVEL_DATA = [
     {
         'name': 'Steady Pour',
-        # Smaller cup: 12 cols × 12 rows outer → 11×11 interior.
-        # target_y at row 50 means need ~11 wide × 8 tall = 88 water cells
-        # to fill to the dotted line. Surface must sit within ±1 of row 50
-        # for 20 consecutive ticks to win.
-        'kettle_pivot_init': (32, 18),
-        'cup_left': 38, 'cup_right': 50,
-        'cup_top': 46, 'cup_bottom': 58,
-        'target_y': 50,
-        # Particle-based reservoir: enough to fill past the line so the
-        # player has to stop deliberately (otherwise the cup overflows).
-        'kettle_volume': 200,
+        # Compact cup: 9 cols × 10 rows outer → 8×9 interior. Smaller than
+        # the previous 12×12 to make precision matter.
+        'kettle_pivot_init': (16, 22),
+        'cup_left': 40, 'cup_right': 48,
+        'cup_top': 48, 'cup_bottom': 57,
+        'target_y': 51,
+        'kettle_volume': 180,
         'obstacles': [],
     },
 ]
@@ -190,22 +187,17 @@ class PourDisplay(RenderableUserDisplay):
             if 0 <= ix < GW and 0 <= iy < GH:
                 body_world[(ix, iy)] = C_DGRAY
 
-        # Simulated kettle water — fill the world-y-lowest interior cells
-        # first, so the surface visibly tilts toward whichever side is
-        # currently lower in world space (the spout side when tipped right).
-        n_water = min(g.kettle_water, KETTLE_INTERIOR_CAPACITY)
-        if n_water > 0:
-            interior_world = []
-            for (lx, ly) in KETTLE_INTERIOR:
-                wx, wy = _rotate(lx, ly, tilt)
-                ix, iy = int(round(px + wx)), int(round(py + wy))
-                interior_world.append((ix, iy, wy))
-            # Bottom-most cells in world coords get filled first.
-            interior_world.sort(key=lambda p: -p[2])
-            for i in range(n_water):
-                ix, iy, _ = interior_world[i]
-                if 0 <= ix < GW and 0 <= iy < GH:
-                    body_world[(ix, iy)] = C_BLUE
+        # Simulated kettle water — each particle has its own (lx, ly) cell in
+        # the kettle's local frame. The simulation runs in local coords with
+        # a gravity vector rotated by -tilt, so when the kettle tips the
+        # particles physically pile up on the down-tilted side and the
+        # surface flattens with falling-sand mechanics. Render each particle
+        # at its world-frame cell.
+        for (lx, ly) in g.kettle_particles:
+            wx, wy = _rotate(lx, ly, tilt)
+            ix, iy = int(round(px + wx)), int(round(py + wy))
+            if 0 <= ix < GW and 0 <= iy < GH:
+                body_world[(ix, iy)] = C_BLUE
 
         # Spout (overlaid after body so spout colour wins)
         for (lx, ly) in KETTLE_SPOUT:
@@ -286,7 +278,7 @@ class Ps01(ARCBaseGame):
         self.particles = []
         self.kettle_pivot = (32, 18)
         self.kettle_volume_initial = 0
-        self.kettle_water = 0
+        self.kettle_particles = []  # list[(lx, ly)] — water cells in kettle local frame
         self.cup_left = 0
         self.cup_right = 0
         self.cup_top = 0
@@ -313,7 +305,21 @@ class Ps01(ARCBaseGame):
         self.particles = []
         self.kettle_pivot = d['kettle_pivot_init']
         self.kettle_volume_initial = d['kettle_volume']
-        self.kettle_water = d['kettle_volume']
+        # Seed kettle_particles by stacking from the bottom of the interior
+        # (local-frame, which == world-frame at tilt=0) up to the requested
+        # volume. Each particle is a discrete water cell that the local-frame
+        # falling-sand sim moves around.
+        self.kettle_particles = []
+        # Sort interior cells bottom-up so we fill from the bottom.
+        sorted_interior = sorted(KETTLE_INTERIOR, key=lambda p: (-p[1], p[0]))
+        n_seed = min(d['kettle_volume'], KETTLE_INTERIOR_CAPACITY)
+        for i in range(n_seed):
+            self.kettle_particles.append(sorted_interior[i])
+        # Any remaining "volume" beyond visible capacity sits in a hidden
+        # reservoir and re-spawns particles at the top-back of the kettle as
+        # particles eject through the spout. Lets a single pour outlast the
+        # 21-cell visible interior while keeping the surface fully simulated.
+        self._kettle_reservoir = max(0, d['kettle_volume'] - KETTLE_INTERIOR_CAPACITY)
         self.cup_left = d['cup_left']
         self.cup_right = d['cup_right']
         self.cup_top = d['cup_top']
@@ -341,6 +347,66 @@ class Ps01(ARCBaseGame):
         mx = max(PIVOT_X_MIN, min(PIVOT_X_MAX, mx))
         my = max(PIVOT_Y_MIN, min(PIVOT_Y_MAX, my))
         self.kettle_pivot = (mx, my)
+
+    # ── Kettle-water local-frame falling-sand ───────────────────────────────
+
+    def _step_kettle_water(self):
+        """Advance the in-kettle water sim one tick. Operates in the kettle's
+        LOCAL frame (where the interior is a fixed 7×3 box) and uses a
+        gravity vector rotated by -tilt so the sand falls toward whichever
+        wall is currently lowest in world space. Result: water visibly piles
+        up on the spout side as the kettle tips."""
+        if not self.kettle_particles:
+            return
+        # Local-frame gravity: world-(0,1) rotated by -tilt.
+        t = math.radians(self.tilt)
+        gx_f, gy_f = math.sin(t), math.cos(t)
+        # Discrete primary direction (one of 8 neighbours, picked from the
+        # angle of (gx_f, gy_f)).
+        def _disc(v):
+            if v > 0.3827:   # > sin(22.5°)
+                return 1
+            if v < -0.3827:
+                return -1
+            return 0
+        gdx, gdy = _disc(gx_f), _disc(gy_f)
+        if gdx == 0 and gdy == 0:
+            gdy = 1
+        # Diagonal alternatives perpendicular-ish to gravity, biased toward
+        # the steeper component so water "rolls" off the high side.
+        # Candidate moves in priority order:
+        #   1. straight along gravity
+        #   2. the two diagonals adjacent to the gravity direction
+        candidates_dirs = [(gdx, gdy)]
+        if gdx == 0:
+            candidates_dirs += [(-1, gdy), (1, gdy)]
+        elif gdy == 0:
+            candidates_dirs += [(gdx, -1), (gdx, 1)]
+        else:
+            # Pure diagonal — also try the two cardinal components.
+            candidates_dirs += [(gdx, 0), (0, gdy)]
+
+        interior = INTERIOR_SET
+        # Sort particles bottom-up in world-y so lowest piles up first
+        def world_y(p):
+            return p[0] * gx_f + p[1] * gy_f  # = world-y component (= dot with gravity)
+        particles_sorted = sorted(self.kettle_particles, key=lambda p: -world_y(p))
+        occupied = set(particles_sorted)
+        new_set = set(particles_sorted)
+        for (lx, ly) in particles_sorted:
+            for (dx, dy) in candidates_dirs:
+                nx, nly = lx + dx, ly + dy
+                if (nx, nly) not in interior:
+                    continue
+                if (nx, nly) in occupied:
+                    continue
+                # Move
+                occupied.discard((lx, ly))
+                occupied.add((nx, nly))
+                new_set.discard((lx, ly))
+                new_set.add((nx, nly))
+                break
+        self.kettle_particles = list(new_set)
 
     # ── Solid-cell test ─────────────────────────────────────────────────────
 
@@ -505,21 +571,54 @@ class Ps01(ARCBaseGame):
     # ── Pour emission ───────────────────────────────────────────────────────
 
     def _emit_pour(self):
+        # Emission requires (a) tilt past SPILL_TILT and (b) at least one
+        # simulated water cell touching the spout exit (lx=3, ly in {-1, -2}).
+        # That means the kettle physics actually has to feed the spout — at
+        # tilt 0 with full water, no emission, because the surface sits
+        # below the spout opening. Tip the kettle, the sloshing brings water
+        # to the spout-side wall, and then it pours.
         rate = _emit_rate(self.tilt)
-        if rate == 0 or self.kettle_water <= 0:
+        if rate == 0:
+            return
+        if not self.kettle_particles and self._kettle_reservoir <= 0:
             return
         sx, sy = self._spout_tip_world()
         emit_x = sx
         emit_y = sy + 1.0
         vx = max(0.0, (self.tilt - HVEL_TILT_OFFSET) * HVEL_SLOPE)
         vy = 0.4
+        # Find spout-feeder cells (interior cells right next to the spout
+        # opening). The kettle interior is 7×3 with the rightmost column at
+        # lx=3; those cells flow into the spout (lx=4..5) when tipped.
+        spout_feeders = [(3, -1), (3, -2)]
+        emitted = 0
         for _ in range(rate):
-            if self.kettle_water <= 0:
+            # Find the highest-priority feeder cell that has water and emit
+            # one particle from it. Highest priority = lowest in world frame
+            # (= where water actually piles up at the current tilt).
+            chosen = None
+            best_wy = None
+            for cell in spout_feeders:
+                if cell in self.kettle_particles:
+                    _, wy = _rotate(cell[0], cell[1], self.tilt)
+                    if best_wy is None or wy > best_wy:
+                        best_wy = wy
+                        chosen = cell
+            if chosen is None:
                 break
+            self.kettle_particles.remove(chosen)
             self.particles.append({
                 'fx': emit_x, 'fy': emit_y, 'vx': vx, 'vy': vy,
             })
-            self.kettle_water -= 1
+            emitted += 1
+            # Refill from the hidden back-reservoir at the top-back interior
+            # cell so the visible water level decays gradually instead of
+            # disappearing in one tilt of the kettle.
+            if self._kettle_reservoir > 0:
+                refill_cell = (-3, -3)  # top-back corner
+                if refill_cell not in self.kettle_particles:
+                    self.kettle_particles.append(refill_cell)
+                    self._kettle_reservoir -= 1
 
     # ── Cup volume + win check ──────────────────────────────────────────────
 
@@ -584,17 +683,18 @@ class Ps01(ARCBaseGame):
     def step(self):
         aid = self.action.id.value
 
-        # Pivot follows mouse (both ACTION6 and ACTION7 may carry coords —
-        # the frontend forwards the live mouse position on every tick).
-        self._update_pivot_from_mouse()
-
+        # Pivot follows mouse ONLY while the player is holding the click
+        # (ACTION6). On release (ACTION7), the kettle stays put — that's how
+        # you stop pouring without also losing your aim.
         if aid == 6:
+            self._update_pivot_from_mouse()
             self.tilt = min(TILT_MAX, self.tilt + TILT_PER_CLICK)
         else:
             self.tilt = max(0, self.tilt - TILT_PER_RELEASE)
 
         self.tick += 1
 
+        self._step_kettle_water()
         self._emit_pour()
         self._step_particles()
         self._step_water_ca()
