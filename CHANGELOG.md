@@ -5,6 +5,38 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.26.0] — dl01: Demon Lord (5-level d-pad sokoban-RPG)
+*Author: Claude Opus 4.7 (1M context) | 2026-05-06*
+
+### Added
+- **New game `dl01` "Demon Lord"** — five-level d-pad sokoban-RPG
+  built on a 16×16 grid (`environment_files/dl/00000001/`).
+  Player pushes light crystals; each crystal emits a 4-cardinal
+  beam that lights cells until blocked by a wall, the grid edge,
+  or another crystal. Lit cells kill shadow demons. Final level
+  is a Demon Lord boss fight: light all three sanctuary shrines
+  to flip the Lord vulnerable, then walk into him to win.
+  Walking into the Lord while he is invulnerable kills the player.
+- **Mechanics introduced level-by-level:**
+  L1 "First Light" (beam reveal) → L2 "Push It" (sokoban push) →
+  L3 "Two Targets" (multi-crystal positioning) → L4 "Watchman"
+  (patrolling demon + static demon, exit at top) → L5 "The Demon
+  Lord" (3 crystals × 3 shrines + sanctuary boss).
+- **Patrolling demon** that waits one turn when blocked by
+  walls / crystals / live demons / the Lord; kills the player on
+  contact; dies when its cell becomes lit.
+- **Crystal-blocks-crystal beam rule** — a crystal absorbs another
+  crystal's beam, so positioning order matters (used in L5).
+- Pure d-pad controls (`available_actions = [1, 2, 3, 4]`); fully
+  deterministic, no RNG.
+
+### Verified
+- Mandatory smoke test (`smoke_test.py`) wins all 5 levels
+  deterministically. Final state: `GameState.WIN` at Lord's cell
+  `(8, 5)` after 31 turns of level 5.
+
+---
+
 ## [1.25.0] — pw01 v3: player thermostat (W / S keys)
 *Author: Claude Opus 4.7 (1M context) | 2026-04-29*
 

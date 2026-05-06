@@ -59,6 +59,7 @@ environment_files/*
 !environment_files/ac/
 !environment_files/ar/
 !environment_files/cr/
+!environment_files/dl/
 !environment_files/fd/
 !environment_files/fr/
 !environment_files/fy/
