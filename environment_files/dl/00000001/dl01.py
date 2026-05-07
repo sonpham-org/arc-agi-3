@@ -1,14 +1,20 @@
 # Author: Claude Opus 4.7
-# Date: 2026-05-06 12:00
+# Date: 2026-05-07 10:00
 # PURPOSE: Demon Lord (dl01) — 5-level d-pad sokoban-RPG. Player pushes light
 #          crystals; each crystal emits a 4-cardinal beam that lights cells
 #          until blocked by a wall, the grid edge, or another crystal. Lit
-#          cells kill shadow demons. Final level: light all 3 sanctuary
-#          shrines to make the Demon Lord vulnerable, then walk into him to
-#          win. Walking into the invulnerable Lord kills the player.
+#          cells kill shadow demons. A pink Demon General hunts the player
+#          via BFS shortest-path on every level — dormant for the first 2
+#          player moves, then chases one cell per turn; killable by light,
+#          deadly on contact, blocks player walks and crystal pushes.
+#          Final level: light all 3 sanctuary shrines to make the Demon
+#          Lord vulnerable, then walk into him to win. Walking into the
+#          invulnerable Lord kills the player.
 #          Integrates with arcengine via ARCBaseGame; d-pad only (ACTION1-4).
 # SRP/DRY check: Pass — no existing utility covers crystal-beam-lighting
-#                sokoban rule. Pattern is novel for this codebase.
+#                sokoban rule. BFS pathfinder is one-off, kept inline.
+
+from collections import deque
 
 import numpy as np
 from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay
@@ -28,10 +34,15 @@ C_DEMON_STAT   = 15  # Purple
 C_DEMON_PATROL = 8   # Red
 C_LORD_INVULN  = 13  # Maroon
 C_LORD_VULN    = 6   # Magenta
+C_GENERAL      = 7   # LightMagenta — Demon General (chasing enemy)
 C_SHRINE_OFF   = 2   # Gray
 C_SHRINE_ON    = 14  # Green
 C_EXIT         = 12  # Orange
 C_BG           = 5   # Black
+
+# Demon General activates after this many successful player moves (turns).
+# 2 → general is dormant on player's first 2 actions, chases from action 3 on.
+GENERAL_DORMANT_TURNS = 2
 
 # Action id → (dx, dy). ACTION1..4 = UP, DOWN, LEFT, RIGHT (per CLAUDE.md).
 DIR_DELTAS = {
@@ -54,6 +65,9 @@ DIR_DELTAS = {
 #   shrines          — list of shadow-shrine positions (Lord level only)
 #   exit_pos         — (x, y) walkable exit, or None on Lord level
 #   demon_lord       — (x, y) of the Lord, or None
+#   demon_general    — (x, y) starting cell of the chasing Demon General,
+#                      or None if absent. Dormant for the first
+#                      GENERAL_DORMANT_TURNS player moves, then BFS-chases.
 #   player_start     — (x, y)
 #   turn_limit       — hard cap; exceeding ends the level as a loss
 # ============================================================================
@@ -61,7 +75,8 @@ DIR_DELTAS = {
 LEVELS = [
     # ── Level 1: "First Light" ───────────────────────────────────────────────
     # Crystal pre-aligned with demon (col 4). Light kills the demon at level
-    # start; player just walks to the exit. Tutorial: see what beams do.
+    # start; player just walks to the exit. The Demon General starts at the
+    # opposite corner — dormant 2 turns then chases via BFS.
     {
         "name": "First Light",
         "walls": set(),
@@ -71,13 +86,15 @@ LEVELS = [
         "shrines": [],
         "exit_pos": (14, 14),
         "demon_lord": None,
+        "demon_general": (1, 1),
         "player_start": (1, 14),
-        "turn_limit": 30,
+        "turn_limit": 45,
     },
 
     # ── Level 2: "Push It" ───────────────────────────────────────────────────
     # Crystal off-column (5,14). Player must push it left to col 4 to kill
-    # the demon, then walk to the exit. Teaches sokoban push.
+    # the demon, then walk to the exit. Teaches sokoban push under chase
+    # pressure.
     {
         "name": "Push It",
         "walls": set(),
@@ -87,13 +104,13 @@ LEVELS = [
         "shrines": [],
         "exit_pos": (14, 14),
         "demon_lord": None,
+        "demon_general": (1, 1),
         "player_start": (1, 14),
-        "turn_limit": 35,
+        "turn_limit": 55,
     },
 
     # ── Level 3: "Two Targets" ──────────────────────────────────────────────
-    # Two crystals, two demons. Crystals start in cols 3 and 12 (no demons
-    # there). Push crystal A to col 5, crystal B to col 10.
+    # Two crystals, two demons. Push crystal A to col 5, crystal B to col 10.
     {
         "name": "Two Targets",
         "walls": set(),
@@ -103,13 +120,15 @@ LEVELS = [
         "shrines": [],
         "exit_pos": (14, 14),
         "demon_lord": None,
+        "demon_general": (1, 1),
         "player_start": (1, 14),
-        "turn_limit": 50,
+        "turn_limit": 70,
     },
 
     # ── Level 4: "Watchman" ─────────────────────────────────────────────────
     # Patrol demon walks col 8 rows 4-7. Static demon at (10, 7). Two crystals
-    # in row 14. Exit moved to (14, 1) so player must traverse upward.
+    # in row 14. Exit at (14, 1) (so the General can't be there — starts at
+    # (1, 1) instead).
     {
         "name": "Watchman",
         "walls": set(),
@@ -124,17 +143,18 @@ LEVELS = [
         "shrines": [],
         "exit_pos": (14, 1),
         "demon_lord": None,
+        # (14, 14) would die at level start — sits in the right-beam from
+        # crystal (12, 14). One row up keeps it in shadow on turn 0.
+        "demon_general": (14, 13),
         "player_start": (1, 14),
-        "turn_limit": 80,
+        "turn_limit": 110,
     },
 
     # ── Level 5: "The Demon Lord" (boss) ────────────────────────────────────
     # Sanctuary U-shape (open south at (8,6)) houses the Lord at (8,5).
     # Three shrines at (3,7), (13,7), (8,9). Three crystals at (5,11), (10,11),
-    # (8,13). Push crystal A LEFT to col 3, crystal B RIGHT to col 13; crystal
-    # C at (8,13) already lights shrine (8,9). Then walk via col 7 (avoiding
-    # col 8 which has crystal C) up to (7,7), right into (8,7), up through the
-    # opening at (8,6), and into the now-vulnerable Lord at (8,5).
+    # (8,13). The General lurks at (14, 14) — far from the player's eventual
+    # path through col 7 to the Lord, but close enough to demand caution.
     {
         "name": "The Demon Lord",
         "walls": {
@@ -149,8 +169,9 @@ LEVELS = [
         "shrines": [(3, 7), (13, 7), (8, 9)],
         "exit_pos": None,           # win = walk into vulnerable Lord
         "demon_lord": (8, 5),
+        "demon_general": (14, 14),
         "player_start": (1, 14),
-        "turn_limit": 100,
+        "turn_limit": 140,
     },
 ]
 
@@ -225,6 +246,13 @@ class Dl01Display(RenderableUserDisplay):
             color = C_LORD_VULN if g._demon_lord["vulnerable"] else C_LORD_INVULN
             frame[py:py + CELL, px:px + CELL] = color
 
+        # 7b. Demon General (alive only) — full cell. Pink/LightMagenta
+        # signals the elite chasing enemy.
+        if g._demon_general is not None and g._demon_general["alive"]:
+            gx, gy = g._demon_general["pos"]
+            px, py = gx * CELL, gy * CELL
+            frame[py:py + CELL, px:px + CELL] = C_GENERAL
+
         # 8. Player — full cell, on top of everything
         ppx, ppy = g._player
         px, py = ppx * CELL, ppy * CELL
@@ -250,6 +278,7 @@ class Dl01(ARCBaseGame):
         self._shrines = {}            # {(x,y): {"lit": bool}}
         self._exit_pos = None
         self._demon_lord = None       # {"pos","vulnerable"} or None
+        self._demon_general = None    # {"pos","alive"} or None
         self._lit_cells = set()
         self._turn = 0
         self._turn_limit = 30
@@ -311,6 +340,12 @@ class Dl01(ARCBaseGame):
         else:
             self._demon_lord = None
 
+        gen_pos = ldef.get("demon_general")
+        if gen_pos is not None:
+            self._demon_general = {"pos": gen_pos, "alive": True}
+        else:
+            self._demon_general = None
+
         self._player = ldef["player_start"]
         self._turn = 0
         self._turn_limit = ldef["turn_limit"]
@@ -320,6 +355,7 @@ class Dl01(ARCBaseGame):
         self._recompute_lighting()
         self._kill_static_demons_in_light()
         self._kill_patrol_demons_in_light()
+        self._kill_general_in_light()
         self._update_shrines()
         self._update_lord()
 
@@ -401,6 +437,79 @@ class Dl01(ARCBaseGame):
                 return True
         return False
 
+    def _general_alive(self):
+        return self._demon_general is not None and self._demon_general["alive"]
+
+    def _general_blocker_at(self, pos):
+        return self._general_alive() and self._demon_general["pos"] == pos
+
+    def _kill_general_in_light(self):
+        if self._general_alive() and self._demon_general["pos"] in self._lit_cells:
+            self._demon_general["alive"] = False
+
+    def _general_bfs_next(self):
+        """BFS from the General's cell toward the player. Returns the next
+        cell to step into, or None if the General has no path or already
+        co-locates with the player. Blockers excluded from traversal:
+        walls, crystals, live static/patrol demons, the Demon Lord. The
+        player cell itself IS reachable as the goal — that step kills the
+        player."""
+        if not self._general_alive():
+            return None
+        start = self._demon_general["pos"]
+        goal = self._player
+        if start == goal:
+            return None
+
+        parents = {start: None}
+        queue = deque([start])
+        while queue:
+            node = queue.popleft()
+            if node == goal:
+                break
+            for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+                nxt = (node[0] + dx, node[1] + dy)
+                if nxt in parents:
+                    continue
+                if not self._in_bounds(nxt):
+                    continue
+                if nxt in self._all_walls:
+                    continue
+                if nxt in self._crystals:
+                    continue
+                if nxt != goal:
+                    if (nxt in self._static_demons
+                            and self._static_demons[nxt]["alive"]):
+                        continue
+                    if self._patrol_blocker_at(nxt):
+                        continue
+                    if (self._demon_lord is not None
+                            and self._demon_lord["pos"] == nxt):
+                        continue
+                parents[nxt] = node
+                queue.append(nxt)
+
+        if goal not in parents:
+            return None
+        # Walk the parent chain back to the cell adjacent to start
+        cur = goal
+        while parents[cur] != start:
+            cur = parents[cur]
+        return cur
+
+    def _move_general(self):
+        """Advance the General one BFS step toward the player if it is
+        active. Returns True if the General stepped onto the player (death)."""
+        if not self._general_alive():
+            return False
+        if self._turn < GENERAL_DORMANT_TURNS:
+            return False
+        nxt = self._general_bfs_next()
+        if nxt is None:
+            return False
+        self._demon_general["pos"] = nxt
+        return nxt == self._player
+
     def _update_shrines(self):
         for pos, state in self._shrines.items():
             state["lit"] = pos in self._lit_cells
@@ -416,8 +525,10 @@ class Dl01(ARCBaseGame):
         )
 
     def _check_level_win(self):
-        """For exit-based levels: all enemies dead AND player on exit.
-        For the Lord level: handled directly in step() on Lord-cell entry."""
+        """For exit-based levels: all required enemies dead AND player on
+        exit. The Demon General is a perpetual hazard, not a kill target —
+        leaving it alive is fine; it just keeps chasing. For the Lord level:
+        win is handled directly in step() on Lord-cell entry."""
         if self._exit_pos is None:
             return False
         if self._player != self._exit_pos:
@@ -471,6 +582,13 @@ class Dl01(ARCBaseGame):
             self.complete_action()
             return
 
+        # Live Demon General: blocks player walking (it kills the player only
+        # when IT steps onto the player, not the other way around — symmetric
+        # with the patrol-demon rule).
+        if self._general_blocker_at(target):
+            self.complete_action()
+            return
+
         # Crystal: try push
         if target in self._crystals:
             push_target = (target[0] + dx, target[1] + dy)
@@ -481,6 +599,7 @@ class Dl01(ARCBaseGame):
                 or (push_target in self._static_demons
                     and self._static_demons[push_target]["alive"])
                 or self._patrol_blocker_at(push_target)
+                or self._general_blocker_at(push_target)
                 or (self._demon_lord is not None
                     and self._demon_lord["pos"] == push_target)
             )
@@ -508,6 +627,15 @@ class Dl01(ARCBaseGame):
 
         # Patrol demon may have stepped into a beam during its move
         self._kill_patrol_demons_in_light()
+
+        # Demon General chases AFTER patrol demons (so it sees up-to-date
+        # blockers). Activation gate uses pre-increment self._turn — the
+        # general first acts on the player's (GENERAL_DORMANT_TURNS+1)th move.
+        if self._move_general():
+            self.lose()
+            self.complete_action()
+            return
+        self._kill_general_in_light()
 
         self._update_shrines()
         self._update_lord()

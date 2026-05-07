@@ -34,8 +34,11 @@ def main():
             A(action)
 
     def banner(msg):
+        gen = g._demon_general
+        gen_str = (f"general@{gen['pos']}{'A' if gen['alive'] else 'D'}"
+                   if gen else "no-general")
         print(f"  -> {msg}: state={g._state.name}, level={g.level_index}, "
-              f"player={g._player}, turn={g._turn}")
+              f"player={g._player}, turn={g._turn}, {gen_str}")
 
     print("Level 1 — First Light")
     # Crystal already aligned with demon → demon dies at start.

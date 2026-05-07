@@ -5,6 +5,37 @@ Format: [SemVer](https://semver.org/) — what / why / how. Author and model not
 
 ---
 
+## [1.27.0] — dl01: add chasing Demon General (all 5 levels)
+*Author: Claude Opus 4.7 (1M context) | 2026-05-07*
+
+### Added
+- **Demon General** — a pink (LightMagenta, palette index 7) elite enemy
+  on every level of `dl01`. Dormant for the player's first 2 actions,
+  then BFS-chases the player at one cell per turn. Killable by light
+  beams (consistent with shadow demons). Blocks player walking AND
+  crystal pushes like a wall while alive. Stepping onto the player
+  cell ends the level as a loss.
+- General start positions chosen to keep existing solutions feasible:
+  L1–L3 start (1, 1) (opposite the (14, 14) exit); L4 starts (14, 13)
+  (one row above the initial right-beam from crystal (12, 14) so it
+  doesn't die on turn 0); L5 starts (14, 14) (far from the Lord at
+  (8, 5) and the player's eventual col-7 approach).
+- Per-level turn budgets bumped to absorb chase pressure: L1 30→45,
+  L2 35→55, L3 50→70, L4 80→110, L5 100→140.
+
+### Changed
+- **Win condition for L1–L4 now ignores the General** — the General is
+  a perpetual hazard, not a kill requirement. Players race to the exit
+  past it. (Killing it with a beam is still possible and useful.)
+
+### Verified
+- Smoke test (`smoke_test.py`) wins all 5 levels with the original
+  solutions; final state `GameState.WIN` at Lord cell `(8, 5)` after
+  31 turns of L5. The General appears, activates, and chases on every
+  level (L5 General killed mid-game by a beam at (14, 13)).
+
+---
+
 ## [1.26.0] — dl01: Demon Lord (5-level d-pad sokoban-RPG)
 *Author: Claude Opus 4.7 (1M context) | 2026-05-06*
 
